@@ -1,1 +1,179 @@
-# easy-cull
+# easy-photo-culling
+
+<!--TOC-->
+
+______________________________________________________________________
+
+**Table of Contents**
+
+- [1. Setup and Run](#1-setup-and-run)
+  - [1.1. Option A: `uv`](#11-option-a-uv)
+  - [1.2. Option B: Anaconda](#12-option-b-anaconda)
+  - [1.3. Open the App](#13-open-the-app)
+- [2. Features](#2-features)
+- [3. Modes and Transitions](#3-modes-and-transitions)
+- [4. Keyboard Shortcuts](#4-keyboard-shortcuts)
+- [5. Metadata File](#5-metadata-file)
+
+______________________________________________________________________
+
+<!--TOC-->
+
+Desktop photo culling app for JPEG and RAW photo folders.
+
+## 1. Setup and Run
+
+### 1.1. Option A: `uv`
+
+Install dependencies:
+
+```bash
+uv sync
+```
+
+Type check the application package:
+
+```bash
+tox -e ty
+```
+
+Start the app:
+
+```bash
+uv run python -m easy_photo_culling
+```
+
+### 1.2. Option B: Anaconda
+
+Create and activate an environment:
+
+```bash
+conda create -n easy-photo-culling python=3.12
+conda activate easy-photo-culling
+```
+
+Install dependencies:
+
+```bash
+pip install PySide6 imagehash pillow rawpy
+```
+
+Start the app:
+
+```bash
+python -m easy_photo_culling
+```
+
+### 1.3. Open the App
+
+Launch the desktop app and use the native folder picker to choose a photo
+folder.
+
+## 2. Features
+
+- Opens folders through the native desktop folder picker.
+- Groups JPEG and RAW files by shared filename stem.
+- Shows two primary UI states: browse mode for the full-grid thumbnail view,
+  and view mode for the vertical thumbnail strip, central photo viewer,
+  optional split view, and scene strip after scene detection.
+- Supports scene detection that rebuilds the left strip into scene stacks while
+  keeping browse mode as a full per-photo grid.
+- Supports keyboard-based ratings, color labels, picked/reject flags, and an
+  `Assign to Photo` menu for the current selection.
+- Supports an `Organize Photos` workflow from the top bar, File menu, or
+  `Ctrl+Shift+E` to either reorganize files by one tag criterion or write
+  shared XMP sidecars for Lightroom/Capture One style metadata exchange, then
+  immediately undo the completed operation from the finished dialog if needed.
+- Displays metadata in the top bar and thumbnail strips using star ratings, a
+  colored label dot, and pick/reject indicators.
+- Supports autofocus-point/manual zoom, split view, per-photo remembered manual
+  zoom state, and `W/A/S/D` panning.
+- Shows the current visible region on strip thumbnails while zoomed in, using a
+  red zoom box and a darkened mask outside the box.
+- In scene mode, the visible-region overlay moves to the horizontal scene strip
+  rather than the left scene-stack strip.
+- Keeps split view active when scene detection finishes in view mode, while
+  still exiting browse mode back to a fit view.
+- Uses a progress overlay during long-running work such as folder loading and
+  scene detection, photo organization, and XMP writing, temporarily disabling
+  interactions and assignment actions.
+- Writes visible metadata immediately to `easy-photo-culling.json` in the
+  selected folder.
+
+## 3. Modes and Transitions
+
+- `View mode` is the normal working mode. It shows the left thumbnail strip,
+  the main viewer, and the horizontal scene strip when scene detection is
+  available for the current photo.
+- When photos are loaded, keyboard focus returns to the active navigation list
+  for the current mode so list navigation works immediately without first
+  tabbing away from the top bar.
+- `Single-pane fit view` is the default viewer state inside view mode.
+- `Single-pane manual/focus view` is the zoomed viewer state inside view mode.
+- `Split view` is an alternate view-mode layout with a fit-view pane on the
+  left and a zoom/focus pane on the right.
+- `Browse mode` is the full-photo grid view.
+
+Common transitions:
+
+- Press `G` to enter browse mode from normal view mode.
+- Press `Space` in browse mode to return to single-pane fit view for the
+  current photo.
+- Press `Space` in single-pane fit view to enter manual/focus zoom.
+- Press `Space` in single-pane manual view to return to fit view.
+- Press `\` in normal view mode to toggle split view on or off.
+- Press `Space` in split view to promote the right zoomed pane into single-pane
+  manual view.
+- Double-clicking a browse-grid photo exits browse mode and opens that photo in
+  single-pane fit view.
+- If scene detection finishes while you are in browse mode, the app exits
+  browse mode and returns to fit view for the current photo.
+- If scene detection finishes while you are already in split view, split view
+  stays active and preserves its manual zoom state.
+- If you switch away from the app and come back while a folder is loaded,
+  keyboard focus returns to the active navigation list instead of staying on
+  the top-bar buttons.
+
+## 4. Keyboard Shortcuts
+
+- Ratings: `1`-`5` assign, `0` clears
+- Color labels: `6` red, `7` yellow, `8` green, `9` blue, `` ` `` clears, and
+  purple is available from `Assign to Photo > Color Label`
+- Flags: `P` pick, `X` reject, `U` clear
+- Organizer: `Ctrl+Shift+E` opens the organizer/XMP dialog
+- Browse and view mode: `G` enters browse mode, `Space` exits browse mode into
+  fit-to-window view mode, promotes split view into full zoom, or toggles focus
+  zoom while already in single-pane view mode, and double-clicking a browse
+  thumbnail opens that photo in fit-to-window view mode
+- Zoom and pan in view mode: `\` toggles split view, `-` zooms out, `=` / `+`
+  zoom in, `W/A/S/D` pan the active zoomed view, the strip thumbnail overlay
+  tracks the current visible region while zoomed, and left/right arrows move
+  within the current scene
+
+## 5. Metadata File
+
+The app stores per-photo metadata in `easy-photo-culling.json` inside the
+selected folder. Keys use the visible photo stem, not the filename with
+extension.
+
+You can also export the current rating, color label, and pick/reject state to
+shared uppercase `PHOTO_ID.XMP` sidecars through `Organize Photos`.
+
+Example:
+
+```json
+{
+  "IMG_2000": {
+    "rating": 4,
+    "color_label": "red",
+    "flag": "picked"
+  }
+}
+```
+
+Rules:
+
+- `rating` is `1`-`5` or omitted
+- `color_label` is one of `red`, `yellow`, `green`, `blue`, `purple`, or
+  omitted
+- `flag` is `picked`, `rejected`, or omitted

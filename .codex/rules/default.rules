@@ -1,0 +1,1 @@
+prefix_rule(pattern=["/bin/zsh", "-lc", "QT_QPA_PLATFORM=offscreen uv run pytest"], decision="allow")

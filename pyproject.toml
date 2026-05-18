@@ -1,0 +1,43 @@
+[build-system]
+build-backend = "setuptools.build_meta"
+requires = ["setuptools>=68.0"]
+
+[project]
+name = "easy-photo-culling"
+version = "0.1.0"
+dependencies = [
+  "PySide6>=6.8.0",
+  "imagehash>=4.3.1",
+  "pillow>=10.4.0",
+  "rawpy>=0.24.0",
+]
+requires-python = ">=3.12"
+description = "Desktop photo culling app with RAW preview support."
+readme = "README.md"
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.27.0",
+  "muff>=0.14.5",
+  "numpy>=1.26.0",
+  "pre-commit>=4.3.0",
+  "pytest>=8.3.2",
+  "tox>=4.28.0",
+  "ty>=0.0.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+include = ["easy_photo_culling*"]
+
+[tool.ty.analysis]
+replace-imports-with-any = ["PySide6.**", "imagehash", "rawpy"]
+
+[tool.ty.environment]
+python = ".venv"
+python-version = "3.12"
+
+[tool.ty.src]
+include = ["easy_photo_culling"]
