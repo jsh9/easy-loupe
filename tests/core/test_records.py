@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from easy_photo_culling import core
-from easy_photo_culling.core.photo_library import PhotoLibrary
-from easy_photo_culling.core.records import SceneGroup
+from easy_cull import core
+from easy_cull.core.photo_library import PhotoLibrary
+from easy_cull.core.records import SceneGroup
 from tests.core._helpers import create_jpeg, stub_read_exif
 
 if TYPE_CHECKING:

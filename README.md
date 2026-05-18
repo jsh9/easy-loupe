@@ -1,4 +1,4 @@
-# easy-photo-culling
+# EasyCull
 
 <!--TOC-->
 
@@ -40,7 +40,7 @@ tox -e ty
 Start the app:
 
 ```bash
-uv run python -m easy_photo_culling
+uv run python -m easy_cull
 ```
 
 ### 1.2. Option B: Anaconda
@@ -48,8 +48,8 @@ uv run python -m easy_photo_culling
 Create and activate an environment:
 
 ```bash
-conda create -n easy-photo-culling python=3.12
-conda activate easy-photo-culling
+conda create -n easy-cull python=3.12
+conda activate easy-cull
 ```
 
 Install dependencies:
@@ -61,7 +61,7 @@ pip install PySide6 imagehash pillow rawpy
 Start the app:
 
 ```bash
-python -m easy_photo_culling
+python -m easy_cull
 ```
 
 ### 1.3. Open the App
@@ -97,8 +97,8 @@ folder.
 - Uses a progress overlay during long-running work such as folder loading and
   scene detection, photo organization, and XMP writing, temporarily disabling
   interactions and assignment actions.
-- Writes visible metadata immediately to `easy-photo-culling.json` in the
-  selected folder.
+- Writes visible metadata immediately to `easy-cull.json` in the selected
+  folder.
 
 ## 3. Modes and Transitions
 
@@ -152,9 +152,8 @@ Common transitions:
 
 ## 5. Metadata File
 
-The app stores per-photo metadata in `easy-photo-culling.json` inside the
-selected folder. Keys use the visible photo stem, not the filename with
-extension.
+The app stores per-photo metadata in `easy-cull.json` inside the selected
+folder. Keys use the visible photo stem, not the filename with extension.
 
 You can also export the current rating, color label, and pick/reject state to
 shared uppercase `PHOTO_ID.XMP` sidecars through `Organize Photos`.

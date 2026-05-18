@@ -7,7 +7,7 @@ import pytest
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QKeyEvent
 
-import easy_photo_culling.ui.main_window.window as main_window_module
+import easy_cull.ui.main_window.window as main_window_module
 from tests.ui._helpers import (
     create_main_window_with_library,
     trigger_scene_shortcut,

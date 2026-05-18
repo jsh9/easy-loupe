@@ -5,8 +5,8 @@ from typing import TYPE_CHECKING
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import QApplication
 
-import easy_photo_culling.ui.main_window.window as main_window_module
-import easy_photo_culling.ui.theme as theme_module
+import easy_cull.ui.main_window.window as main_window_module
+import easy_cull.ui.theme as theme_module
 from tests.ui._helpers import create_main_window_with_library
 
 if TYPE_CHECKING:

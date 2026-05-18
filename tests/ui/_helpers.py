@@ -7,11 +7,11 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QKeySequence
 from PySide6.QtWidgets import QApplication
 
-import easy_photo_culling.core.exif as core_exif_module
-import easy_photo_culling.ui.main_window.window as main_window_module
-import easy_photo_culling.ui.theme as theme_module
-from easy_photo_culling.core.photo_library import PhotoLibrary
-from easy_photo_culling.core.records import SceneGroup
+import easy_cull.core.exif as core_exif_module
+import easy_cull.ui.main_window.window as main_window_module
+import easy_cull.ui.theme as theme_module
+from easy_cull.core.photo_library import PhotoLibrary
+from easy_cull.core.records import SceneGroup
 
 if TYPE_CHECKING:
     from pathlib import Path

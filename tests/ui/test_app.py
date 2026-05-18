@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import easy_photo_culling.ui as ui_package
-import easy_photo_culling.ui.main_window as ui_main_window_package
-import easy_photo_culling.ui.main_window.window as main_window_module
-import easy_photo_culling.ui.viewers as ui_viewers_package
-import easy_photo_culling.ui.viewers.exif_overlay as exif_overlay_module
-import easy_photo_culling.ui.viewers.main_photo_viewer as main_photo_viewer_module
-import easy_photo_culling.ui.viewers.photo_viewer as photo_viewer_module
-import easy_photo_culling.ui.widgets as widgets_module
-import easy_photo_culling.ui.workers as workers_module
+import easy_cull.ui as ui_package
+import easy_cull.ui.main_window as ui_main_window_package
+import easy_cull.ui.main_window.window as main_window_module
+import easy_cull.ui.viewers as ui_viewers_package
+import easy_cull.ui.viewers.exif_overlay as exif_overlay_module
+import easy_cull.ui.viewers.main_photo_viewer as main_photo_viewer_module
+import easy_cull.ui.viewers.photo_viewer as photo_viewer_module
+import easy_cull.ui.widgets as widgets_module
+import easy_cull.ui.workers as workers_module
 
 
 def test_ui_packages_do_not_export_shortcuts() -> None:

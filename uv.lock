@@ -61,7 +61,7 @@ wheels = [
 ]
 
 [[package]]
-name = "easy-photo-culling"
+name = "easy-cull"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

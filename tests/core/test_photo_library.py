@@ -5,10 +5,10 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-import easy_photo_culling.analysis.scenes as analysis_scenes_module
-import easy_photo_culling.core.photo_library as library_module
-from easy_photo_culling.core.photo_library import PhotoLibrary
-from easy_photo_culling.core.records import SceneGroup
+import easy_cull.analysis.scenes as analysis_scenes_module
+import easy_cull.core.photo_library as library_module
+from easy_cull.core.photo_library import PhotoLibrary
+from easy_cull.core.records import SceneGroup
 from tests.core._helpers import FakeHash, create_jpeg, stub_read_exif
 
 if TYPE_CHECKING:
@@ -293,7 +293,7 @@ def test_detect_scenes_requires_imagehash_when_analysis_runs(
 
     library = PhotoLibrary(cache_dir=tmp_path / '.cache')
     library.load_folder(tmp_path)
-    monkeypatch.setattr('easy_photo_culling.analysis.scenes.imagehash', None)
+    monkeypatch.setattr('easy_cull.analysis.scenes.imagehash', None)
 
     with pytest.raises(RuntimeError, match='imagehash is required'):
         library.detect_scenes()

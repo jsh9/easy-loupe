@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-import easy_photo_culling.core.autofocus_points as autofocus_points_module
+import easy_cull.core.autofocus_points as autofocus_points_module
 from tests.core.autofocus_points._helpers import first_int
 
 

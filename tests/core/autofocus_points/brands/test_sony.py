@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import easy_photo_culling.core.autofocus_points as autofocus_points_module
+import easy_cull.core.autofocus_points as autofocus_points_module
 
 
 def test_sony_malformed_focus_location_does_not_use_dimension_values() -> None:

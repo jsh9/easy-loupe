@@ -1,0 +1,1 @@
+"""EasyCull application package."""

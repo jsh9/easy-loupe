@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, Never
 
 import pytest
 
-import easy_photo_culling.core.exif as core_exif_module
+import easy_cull.core.exif as core_exif_module
 
 if TYPE_CHECKING:
     from pathlib import Path

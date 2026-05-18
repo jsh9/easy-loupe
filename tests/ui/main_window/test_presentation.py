@@ -5,9 +5,9 @@ from typing import TYPE_CHECKING
 import pytest
 from PySide6.QtWidgets import QApplication
 
-import easy_photo_culling.ui.main_window.window as main_window_module
-from easy_photo_culling.core.photo_library import PhotoLibrary
-from easy_photo_culling.core.records import SceneGroup
+import easy_cull.ui.main_window.window as main_window_module
+from easy_cull.core.photo_library import PhotoLibrary
+from easy_cull.core.records import SceneGroup
 from tests.ui._helpers import (
     create_jpeg,
     create_main_window_with_library,

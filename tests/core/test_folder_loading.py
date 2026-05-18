@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import easy_photo_culling.core.folder_loading as folder_loading_module
+import easy_cull.core.folder_loading as folder_loading_module
 from tests.core._helpers import create_jpeg
 
 if TYPE_CHECKING:

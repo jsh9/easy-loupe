@@ -6,8 +6,8 @@ from PySide6.QtCore import QSize
 from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import QApplication
 
-import easy_photo_culling.ui.theme as theme_module
-import easy_photo_culling.ui.widgets as widgets_module
+import easy_cull.ui.theme as theme_module
+import easy_cull.ui.widgets as widgets_module
 from tests.ui._helpers import (
     create_jpeg,
     image_pixel_rgb,

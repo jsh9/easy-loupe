@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Never
 
-import easy_photo_culling.ui.workers as workers_module
-from easy_photo_culling.operations.common import OperationSummary
+import easy_cull.ui.workers as workers_module
+from easy_cull.operations.common import OperationSummary
 
 
 def test_scene_detection_worker_emits_finished_and_failed() -> None:

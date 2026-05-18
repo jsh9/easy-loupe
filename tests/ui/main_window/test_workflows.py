@@ -9,14 +9,14 @@ from PySide6.QtCore import Qt, QThread
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
-import easy_photo_culling.ui.main_window.window as main_window_module
-import easy_photo_culling.ui.main_window.workflows as workflows_module
-import easy_photo_culling.ui.theme as theme_module
-from easy_photo_culling.core.records import METADATA_FILENAME
-from easy_photo_culling.operations.common import OperationSummary, UndoPlan
-from easy_photo_culling.operations.export import OrganizeFilesOptions
-from easy_photo_culling.operations.xmp import WriteXmpOptions
-from easy_photo_culling.ui.main_window.dialogs import OrganizerDialogResult
+import easy_cull.ui.main_window.window as main_window_module
+import easy_cull.ui.main_window.workflows as workflows_module
+import easy_cull.ui.theme as theme_module
+from easy_cull.core.records import METADATA_FILENAME
+from easy_cull.operations.common import OperationSummary, UndoPlan
+from easy_cull.operations.export import OrganizeFilesOptions
+from easy_cull.operations.xmp import WriteXmpOptions
+from easy_cull.ui.main_window.dialogs import OrganizerDialogResult
 from tests.ui._helpers import (
     assert_choose_folder_idle,
     create_jpeg,

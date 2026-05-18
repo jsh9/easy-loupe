@@ -5,13 +5,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from easy_photo_culling import core
-from easy_photo_culling.core.metadata import (
+from easy_cull import core
+from easy_cull.core.metadata import (
     normalize_metadata_entries,
     serialize_metadata_entries,
 )
-from easy_photo_culling.core.photo_library import PhotoLibrary
-from easy_photo_culling.core.records import METADATA_FILENAME
+from easy_cull.core.photo_library import PhotoLibrary
+from easy_cull.core.records import METADATA_FILENAME
 from tests.core._helpers import create_jpeg, make_photo_record, stub_read_exif
 
 if TYPE_CHECKING:

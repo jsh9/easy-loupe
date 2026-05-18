@@ -5,13 +5,13 @@
 This repository is a local desktop photo culling app for JPEG and RAW folders.
 It is organized around a small set of top-level packages:
 
-- `easy_photo_culling/core/`: non-UI application logic for the photo library,
-  records, EXIF, metadata, previews, and scene detection.
-- `easy_photo_culling/ui/`: PySide6 desktop UI built around `PhotoLibrary`.
-- `easy_photo_culling/analysis/`: scene-detection logic plus placeholder
+- `easy_cull/core/`: non-UI application logic for the photo library, records,
+  EXIF, metadata, previews, and scene detection.
+- `easy_cull/ui/`: PySide6 desktop UI built around `PhotoLibrary`.
+- `easy_cull/analysis/`: scene-detection logic plus placeholder
   analysis-oriented feature modules.
-- `easy_photo_culling/operations/`: concrete batch file-operation modules for
-  photo organization, XMP sidecars, and undo support.
+- `easy_cull/operations/`: concrete batch file-operation modules for photo
+  organization, XMP sidecars, and undo support.
 
 The codebase is small, but a lot of behavior is still concentrated in a few
 large modules and packages. Read the relevant section before editing; avoid
@@ -22,7 +22,7 @@ making UI or library changes based on assumptions.
 - Python target: `>=3.12` from `pyproject.toml`
 - Preferred environment manager: `uv`
 - Install dependencies: `uv sync`
-- Launch the app: `uv run python -m easy_photo_culling`
+- Launch the app: `uv run python -m easy_cull`
 
 ### 2.1. Windows Sessions
 
@@ -74,7 +74,7 @@ Notes:
 
 ## 4. Repository Map
 
-- `easy_photo_culling/core/`
+- `easy_cull/core/`
   - Contains the non-UI implementation modules and packages: `photo_library`,
     `records`, `folder_loading`, `exif`, `autofocus_points`, `metadata`, and
     `preview`.
@@ -86,27 +86,27 @@ Notes:
     extraction logic belongs under `autofocus_points/brands/`.
   - `records.py` defines the shared constants plus the `PhotoRecord` and
     `SceneGroup` dataclasses.
-- `easy_photo_culling/ui/`
+- `easy_cull/ui/`
   - Defines the full PySide6 UI: browse mode, single-pane and split view modes,
     theming, thumbnail widgets, viewer, scene strip, worker thread, and the
     main window.
   - The UI is split primarily across `ui/main_window/`, `ui/viewers/`,
     `ui/widgets.py`, `ui/theme.py`, `ui/workers.py`, and `ui/app.py`.
-- `easy_photo_culling/ui/main_window/`
+- `easy_cull/ui/main_window/`
   - Contains the `MainWindow` package: `window.py`, `build.py`, `workflows.py`,
     `navigation.py`, and `presentation.py`.
   - `MainWindow` remains the central stateful UI controller.
-- `easy_photo_culling/ui/viewers/`
+- `easy_cull/ui/viewers/`
   - Contains `PhotoViewer`, `MainPhotoViewer`, and `ExifOverlayWidget`.
-- `easy_photo_culling/analysis/`
+- `easy_cull/analysis/`
   - Contains the concrete `scenes.py` scene-detection implementation plus
     placeholder `quality.py` and `faces.py` modules for future work.
-- `easy_photo_culling/operations/`
+- `easy_cull/operations/`
   - Contains concrete non-UI batch operations: `export.py` reorganizes tagged
     photo sets by metadata, `xmp.py` writes shared XMP sidecars, and
     `common.py` provides undo bookkeeping plus shared filesystem helpers.
-- `easy_photo_culling/__main__.py`
-  - Package module entry point that delegates to `easy_photo_culling.ui.app`.
+- `easy_cull/__main__.py`
+  - Package module entry point that delegates to `easy_cull.ui.app`.
 - `tests/core/`
   - Core behavioral contract for folder loading, EXIF parsing, records,
     metadata, preview generation, autofocus-point extraction, and
@@ -138,8 +138,7 @@ product contract and the tests/docs are updated accordingly.
   - RAW: `.cr3`, `.nef`
 - A `PhotoRecord.photo_id` is the visible stem, not the filename with
   extension.
-- Metadata is stored in `easy-photo-culling.json` inside the selected photo
-  folder.
+- Metadata is stored in `easy-cull.json` inside the selected photo folder.
 - Saved metadata keys use the visible stem format, for example `IMG_2000`, not
   `IMG_2000.JPG`.
 - When reading metadata, legacy forms are normalized:
@@ -208,8 +207,8 @@ directory derived from:
 
 Relevant details:
 
-- Default cache path is `~/Library/Caches/easy-photo-culling` on macOS when
-  `~/Library` exists, otherwise `~/.cache/easy-photo-culling`.
+- Default cache path is `~/Library/Caches/easy-cull` on macOS when `~/Library`
+  exists, otherwise `~/.cache/easy-cull`.
 - If the preferred cache directory is not writable, the library falls back to a
   temp directory.
 - Cache invalidation is currently mtime-based. If you change preview semantics,
@@ -426,7 +425,7 @@ Mode-transition summary:
 - Metadata-only refreshes keep the current selection and preserve the current
   scroll position in the left thumbnail strip and browse grid.
 - Clearing all assigned metadata for a photo removes that photo's persisted
-  entry from `easy-photo-culling.json`.
+  entry from `easy-cull.json`.
 - When scene stacks are shown in the left strip:
   - the displayed scene label is `FIRST...LAST` when a scene contains more than
     one photo
@@ -528,11 +527,11 @@ Additional assignment-menu behavior:
   - verify the distinction between embedded-thumbnail previews and full
     postprocessed renders
 - If you change focus-point extraction:
-  - make the change in `easy_photo_culling/core/autofocus_points/`, keeping
-    `easy_photo_culling/core/exif.py` as the compatibility re-export layer
+  - make the change in `easy_cull/core/autofocus_points/`, keeping
+    `easy_cull/core/exif.py` as the compatibility re-export layer
   - add new brand-specific extraction under
-    `easy_photo_culling/core/autofocus_points/brands/` and register it in the
-    brand extractor order in `autofocus_points/extraction.py`
+    `easy_cull/core/autofocus_points/brands/` and register it in the brand
+    extractor order in `autofocus_points/extraction.py`
   - add targeted tests under `tests/core/autofocus_points/` for the metadata
     keys, brand detection, orientation handling, and fallback behavior you
     touched

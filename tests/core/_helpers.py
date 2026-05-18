@@ -5,8 +5,8 @@ from typing import TYPE_CHECKING
 
 from PIL import Image
 
-import easy_photo_culling.core.exif as core_exif_module
-from easy_photo_culling.core.photo_library import PhotoLibrary
+import easy_cull.core.exif as core_exif_module
+from easy_cull.core.photo_library import PhotoLibrary
 
 if TYPE_CHECKING:
     from pathlib import Path

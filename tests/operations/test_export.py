@@ -4,9 +4,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from easy_photo_culling.core.photo_library import PhotoLibrary
-from easy_photo_culling.operations.common import OperationError, undo_operation
-from easy_photo_culling.operations.export import (
+from easy_cull.core.photo_library import PhotoLibrary
+from easy_cull.operations.common import OperationError, undo_operation
+from easy_cull.operations.export import (
     OrganizeFilesOptions,
     organize_photos,
 )

@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 import pytest
 from PySide6.QtWidgets import QApplication, QGraphicsItem
 
-import easy_photo_culling.ui.viewers.photo_viewer as photo_viewer_module
+import easy_cull.ui.viewers.photo_viewer as photo_viewer_module
 from tests.ui._helpers import create_jpeg
 
 if TYPE_CHECKING:
