@@ -100,18 +100,22 @@ larger than a launcher stub because it contains the application runtime.
 
 ### 2.2. Windows
 
-There is not a Windows build script yet. It should be straightforward but needs
-to be done and verified on Windows because PyInstaller does not cross-build
-Windows executables from macOS.
+Build the Windows executable on Windows:
 
-Expected work:
+```powershell
+uv sync --extra dev
+uv run python scripts/windows/build_app.py
+```
 
-- add a Windows icon asset, usually `easy_cull/ui/assets/EasyCull.ico`
-- add a Windows PyInstaller spec or a small `scripts/windows/build_app.py`
-  wrapper
-- build with `uv sync --extra dev` and PyInstaller on Windows
-- verify `dist/EasyCull/EasyCull.exe` or a one-file `EasyCull.exe` launches,
-  has the correct taskbar/app-switcher icon, and can open folders
+The default output is a one-folder PyInstaller app at
+`dist\EasyCull\EasyCull.exe`. To build a single executable instead:
+
+```powershell
+uv run python scripts/windows/build_app.py --onefile
+```
+
+The script creates `easy_cull\ui\assets\EasyCull.ico` from the packaged PNG
+when the `.ico` asset is missing.
 
 PySide6, Pillow, rawpy, and imagehash are all PyInstaller-compatible in
 principle, but RAW support should be verified with sample RAW files on Windows.

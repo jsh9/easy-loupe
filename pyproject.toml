@@ -31,7 +31,7 @@ dev = [
 testpaths = ["tests"]
 
 [tool.setuptools.package-data]
-"easy_cull.ui.assets" = ["*.icns", "*.png", "*.svg"]
+"easy_cull.ui.assets" = ["*.icns", "*.ico", "*.png", "*.svg"]
 
 [tool.setuptools.packages.find]
 include = ["easy_cull*"]
