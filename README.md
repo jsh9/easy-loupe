@@ -103,22 +103,50 @@ larger than a launcher stub because it contains the application runtime.
 Build the Windows executable on Windows:
 
 ```powershell
+uv python pin 3.12
 uv sync --extra dev
 uv run python scripts/windows/build_app.py
 ```
 
-The default output is a one-folder PyInstaller app at
-`dist\EasyCull\EasyCull.exe`. To build a single executable instead:
+The default output is a one-folder PyInstaller app at `dist\EasyCull\`. Run the
+executable from inside that folder:
+
+```powershell
+.\dist\EasyCull\EasyCull.exe
+```
+
+Do not copy only `EasyCull.exe` out of `dist\EasyCull\`. In the default
+one-folder build, the `.exe` is only the launcher; Qt, PySide6, Python, and
+other DLLs live next to it under the same output folder. If you want one file
+that can be moved by itself, build a single executable instead:
 
 ```powershell
 uv run python scripts/windows/build_app.py --onefile
 ```
+
+The one-file build should be much larger than the launcher `.exe` from the
+one-folder build because it embeds the dependency payload.
 
 The script creates `easy_cull\ui\assets\EasyCull.ico` from the packaged PNG
 when the `.ico` asset is missing.
 
 PySide6, Pillow, rawpy, and imagehash are all PyInstaller-compatible in
 principle, but RAW support should be verified with sample RAW files on Windows.
+If `QtWidgets` still fails to import on a packaged build, first confirm that the
+whole `dist\EasyCull\` folder is intact and that the test machine is a
+supported Windows 10/11 system for the bundled Qt/PySide6 version.
+
+For packaging diagnostics on Windows:
+
+```powershell
+uv run python scripts/windows/build_app.py --diagnose
+uv run python scripts/windows/build_app.py --console
+.\dist\EasyCull\EasyCull.exe
+```
+
+The diagnostic command prints the Python/PySide6/PyInstaller versions plus the
+Qt DLLs and Windows platform plugin found under `dist\EasyCull\`. The console
+build keeps a terminal attached so startup errors include a normal traceback.
 
 ## 3. Features
 

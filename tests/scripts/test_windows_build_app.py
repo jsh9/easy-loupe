@@ -25,6 +25,10 @@ def test_windows_pyinstaller_command_prefers_module_when_binary_missing(
         'EasyCull',
         '--icon',
         str(build_app.ICON_PATH),
+        '--collect-all',
+        'PySide6',
+        '--collect-all',
+        'shiboken6',
         '--collect-data',
         'easy_cull.ui.assets',
         str(build_app.ENTRYPOINT),
@@ -45,7 +49,22 @@ def test_windows_pyinstaller_command_supports_onefile(
         'EasyCull',
         '--icon',
         str(build_app.ICON_PATH),
+        '--collect-all',
+        'PySide6',
+        '--collect-all',
+        'shiboken6',
         '--collect-data',
         'easy_cull.ui.assets',
         str(build_app.ENTRYPOINT),
     ]
+
+
+def test_windows_pyinstaller_command_supports_console_debug_build(
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(build_app.shutil, 'which', lambda _name: 'pyinstaller')
+
+    command = build_app.pyinstaller_command(windowed=False)
+
+    assert '--windowed' not in command
+    assert command[:3] == ['pyinstaller', '--clean', '--noconfirm']
