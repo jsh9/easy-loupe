@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import QApplication
 
 from easy_cull.ui.theme import PHOTO_ID_ROLE
 
@@ -53,7 +52,8 @@ class MainWindowNavigationMixin:
             return
 
         if (
-            self._busy
+            not self.isActiveWindow()
+            or self._busy
             or self._background_task_active()
             or not self.library.photos
         ):
@@ -66,11 +66,8 @@ class MainWindowNavigationMixin:
         if target.currentRow() < 0 and target.count() > 0:
             target.setCurrentRow(0)
 
-        self.activateWindow()
-        self.raise_()
         target.setFocus(Qt.OtherFocusReason)
         target.viewport().setFocus(Qt.OtherFocusReason)
-        QApplication.processEvents()
 
     def _left_list_selection_changed(
             self: MainWindow,
