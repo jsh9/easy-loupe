@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from PySide6.QtWidgets import QApplication
+
 import easy_cull.ui as ui_package
+import easy_cull.ui.identity as identity_module
 import easy_cull.ui.main_window as ui_main_window_package
 import easy_cull.ui.main_window.window as main_window_module
 import easy_cull.ui.viewers as ui_viewers_package
@@ -40,3 +43,36 @@ def test_ui_modules_export_concrete_symbols() -> None:
         workers_module.SceneDetectionWorker.__name__ == 'SceneDetectionWorker'
     )
     assert workers_module.OperationWorker.__name__ == 'OperationWorker'
+
+
+def test_ui_identity_uses_packaged_logo_assets() -> None:
+    _app = QApplication.instance() or QApplication([])
+    icns = identity_module.asset_resource(identity_module.ICON_ICNS)
+    png = identity_module.asset_resource(identity_module.ICON_PNG)
+    svg = identity_module.asset_resource(identity_module.ICON_SVG)
+
+    assert icns.is_file()
+    assert png.is_file()
+    assert svg.is_file()
+    assert not identity_module.easy_cull_icon().isNull()
+
+
+def test_branded_argv_replaces_process_executable_name() -> None:
+    assert identity_module.branded_argv(['python3.13', '-m', 'easy_cull']) == [
+        'EasyCull',
+        '-m',
+        'easy_cull',
+    ]
+    assert identity_module.branded_argv([]) == ['EasyCull']
+
+
+def test_apply_app_identity_sets_qt_name_and_icon() -> None:
+    app = QApplication.instance() or QApplication([])
+
+    identity_module.apply_app_identity(app)
+
+    assert app.applicationName() == 'EasyCull'
+    assert app.applicationDisplayName() == 'EasyCull'
+    assert app.organizationName() == 'EasyCull'
+    assert app.desktopFileName() == 'EasyCull'
+    assert not app.windowIcon().isNull()

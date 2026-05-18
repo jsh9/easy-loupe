@@ -10,10 +10,13 @@ ______________________________________________________________________
   - [1.1. Option A: `uv`](#11-option-a-uv)
   - [1.2. Option B: Anaconda](#12-option-b-anaconda)
   - [1.3. Open the App](#13-open-the-app)
-- [2. Features](#2-features)
-- [3. Modes and Transitions](#3-modes-and-transitions)
-- [4. Keyboard Shortcuts](#4-keyboard-shortcuts)
-- [5. Metadata File](#5-metadata-file)
+- [2. Build App Binary](#2-build-app-binary)
+  - [2.1. macOS](#21-macos)
+  - [2.2. Windows](#22-windows)
+- [3. Features](#3-features)
+- [4. Modes and Transitions](#4-modes-and-transitions)
+- [5. Keyboard Shortcuts](#5-keyboard-shortcuts)
+- [6. Metadata File](#6-metadata-file)
 
 ______________________________________________________________________
 
@@ -69,7 +72,51 @@ python -m easy_cull
 Launch the desktop app and use the native folder picker to choose a photo
 folder.
 
-## 2. Features
+## 2. Build App Binary
+
+EasyCull uses PyInstaller for native app bundles. Build on the target operating
+system: the macOS app should be built on macOS, and a Windows executable should
+be built on Windows.
+
+### 2.1. macOS
+
+When EasyCull is launched as `python -m easy_cull`, macOS still sees the
+underlying Python executable as the running application. The in-app window
+title is correct, but app-level switchers can still show `python3.13` or the
+Python icon.
+
+Build and launch the macOS app bundle for native Finder, Dock, app switcher,
+and AltTab behavior:
+
+```bash
+uv sync --extra dev
+uv run python scripts/macos/build_app.py
+open dist/EasyCull.app
+```
+
+The generated `EasyCull.app` is a PyInstaller bundle with its own Python
+runtime, dependencies, `Info.plist`, and `EasyCull.icns` app icon. It is much
+larger than a launcher stub because it contains the application runtime.
+
+### 2.2. Windows
+
+There is not a Windows build script yet. It should be straightforward but needs
+to be done and verified on Windows because PyInstaller does not cross-build
+Windows executables from macOS.
+
+Expected work:
+
+- add a Windows icon asset, usually `easy_cull/ui/assets/EasyCull.ico`
+- add a Windows PyInstaller spec or a small `scripts/windows/build_app.py`
+  wrapper
+- build with `uv sync --extra dev` and PyInstaller on Windows
+- verify `dist/EasyCull/EasyCull.exe` or a one-file `EasyCull.exe` launches,
+  has the correct taskbar/app-switcher icon, and can open folders
+
+PySide6, Pillow, rawpy, and imagehash are all PyInstaller-compatible in
+principle, but RAW support should be verified with sample RAW files on Windows.
+
+## 3. Features
 
 - Opens folders through the native desktop folder picker.
 - Groups JPEG and RAW files by shared filename stem.
@@ -100,7 +147,7 @@ folder.
 - Writes visible metadata immediately to `easy-cull.json` in the selected
   folder.
 
-## 3. Modes and Transitions
+## 4. Modes and Transitions
 
 - `View mode` is the normal working mode. It shows the left thumbnail strip,
   the main viewer, and the horizontal scene strip when scene detection is
@@ -134,7 +181,7 @@ Common transitions:
   keyboard focus returns to the active navigation list instead of staying on
   the top-bar buttons.
 
-## 4. Keyboard Shortcuts
+## 5. Keyboard Shortcuts
 
 - Ratings: `1`-`5` assign, `0` clears
 - Color labels: `6` red, `7` yellow, `8` green, `9` blue, `` ` `` clears, and
@@ -150,7 +197,7 @@ Common transitions:
   tracks the current visible region while zoomed, and left/right arrows move
   within the current scene
 
-## 5. Metadata File
+## 6. Metadata File
 
 The app stores per-photo metadata in `easy-cull.json` inside the selected
 folder. Keys use the visible photo stem, not the filename with extension.

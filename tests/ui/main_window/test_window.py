@@ -19,6 +19,8 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:
     app = QApplication.instance() or QApplication([])
     window = main_window_module.MainWindow()
 
+    assert window.windowTitle() == 'EasyCull'
+    assert not window.windowIcon().isNull()
     assert (
         window.open_action.shortcut().toString(QKeySequence.PortableText)
         == 'Ctrl+O'
