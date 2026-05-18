@@ -522,10 +522,56 @@ def test_restore_active_navigation_focus_targets_active_list(
     window.open_button.setFocus(Qt.OtherFocusReason)
     app.processEvents()
 
+    def fail_window_activation(*_args: object, **_kwargs: object) -> Never:
+        raise AssertionError(
+            'navigation focus restore must not activate or raise the window'
+        )
+
+    monkeypatch.setattr(window, 'activateWindow', fail_window_activation)
+    monkeypatch.setattr(window, 'raise_', fail_window_activation)
+
     window._restore_active_navigation_focus()
     app.processEvents()
 
     assert _list_widget_has_focus(app, getattr(window, expected_focus_attr))
+
+    window.close()
+
+
+def test_restore_active_navigation_focus_ignores_inactive_window(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Ignore stale deferred focus restores after EasyCull loses activation.
+
+    Window activation schedules navigation-focus restoration through a
+    zero-delay timer. During an AltTab
+    (https://github.com/lwouis/alt-tab-macos) switch away from EasyCull, that
+    queued callback can run after another window has already been raised. In
+    that case EasyCull must not move focus, select a navigation item, or do
+    anything that could help pull its window back to the front.
+    """
+    _theme_module, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_8800', 'dimgray'), ('IMG_8801', 'blue')],
+    )
+    window.activateWindow()
+    window.raise_()
+    app.processEvents()
+
+    window.open_button.setFocus(Qt.OtherFocusReason)
+    window.thumbnail_list.setCurrentRow(-1)
+    app.processEvents()
+
+    monkeypatch.setattr(window, 'isActiveWindow', lambda: False)
+
+    window._restore_active_navigation_focus()
+    app.processEvents()
+
+    assert app.focusWidget() is window.open_button
+    assert window.thumbnail_list.currentRow() == -1
 
     window.close()
 
