@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess  # noqa: S404 - explicit exiftool integration
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -24,10 +26,16 @@ __all__ = [
     'resolve_image_size',
 ]
 
+EXIFTOOL_ENV_VAR = 'EASY_CULL_EXIFTOOL'
+_BUNDLED_EXIFTOOL_CANDIDATES = (
+    Path('easy_cull/vendor/exiftool/windows/exiftool.exe'),
+    Path('easy_cull/vendor/exiftool/macos/exiftool'),
+)
+
 
 def read_exif_metadata(files: list[Path]) -> dict[str, dict[str, Any]]:
     """Read EXIF metadata for a list of files using exiftool."""
-    exiftool_path = shutil.which('exiftool')
+    exiftool_path = _resolve_exiftool_path()
     if not exiftool_path or not files:
         return {}
 
@@ -63,6 +71,51 @@ def read_exif_metadata(files: list[Path]) -> dict[str, dict[str, Any]]:
                 records[Path(source_file).name] = record
 
     return records
+
+
+def _resolve_exiftool_path() -> str | None:
+    """Return the preferred ExifTool executable path for this environment."""
+    env_path = os.environ.get(EXIFTOOL_ENV_VAR)
+    if env_path:
+        return env_path
+
+    bundled_path = _resolve_bundled_exiftool_path()
+    if bundled_path is not None:
+        return str(bundled_path)
+
+    return shutil.which('exiftool')
+
+
+def _resolve_bundled_exiftool_path() -> Path | None:
+    """Return the PyInstaller-packaged ExifTool path when present."""
+    roots = []
+    pyinstaller_root = getattr(sys, '_MEIPASS', None)
+    if pyinstaller_root:
+        pyinstaller_path = Path(pyinstaller_root)
+        roots.extend([
+            pyinstaller_path,
+            pyinstaller_path.parent / 'Resources',
+            pyinstaller_path.parent / 'Frameworks',
+        ])
+
+    executable = getattr(sys, 'executable', None)
+    if executable:
+        executable_dir = Path(executable).resolve().parent
+        roots.extend([
+            executable_dir,
+            executable_dir.parent / 'Resources',
+            executable_dir.parent / 'Frameworks',
+        ])
+
+    roots.append(Path(__file__).resolve().parents[2])
+
+    for root in roots:
+        for candidate in _BUNDLED_EXIFTOOL_CANDIDATES:
+            path = root / candidate
+            if path.is_file():
+                return path
+
+    return None
 
 
 def format_exif_display(metadata: dict[str, Any]) -> dict[str, str]:

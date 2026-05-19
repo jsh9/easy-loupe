@@ -100,6 +100,65 @@ def test_resolve_image_size_uses_known_dimensions_in_priority_order(
     assert core_exif_module.resolve_image_size(metadata) == expected
 
 
+def test_resolve_exiftool_path_uses_environment_override(
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(core_exif_module.EXIFTOOL_ENV_VAR, '/custom/exiftool')
+    monkeypatch.setattr(
+        core_exif_module,
+        '_resolve_bundled_exiftool_path',
+        lambda: pytest.fail('bundled path should not be checked'),
+    )
+
+    assert core_exif_module._resolve_exiftool_path() == '/custom/exiftool'
+
+
+def test_resolve_exiftool_path_finds_pyinstaller_bundle(
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+) -> None:
+    bundled_exiftool = (
+        tmp_path
+        / 'easy_cull'
+        / 'vendor'
+        / 'exiftool'
+        / 'windows'
+        / 'exiftool.exe'
+    )
+    bundled_exiftool.parent.mkdir(parents=True)
+    bundled_exiftool.write_text('exiftool')
+    monkeypatch.delenv(core_exif_module.EXIFTOOL_ENV_VAR, raising=False)
+    monkeypatch.setattr(
+        core_exif_module.sys,
+        '_MEIPASS',
+        str(tmp_path),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        core_exif_module.shutil, 'which', lambda _name: None
+    )
+
+    assert core_exif_module._resolve_exiftool_path() == str(bundled_exiftool)
+
+
+def test_resolve_exiftool_path_falls_back_to_system_path(
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(core_exif_module.EXIFTOOL_ENV_VAR, raising=False)
+    monkeypatch.setattr(
+        core_exif_module,
+        '_resolve_bundled_exiftool_path',
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        core_exif_module.shutil,
+        'which',
+        lambda name: '/usr/bin/exiftool' if name == 'exiftool' else None,
+    )
+
+    assert core_exif_module._resolve_exiftool_path() == '/usr/bin/exiftool'
+
+
 @pytest.mark.parametrize(
     ('mode', 'stdout'),
     [
@@ -116,6 +175,12 @@ def test_read_exif_metadata_returns_empty_for_missing_and_failed_exiftool_paths(
 ) -> None:
     source = tmp_path / 'IMG_6100.JPG'
     source.write_bytes(b'jpeg')
+    monkeypatch.delenv(core_exif_module.EXIFTOOL_ENV_VAR, raising=False)
+    monkeypatch.setattr(
+        core_exif_module,
+        '_resolve_bundled_exiftool_path',
+        lambda: None,
+    )
 
     if mode == 'missing':
         monkeypatch.setattr(
@@ -157,13 +222,20 @@ def test_read_exif_metadata_returns_records_keyed_by_filename(
     second = tmp_path / 'IMG_6101.JPG'
     first.write_bytes(b'jpeg')
     second.write_bytes(b'jpeg')
+    captured_command: list[str] = []
+    monkeypatch.delenv(core_exif_module.EXIFTOOL_ENV_VAR, raising=False)
+    monkeypatch.setattr(
+        core_exif_module,
+        '_resolve_bundled_exiftool_path',
+        lambda: None,
+    )
     monkeypatch.setattr(
         core_exif_module.shutil, 'which', lambda _name: '/usr/bin/exiftool'
     )
-    monkeypatch.setattr(
-        core_exif_module.subprocess,
-        'run',
-        lambda *_args, **_kwargs: type(
+
+    def fake_run(*args: Any, **_kwargs: Any) -> object:
+        captured_command.extend(args[0])
+        return type(
             'Result',
             (),
             {
@@ -179,7 +251,12 @@ def test_read_exif_metadata_returns_records_keyed_by_filename(
                     {'Make': 'Ignored Without SourceFile'},
                 ])
             },
-        )(),
+        )()
+
+    monkeypatch.setattr(
+        core_exif_module.subprocess,
+        'run',
+        fake_run,
     )
 
     assert core_exif_module.read_exif_metadata([first, second]) == {
@@ -189,6 +266,7 @@ def test_read_exif_metadata_returns_records_keyed_by_filename(
             'Make': 'NIKON CORPORATION',
         },
     }
+    assert captured_command[:4] == ['/usr/bin/exiftool', '-j', '-n', '-struct']
 
 
 @pytest.mark.parametrize(

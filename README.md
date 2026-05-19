@@ -78,6 +78,12 @@ EasyCull uses PyInstaller for native app bundles. Build on the target operating
 system: the macOS app should be built on macOS, and a Windows executable should
 be built on Windows.
 
+Packaged builds include an ExifTool payload for camera maker-note metadata used
+by autofocus-point detection. Source/development runs still use `exiftool` from
+the system `PATH` by default. To point EasyCull at a specific local ExifTool
+binary while developing, set `EASY_CULL_EXIFTOOL` to that executable path before
+launching the app.
+
 ### 2.1. macOS
 
 When EasyCull is launched as `python -m easy_cull`, macOS still sees the
@@ -90,13 +96,14 @@ and AltTab behavior:
 
 ```bash
 uv sync --extra dev
-uv run python scripts/macos/build_app.py
+uv run python scripts/build_app/build_app_macos.py
 open dist/EasyCull.app
 ```
 
 The generated `EasyCull.app` is a PyInstaller bundle with its own Python
-runtime, dependencies, `Info.plist`, and `EasyCull.icns` app icon. It is much
-larger than a launcher stub because it contains the application runtime.
+runtime, dependencies, bundled ExifTool payload, `Info.plist`, and
+`EasyCull.icns` app icon. It is much larger than a launcher stub because it
+contains the application runtime.
 
 ### 2.2. Windows
 
@@ -105,7 +112,7 @@ Build the Windows executable on Windows:
 ```powershell
 uv python pin 3.12
 uv sync --extra dev
-uv run python scripts/windows/build_app.py
+uv run python scripts/build_app/build_app_windows.py
 ```
 
 The default output is a one-folder PyInstaller app at `dist\EasyCull\`. Run the
@@ -121,7 +128,7 @@ other DLLs live next to it under the same output folder. If you want one file
 that can be moved by itself, build a single executable instead:
 
 ```powershell
-uv run python scripts/windows/build_app.py --onefile
+uv run python scripts/build_app/build_app_windows.py --onefile
 ```
 
 The one-file build should be much larger than the launcher `.exe` from the
@@ -129,6 +136,11 @@ one-folder build because it embeds the dependency payload.
 
 The script creates `easy_cull\ui\assets\EasyCull.ico` from the packaged PNG
 when the `.ico` asset is missing.
+
+The Windows and macOS build scripts download the official ExifTool release
+payload from <https://exiftool.org/> / SourceForge into the ignored `build`
+cache when the local cache is missing, then package it into the app bundle.
+The downloaded payload is not committed to the repository.
 
 PySide6, Pillow, rawpy, and imagehash are all PyInstaller-compatible in
 principle, but RAW support should be verified with sample RAW files on Windows.
@@ -139,8 +151,8 @@ supported Windows 10/11 system for the bundled Qt/PySide6 version.
 For packaging diagnostics on Windows:
 
 ```powershell
-uv run python scripts/windows/build_app.py --diagnose
-uv run python scripts/windows/build_app.py --console
+uv run python scripts/build_app/build_app_windows.py --diagnose
+uv run python scripts/build_app/build_app_windows.py --console
 .\dist\EasyCull\EasyCull.exe
 ```
 
