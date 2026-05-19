@@ -64,6 +64,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(APP_DIR)
         print(f'Run {APP_PATH} from inside this folder.')
+
     return 0
 
 
@@ -95,26 +96,27 @@ def pyinstaller_command(
     command = [*base_command]
     if clean:
         command.append('--clean')
+
     if onefile:
         command.append('--onefile')
+
     command.append('--noconfirm')
     if windowed:
         command.append('--windowed')
-    command.extend(
-        [
-            '--name',
-            APP_NAME,
-            '--icon',
-            str(ICON_PATH),
-            '--collect-all',
-            'PySide6',
-            '--collect-all',
-            'shiboken6',
-            '--collect-data',
-            'easy_cull.ui.assets',
-            str(ENTRYPOINT),
-        ]
-    )
+
+    command.extend([
+        '--name',
+        APP_NAME,
+        '--icon',
+        str(ICON_PATH),
+        '--collect-all',
+        'PySide6',
+        '--collect-all',
+        'shiboken6',
+        '--collect-data',
+        'easy_cull.ui.assets',
+        str(ENTRYPOINT),
+    ])
 
     return command
 

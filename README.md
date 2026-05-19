@@ -132,8 +132,8 @@ when the `.ico` asset is missing.
 
 PySide6, Pillow, rawpy, and imagehash are all PyInstaller-compatible in
 principle, but RAW support should be verified with sample RAW files on Windows.
-If `QtWidgets` still fails to import on a packaged build, first confirm that the
-whole `dist\EasyCull\` folder is intact and that the test machine is a
+If `QtWidgets` still fails to import on a packaged build, first confirm that
+the whole `dist\EasyCull\` folder is intact and that the test machine is a
 supported Windows 10/11 system for the bundled Qt/PySide6 version.
 
 For packaging diagnostics on Windows:
