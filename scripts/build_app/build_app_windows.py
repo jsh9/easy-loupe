@@ -3,27 +3,29 @@
 from __future__ import annotations
 
 import argparse
-import os
-import platform
 import shutil
 import subprocess  # noqa: S404 - explicit PyInstaller/ExifTool integration
 import sys
-import urllib.request
 import zipfile
 from pathlib import Path
 
 from PIL import Image
 
-APP_NAME = 'EasyCull'
-EXIFTOOL_VERSION = '13.58'
-REPO_ROOT = Path(__file__).resolve().parents[2]
-ENTRYPOINT = REPO_ROOT / 'easy_cull' / '__main__.py'
+if __package__ in {None, ''}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from scripts.build_app import utils
+
+APP_NAME = utils.APP_NAME
+EXIFTOOL_VERSION = utils.EXIFTOOL_VERSION
+REPO_ROOT = utils.REPO_ROOT
+ENTRYPOINT = utils.ENTRYPOINT
 ICON_SOURCE = REPO_ROOT / 'easy_cull' / 'ui' / 'assets' / 'EasyCull.png'
 ICON_PATH = REPO_ROOT / 'easy_cull' / 'ui' / 'assets' / 'EasyCull.ico'
 APP_DIR = REPO_ROOT / 'dist' / APP_NAME
 APP_PATH = REPO_ROOT / 'dist' / APP_NAME / f'{APP_NAME}.exe'
 ONEFILE_PATH = REPO_ROOT / 'dist' / f'{APP_NAME}.exe'
-EXIFTOOL_CACHE_DIR = REPO_ROOT / 'build' / 'exiftool-cache'
+EXIFTOOL_CACHE_DIR = utils.EXIFTOOL_CACHE_DIR
 EXIFTOOL_STAGE_DIR = REPO_ROOT / 'build' / 'exiftool' / 'windows'
 EXIFTOOL_STAGE_EXE = EXIFTOOL_STAGE_DIR / 'exiftool.exe'
 EXIFTOOL_STAGE_FILES = EXIFTOOL_STAGE_DIR / 'exiftool_files'
@@ -93,12 +95,11 @@ def ensure_exiftool_payload() -> Path:
         return EXIFTOOL_STAGE_EXE
 
     EXIFTOOL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    if not EXIFTOOL_WINDOWS_ARCHIVE.exists():
-        print(f'Downloading ExifTool {EXIFTOOL_VERSION} for Windows...')
-        urllib.request.urlretrieve(  # noqa: S310
-            EXIFTOOL_WINDOWS_URL,
-            EXIFTOOL_WINDOWS_ARCHIVE,
-        )
+    utils.download_file(
+        EXIFTOOL_WINDOWS_URL,
+        EXIFTOOL_WINDOWS_ARCHIVE,
+        message=f'Downloading ExifTool {EXIFTOOL_VERSION} for Windows...',
+    )
 
     extract_dir = EXIFTOOL_CACHE_DIR / f'windows-{EXIFTOOL_VERSION}'
     if extract_dir.exists():
@@ -144,44 +145,30 @@ def pyinstaller_command(
         windowed: bool = True,
 ) -> list[str]:
     """Return the PyInstaller command for the Windows executable."""
-    pyinstaller = shutil.which('pyinstaller')
-    base_command = (
-        [pyinstaller]
-        if pyinstaller is not None
-        else [sys.executable, '-m', 'PyInstaller']
-    )
-    command = [*base_command]
+    command = utils.pyinstaller_base_command()
     if clean:
         command.append('--clean')
 
     if onefile:
         command.append('--onefile')
 
-    command.append('--noconfirm')
-    if windowed:
-        command.append('--windowed')
-
     exiftool_path = ensure_exiftool_payload()
-    exiftool_files_data = (
-        f'{EXIFTOOL_STAGE_FILES}{os.pathsep}'
-        f'{EXIFTOOL_BUNDLE_DIR}/exiftool_files'
+    command.extend(
+        utils.common_pyinstaller_args(
+            icon_path=ICON_PATH,
+            windowed=windowed,
+        )
     )
+    entrypoint = command.pop()
     command.extend([
-        '--name',
-        APP_NAME,
-        '--icon',
-        str(ICON_PATH),
         '--add-binary',
-        f'{exiftool_path}{os.pathsep}{EXIFTOOL_BUNDLE_DIR}',
+        utils.pyinstaller_source_and_dest(exiftool_path, EXIFTOOL_BUNDLE_DIR),
         '--add-data',
-        exiftool_files_data,
-        '--collect-all',
-        'PySide6',
-        '--collect-all',
-        'shiboken6',
-        '--collect-data',
-        'easy_cull.ui.assets',
-        str(ENTRYPOINT),
+        utils.pyinstaller_source_and_dest(
+            EXIFTOOL_STAGE_FILES,
+            f'{EXIFTOOL_BUNDLE_DIR}/exiftool_files',
+        ),
+        entrypoint,
     ])
 
     return command
@@ -206,46 +193,21 @@ def run_preflight_check() -> None:
 
 def print_diagnostics() -> None:
     """Print diagnostics for investigating Windows packaging failures."""
-    print(f'Platform: {platform.platform()}')
-    print(f'Python: {sys.version}')
-    print(f'Python executable: {sys.executable}')
-    print(f'Repo root: {REPO_ROOT}')
-    _print_import_diagnostic('PyInstaller')
-    _print_import_diagnostic('PySide6')
-    _print_import_diagnostic('shiboken6')
+    utils.print_common_diagnostics()
 
     if not APP_DIR.exists():
         print(f'Dist folder missing: {APP_DIR}')
         return
 
     print(f'Dist folder: {APP_DIR}')
-    _print_path_matches('QtWidgets.pyd')
-    _print_path_matches('Qt6Core.dll')
-    _print_path_matches('Qt6Gui.dll')
-    _print_path_matches('Qt6Widgets.dll')
-    _print_path_matches('qwindows.dll')
-    _print_path_matches('vcruntime*.dll')
-    _print_path_matches('msvcp*.dll')
+    utils.print_path_matches(APP_DIR, 'QtWidgets.pyd')
+    utils.print_path_matches(APP_DIR, 'Qt6Core.dll')
+    utils.print_path_matches(APP_DIR, 'Qt6Gui.dll')
+    utils.print_path_matches(APP_DIR, 'Qt6Widgets.dll')
+    utils.print_path_matches(APP_DIR, 'qwindows.dll')
+    utils.print_path_matches(APP_DIR, 'vcruntime*.dll')
+    utils.print_path_matches(APP_DIR, 'msvcp*.dll')
     _print_exiftool_diagnostic()
-
-
-def _print_import_diagnostic(module_name: str) -> None:
-    try:
-        module = __import__(module_name)
-    except ImportError as error:
-        print(f'{module_name}: import failed: {error}')
-        return
-
-    version = getattr(module, '__version__', 'unknown')
-    location = getattr(module, '__file__', 'unknown')
-    print(f'{module_name}: version={version} location={location}')
-
-
-def _print_path_matches(pattern: str) -> None:
-    matches = sorted(APP_DIR.rglob(pattern))
-    print(f'{pattern}: {len(matches)}')
-    for path in matches[:10]:
-        print(f'  {path.relative_to(APP_DIR)}')
 
 
 def _print_exiftool_diagnostic() -> None:
@@ -263,18 +225,7 @@ def _print_exiftool_diagnostic() -> None:
         print('Bundled ExifTool version: missing')
         return
 
-    try:
-        result = subprocess.run(  # noqa: S603 - known bundled diagnostic path
-            [str(exiftool_path), '-ver'],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except (OSError, subprocess.CalledProcessError) as error:
-        print(f'Bundled ExifTool version: failed: {error}')
-        return
-
-    print(f'Bundled ExifTool version: {result.stdout.strip()}')
+    utils.print_exiftool_version(exiftool_path)
 
 
 if __name__ == '__main__':

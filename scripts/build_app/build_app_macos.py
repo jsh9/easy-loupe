@@ -3,22 +3,24 @@
 from __future__ import annotations
 
 import argparse
-import os
-import platform
 import shutil
 import subprocess  # noqa: S404 - explicit PyInstaller/ExifTool integration
 import sys
 import tarfile
-import urllib.request
 from pathlib import Path
 
-APP_NAME = 'EasyCull'
-EXIFTOOL_VERSION = '13.58'
-REPO_ROOT = Path(__file__).resolve().parents[2]
-ENTRYPOINT = REPO_ROOT / 'easy_cull' / '__main__.py'
+if __package__ in {None, ''}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from scripts.build_app import utils
+
+APP_NAME = utils.APP_NAME
+EXIFTOOL_VERSION = utils.EXIFTOOL_VERSION
+REPO_ROOT = utils.REPO_ROOT
+ENTRYPOINT = utils.ENTRYPOINT
 ICON_PATH = REPO_ROOT / 'easy_cull' / 'ui' / 'assets' / 'EasyCull.icns'
 APP_PATH = REPO_ROOT / 'dist' / f'{APP_NAME}.app'
-EXIFTOOL_CACHE_DIR = REPO_ROOT / 'build' / 'exiftool-cache'
+EXIFTOOL_CACHE_DIR = utils.EXIFTOOL_CACHE_DIR
 EXIFTOOL_STAGE_DIR = REPO_ROOT / 'build' / 'exiftool' / 'macos'
 EXIFTOOL_STAGE_EXE = EXIFTOOL_STAGE_DIR / 'exiftool'
 EXIFTOOL_STAGE_LIB = EXIFTOOL_STAGE_DIR / 'lib'
@@ -68,12 +70,11 @@ def ensure_exiftool_payload() -> Path:
         return EXIFTOOL_STAGE_EXE
 
     EXIFTOOL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    if not EXIFTOOL_SOURCE_ARCHIVE.exists():
-        print(f'Downloading ExifTool {EXIFTOOL_VERSION} source...')
-        urllib.request.urlretrieve(  # noqa: S310
-            EXIFTOOL_SOURCE_URL,
-            EXIFTOOL_SOURCE_ARCHIVE,
-        )
+    utils.download_file(
+        EXIFTOOL_SOURCE_URL,
+        EXIFTOOL_SOURCE_ARCHIVE,
+        message=f'Downloading ExifTool {EXIFTOOL_VERSION} source...',
+    )
 
     extract_dir = EXIFTOOL_CACHE_DIR / f'macos-{EXIFTOOL_VERSION}'
     if extract_dir.exists():
@@ -103,35 +104,22 @@ def ensure_exiftool_payload() -> Path:
 
 def pyinstaller_command(*, clean: bool = True) -> list[str]:
     """Return the PyInstaller command for the macOS app bundle."""
-    pyinstaller = shutil.which('pyinstaller')
-    base_command = (
-        [pyinstaller]
-        if pyinstaller is not None
-        else [sys.executable, '-m', 'PyInstaller']
-    )
     exiftool_path = ensure_exiftool_payload()
-    command = [*base_command]
+    command = utils.pyinstaller_base_command()
     if clean:
         command.append('--clean')
 
+    command.extend(utils.common_pyinstaller_args(icon_path=ICON_PATH))
+    entrypoint = command.pop()
     command.extend([
-        '--noconfirm',
-        '--windowed',
-        '--name',
-        APP_NAME,
-        '--icon',
-        str(ICON_PATH),
         '--add-binary',
-        f'{exiftool_path}{os.pathsep}{EXIFTOOL_BUNDLE_DIR}',
+        utils.pyinstaller_source_and_dest(exiftool_path, EXIFTOOL_BUNDLE_DIR),
         '--add-data',
-        f'{EXIFTOOL_STAGE_LIB}{os.pathsep}{EXIFTOOL_BUNDLE_DIR}/lib',
-        '--collect-all',
-        'PySide6',
-        '--collect-all',
-        'shiboken6',
-        '--collect-data',
-        'easy_cull.ui.assets',
-        str(ENTRYPOINT),
+        utils.pyinstaller_source_and_dest(
+            EXIFTOOL_STAGE_LIB,
+            f'{EXIFTOOL_BUNDLE_DIR}/lib',
+        ),
+        entrypoint,
     ])
 
     return command
@@ -145,44 +133,19 @@ def mark_bundled_exiftool_executable() -> None:
 
 def print_diagnostics() -> None:
     """Print diagnostics for investigating macOS packaging failures."""
-    print(f'Platform: {platform.platform()}')
-    print(f'Python: {sys.version}')
-    print(f'Python executable: {sys.executable}')
-    print(f'Repo root: {REPO_ROOT}')
-    _print_import_diagnostic('PyInstaller')
-    _print_import_diagnostic('PySide6')
-    _print_import_diagnostic('shiboken6')
+    utils.print_common_diagnostics()
 
     if not APP_PATH.exists():
         print(f'App bundle missing: {APP_PATH}')
         return
 
     print(f'App bundle: {APP_PATH}')
-    _print_path_matches('QtWidgets*')
-    _print_path_matches('QtCore*')
-    _print_path_matches('QtGui*')
-    _print_path_matches('QtWidgets*')
-    _print_path_matches('libshiboken*')
+    utils.print_path_matches(APP_PATH, 'QtWidgets*')
+    utils.print_path_matches(APP_PATH, 'QtCore*')
+    utils.print_path_matches(APP_PATH, 'QtGui*')
+    utils.print_path_matches(APP_PATH, 'QtWidgets*')
+    utils.print_path_matches(APP_PATH, 'libshiboken*')
     _print_exiftool_diagnostic()
-
-
-def _print_import_diagnostic(module_name: str) -> None:
-    try:
-        module = __import__(module_name)
-    except ImportError as error:
-        print(f'{module_name}: import failed: {error}')
-        return
-
-    version = getattr(module, '__version__', 'unknown')
-    location = getattr(module, '__file__', 'unknown')
-    print(f'{module_name}: version={version} location={location}')
-
-
-def _print_path_matches(pattern: str) -> None:
-    matches = sorted(APP_PATH.rglob(pattern))
-    print(f'{pattern}: {len(matches)}')
-    for path in matches[:10]:
-        print(f'  {path.relative_to(APP_PATH)}')
 
 
 def _print_exiftool_diagnostic() -> None:
@@ -193,18 +156,7 @@ def _print_exiftool_diagnostic() -> None:
 
     exiftool_path = paths[0]
     print(f'Bundled ExifTool: {exiftool_path}')
-    try:
-        result = subprocess.run(  # noqa: S603 - known bundled diagnostic path
-            [str(exiftool_path), '-ver'],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except (OSError, subprocess.CalledProcessError) as error:
-        print(f'Bundled ExifTool version: failed: {error}')
-        return
-
-    print(f'Bundled ExifTool version: {result.stdout.strip()}')
+    utils.print_exiftool_version(exiftool_path)
 
 
 def _bundled_exiftool_paths() -> list[Path]:

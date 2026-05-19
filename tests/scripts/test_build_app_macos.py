@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from typing import TYPE_CHECKING
 
@@ -19,11 +20,11 @@ def test_pyinstaller_command_prefers_module_when_binary_missing(
         lambda: build_app.EXIFTOOL_STAGE_EXE,
     )
     exiftool_binary = (
-        f'{build_app.EXIFTOOL_STAGE_EXE}{build_app.os.pathsep}'
+        f'{build_app.EXIFTOOL_STAGE_EXE}{os.pathsep}'
         f'{build_app.EXIFTOOL_BUNDLE_DIR}'
     )
     exiftool_lib = (
-        f'{build_app.EXIFTOOL_STAGE_LIB}{build_app.os.pathsep}'
+        f'{build_app.EXIFTOOL_STAGE_LIB}{os.pathsep}'
         f'{build_app.EXIFTOOL_BUNDLE_DIR}/lib'
     )
 
@@ -38,16 +39,16 @@ def test_pyinstaller_command_prefers_module_when_binary_missing(
         'EasyCull',
         '--icon',
         str(build_app.ICON_PATH),
-        '--add-binary',
-        exiftool_binary,
-        '--add-data',
-        exiftool_lib,
         '--collect-all',
         'PySide6',
         '--collect-all',
         'shiboken6',
         '--collect-data',
         'easy_cull.ui.assets',
+        '--add-binary',
+        exiftool_binary,
+        '--add-data',
+        exiftool_lib,
         str(build_app.ENTRYPOINT),
     ]
 
@@ -62,11 +63,11 @@ def test_pyinstaller_command_uses_binary_when_available(
         lambda: build_app.EXIFTOOL_STAGE_EXE,
     )
     exiftool_binary = (
-        f'{build_app.EXIFTOOL_STAGE_EXE}{build_app.os.pathsep}'
+        f'{build_app.EXIFTOOL_STAGE_EXE}{os.pathsep}'
         f'{build_app.EXIFTOOL_BUNDLE_DIR}'
     )
     exiftool_lib = (
-        f'{build_app.EXIFTOOL_STAGE_LIB}{build_app.os.pathsep}'
+        f'{build_app.EXIFTOOL_STAGE_LIB}{os.pathsep}'
         f'{build_app.EXIFTOOL_BUNDLE_DIR}/lib'
     )
 
@@ -78,15 +79,15 @@ def test_pyinstaller_command_uses_binary_when_available(
         'EasyCull',
         '--icon',
         str(build_app.ICON_PATH),
-        '--add-binary',
-        exiftool_binary,
-        '--add-data',
-        exiftool_lib,
         '--collect-all',
         'PySide6',
         '--collect-all',
         'shiboken6',
         '--collect-data',
         'easy_cull.ui.assets',
+        '--add-binary',
+        exiftool_binary,
+        '--add-data',
+        exiftool_lib,
         str(build_app.ENTRYPOINT),
     ]
