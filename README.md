@@ -79,10 +79,11 @@ system: the macOS app should be built on macOS, and a Windows executable should
 be built on Windows.
 
 Packaged builds include an ExifTool payload for camera maker-note metadata used
-by autofocus-point detection. Source/development runs still use `exiftool` from
-the system `PATH` by default. To point EasyCull at a specific local ExifTool
-binary while developing, set `EASY_CULL_EXIFTOOL` to that executable path
-before launching the app.
+by autofocus-point detection. At runtime EasyCull checks `EASY_CULL_EXIFTOOL`
+first, then a bundled ExifTool payload when running from a packaged app, then
+`exiftool` from the system `PATH`. To point EasyCull at a specific local
+ExifTool binary while developing, set `EASY_CULL_EXIFTOOL` to that executable
+path before launching the app.
 
 ### 2.1. macOS
 
@@ -104,6 +105,24 @@ The generated `EasyCull.app` is a PyInstaller bundle with its own Python
 runtime, dependencies, bundled ExifTool payload, `Info.plist`, and
 `EasyCull.icns` app icon. It is much larger than a launcher stub because it
 contains the application runtime.
+
+For macOS distribution, ship `dist/EasyCull.app`. PyInstaller may also leave a
+separate `dist/EasyCull/` one-folder output beside the app bundle; users do not
+need that folder when receiving the `.app`, and shipping both duplicates the
+runtime payload. A simple zip package can be created with:
+
+```bash
+ditto -c -k --keepParent dist/EasyCull.app EasyCull-macos.zip
+```
+
+For macOS packaging diagnostics:
+
+```bash
+uv run python scripts/build_app/build_app_macos.py --diagnose
+```
+
+The diagnostic command prints the Python/PySide6/PyInstaller versions plus Qt,
+shiboken, and bundled ExifTool paths found inside `dist/EasyCull.app`.
 
 ### 2.2. Windows
 
@@ -141,6 +160,11 @@ The Windows and macOS build scripts download the official ExifTool release
 payload from <https://exiftool.org/> / SourceForge into the ignored `build`
 cache when the local cache is missing, then package it into the app bundle. The
 downloaded payload is not committed to the repository.
+
+Both scripts embed the packaged EasyCull icon assets. Runtime Qt app identity
+also uses the same assets so Finder, Dock, app switcher, AltTab, Windows
+taskbar, and window chrome have the EasyCull name and icon where the platform
+allows it.
 
 PySide6, Pillow, rawpy, and imagehash are all PyInstaller-compatible in
 principle, but RAW support should be verified with sample RAW files on Windows.
