@@ -56,6 +56,7 @@ def read_exif_metadata(files: list[Path]) -> dict[str, dict[str, Any]]:
                 check=True,
                 capture_output=True,
                 text=True,
+                **_exiftool_subprocess_kwargs(),
             )
         except (subprocess.CalledProcessError, OSError):
             return {}
@@ -71,6 +72,52 @@ def read_exif_metadata(files: list[Path]) -> dict[str, dict[str, Any]]:
                 records[Path(source_file).name] = record
 
     return records
+
+
+def _exiftool_subprocess_kwargs() -> dict[str, Any]:
+    """
+    Return platform-specific subprocess options for launching ExifTool.
+
+    EasyCull is built as a windowed Qt app on Windows, but ExifTool is a
+    separate console executable. Without these flags, Windows may briefly show
+    a black terminal window every time the app reads photo metadata. The flags
+    below ask Windows to start that helper process without creating or showing
+    a console window.
+
+    Non-Windows Python builds do not expose these constants/classes, so this
+    helper returns an empty dict there and subprocess.run uses its normal
+    behavior.
+    """
+    creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', None)
+    startupinfo_class = getattr(subprocess, 'STARTUPINFO', None)
+    startf_use_show_window = getattr(subprocess, 'STARTF_USESHOWWINDOW', None)
+    sw_hide = getattr(subprocess, 'SW_HIDE', None)
+
+    # These names exist only on Windows. If they are missing, there is no
+    # Windows console to hide and no extra subprocess options are needed.
+    if creationflags is None and startupinfo_class is None:
+        return {}
+
+    kwargs: dict[str, Any] = {}
+    if creationflags is not None:
+        # CREATE_NO_WINDOW is the main fix for console executables launched
+        # from a GUI app: create the process without a visible console.
+        kwargs['creationflags'] = creationflags
+
+    if (
+        startupinfo_class is not None
+        and startf_use_show_window is not None
+        and sw_hide is not None
+    ):
+        # STARTUPINFO is a second Windows hint that says "if a window would be
+        # shown for this process, start it hidden." It is harmless alongside
+        # CREATE_NO_WINDOW and gives us a little more coverage across runtimes.
+        startupinfo = startupinfo_class()
+        startupinfo.dwFlags |= startf_use_show_window
+        startupinfo.wShowWindow = sw_hide
+        kwargs['startupinfo'] = startupinfo
+
+    return kwargs
 
 
 def _resolve_exiftool_path() -> str | None:

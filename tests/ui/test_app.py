@@ -48,13 +48,31 @@ def test_ui_modules_export_concrete_symbols() -> None:
 def test_ui_identity_uses_packaged_logo_assets() -> None:
     _app = QApplication.instance() or QApplication([])
     icns = identity_module.asset_resource(identity_module.ICON_ICNS)
+    ico = identity_module.asset_resource(identity_module.ICON_ICO)
     png = identity_module.asset_resource(identity_module.ICON_PNG)
     svg = identity_module.asset_resource(identity_module.ICON_SVG)
 
     assert icns.is_file()
+    assert ico.is_file()
     assert png.is_file()
     assert svg.is_file()
     assert not identity_module.easy_cull_icon().isNull()
+
+
+def test_easy_cull_icon_adds_windows_ico_sizes(
+        monkeypatch: object,
+) -> None:
+    _app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(identity_module.sys, 'platform', 'win32')
+
+    sizes = {
+        (size.width(), size.height())
+        for size in identity_module.easy_cull_icon().availableSizes()
+    }
+
+    assert (16, 16) in sizes
+    assert (32, 32) in sizes
+    assert (256, 256) in sizes
 
 
 def test_branded_argv_replaces_process_executable_name() -> None:

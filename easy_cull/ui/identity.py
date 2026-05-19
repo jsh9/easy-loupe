@@ -20,6 +20,7 @@ ASSET_PACKAGE = 'easy_cull.ui.assets'
 ICON_PNG = 'EasyCull.png'
 ICON_SVG = 'EasyCull.svg'
 ICON_ICNS = 'EasyCull.icns'
+ICON_ICO = 'EasyCull.ico'
 
 
 def asset_resource(name: str) -> Traversable:
@@ -29,7 +30,19 @@ def asset_resource(name: str) -> Traversable:
 
 def easy_cull_icon() -> QIcon:
     """Return the packaged EasyCull app icon."""
-    return QIcon(str(asset_resource(ICON_PNG)))
+    icon = QIcon(str(asset_resource(ICON_PNG)))
+    if sys.platform == 'win32':
+        # Add the Windows .ico file to the same Qt icon, so the icon contains
+        # the standard Windows sizes such as 16x16, 32x32, and 256x256.
+        #
+        # This is needed because the PyInstaller command-line option named
+        # "--icon" embeds the icon into EasyCull.exe, but the live taskbar
+        # button comes from Qt's runtime QIcon. If Qt only gets the PNG,
+        # Windows can fall back to a generic taskbar icon even though the EXE
+        # itself has the correct embedded icon.
+        icon.addFile(str(asset_resource(ICON_ICO)))
+
+    return icon
 
 
 def branded_argv(argv: list[str] | None = None) -> list[str]:
