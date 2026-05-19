@@ -20,11 +20,39 @@ making UI or library changes based on assumptions.
 ## 2. Working Setup
 
 - Python target: `>=3.12` from `pyproject.toml`
+- Default local Python from `.python-version`: `3.12`
 - Preferred environment manager: `uv`
 - Install dependencies: `uv sync`
+- Install build/test/dev dependencies: `uv sync --extra dev`
 - Launch the app: `uv run python -m easy_cull`
 
-### 2.1. Windows Sessions
+### 2.1. Build Artifacts
+
+- PyInstaller is a dev dependency. Build on the target operating system rather
+  than cross-compiling app bundles.
+- Build macOS with `uv run python scripts/build_app/build_app_macos.py`. The
+  distributable artifact is `dist/EasyCull.app`.
+- For macOS distribution, ship `dist/EasyCull.app`. If PyInstaller also leaves
+  `dist/EasyCull/` beside it, that sibling one-folder output is not needed by
+  users receiving the `.app` and should not be shipped in addition to the app
+  bundle.
+- A simple macOS zip can be produced with
+  `ditto -c -k --keepParent dist/EasyCull.app EasyCull-macos.zip`.
+- Build Windows with `uv run python scripts/build_app/build_app_windows.py`.
+  The default output is the one-folder app `dist\EasyCull\`; distribute the
+  whole folder, not just `EasyCull.exe`.
+- Windows also supports
+  `uv run python scripts/build_app/build_app_windows.py --onefile` for a
+  movable single executable and `--console` for startup-debug builds.
+- Both build scripts support `--diagnose`; use it to print Python, PySide6,
+  PyInstaller, Qt, shiboken, and bundled ExifTool diagnostics for the built
+  artifact.
+- The build scripts stage official ExifTool payloads under ignored `build`
+  cache/staging directories and bundle them under
+  `easy_cull/vendor/exiftool/...` inside the PyInstaller artifact. Do not
+  commit downloaded ExifTool payloads.
+
+### 2.2. Windows Sessions
 
 On Windows, `uv`, `python`, `pip`, and `tox` are often **not on PATH** in AI
 agent shell sessions even when they are installed for the human user. This is
@@ -92,6 +120,11 @@ Notes:
     main window.
   - The UI is split primarily across `ui/main_window/`, `ui/viewers/`,
     `ui/widgets.py`, `ui/theme.py`, `ui/workers.py`, and `ui/app.py`.
+  - `ui/identity.py` owns the user-facing app name, packaged icon lookup, Qt
+    app identity, and best-effort macOS process/app-switcher identity hooks.
+  - `ui/assets/` contains packaged EasyCull icon assets used by Qt and the
+    PyInstaller build scripts; keep package-data configuration aligned when
+    adding or renaming assets.
 - `easy_cull/ui/main_window/`
   - Contains the `MainWindow` package: `window.py`, `build.py`, `workflows.py`,
     `navigation.py`, and `presentation.py`.
@@ -120,10 +153,16 @@ Notes:
 - `tests/operations/`
   - Operations package contract for file organization, XMP writing, and undo
     behavior.
+- `tests/scripts/`
+  - Packaging-script contract for PyInstaller command construction and build
+    options.
 - `tests/test_package_main.py`
   - Verifies the package entry point wiring.
 - `tests/conftest.py`
   - Adds the repo root to `sys.path` for test imports.
+- `scripts/build_app/`
+  - PyInstaller build scripts and shared helpers for macOS/Windows artifacts,
+    app icons, bundled ExifTool payloads, and packaging diagnostics.
 - `README.md`
   - User-facing setup and feature summary.
 
@@ -183,15 +222,20 @@ product contract and the tests/docs are updated accordingly.
 - `Pillow` handles image loading/transforms.
 - `rawpy` is required to render RAW previews.
 - `imagehash` is required for scene detection.
-- `exiftool` is used opportunistically via `shutil.which("exiftool")` and
-  `subprocess.run(...)`.
+- `exiftool` is used opportunistically via `subprocess.run(...)` after path
+  resolution. The runtime lookup order is `EASY_CULL_EXIFTOOL`, a bundled
+  PyInstaller payload, then `shutil.which("exiftool")`.
 
 Important:
 
 - `exiftool` is not declared in `pyproject.toml`; it is an external system
-  dependency.
+  dependency for source/development runs unless `EASY_CULL_EXIFTOOL` points to
+  a local executable. Packaged app builds include their own ExifTool payload.
 - If `exiftool` is missing or fails, the library falls back to empty EXIF
   metadata rather than crashing.
+- On Windows packaged GUI builds, ExifTool subprocesses are launched with
+  Windows-specific hidden-console options to avoid flashing a terminal window
+  during metadata reads.
 - If `rawpy` or `imagehash` is unavailable and the corresponding feature path
   is exercised, the library raises a runtime error.
 
@@ -539,6 +583,19 @@ Additional assignment-menu behavior:
     available
   - for Pentax DSLR point-id metadata, preserve the central-layout
     approximation unless new ground-truth samples justify changing the mapping
+- If you change ExifTool resolution or invocation:
+  - test `EASY_CULL_EXIFTOOL`, bundled PyInstaller lookup, and system `PATH`
+    fallback behavior
+  - preserve the missing/failing-ExifTool fallback to empty metadata
+  - preserve Windows hidden-console subprocess options for GUI builds
+- If you change app identity, icon assets, or PyInstaller packaging:
+  - update `README.md` build/distribution guidance and this file
+  - update or extend tests under `tests/scripts/` and `tests/ui/test_app.py`
+  - keep `pyproject.toml` package-data entries aligned with assets under
+    `easy_cull/ui/assets/`
+  - verify the platform artifact shape: macOS ships `dist/EasyCull.app`, while
+    Windows default distribution ships the whole `dist\EasyCull\` folder unless
+    `--onefile` is used
 - If you change scene detection:
   - test grouping behavior, not just helper functions
   - preserve ordering assumptions based on capture time

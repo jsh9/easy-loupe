@@ -10,10 +10,13 @@ ______________________________________________________________________
   - [1.1. Option A: `uv`](#11-option-a-uv)
   - [1.2. Option B: Anaconda](#12-option-b-anaconda)
   - [1.3. Open the App](#13-open-the-app)
-- [2. Features](#2-features)
-- [3. Modes and Transitions](#3-modes-and-transitions)
-- [4. Keyboard Shortcuts](#4-keyboard-shortcuts)
-- [5. Metadata File](#5-metadata-file)
+- [2. Build App Binary](#2-build-app-binary)
+  - [2.1. macOS](#21-macos)
+  - [2.2. Windows](#22-windows)
+- [3. Features](#3-features)
+- [4. Modes and Transitions](#4-modes-and-transitions)
+- [5. Keyboard Shortcuts](#5-keyboard-shortcuts)
+- [6. Metadata File](#6-metadata-file)
 
 ______________________________________________________________________
 
@@ -69,7 +72,119 @@ python -m easy_cull
 Launch the desktop app and use the native folder picker to choose a photo
 folder.
 
-## 2. Features
+## 2. Build App Binary
+
+EasyCull uses PyInstaller for native app bundles. Build on the target operating
+system: the macOS app should be built on macOS, and a Windows executable should
+be built on Windows.
+
+Packaged builds include an ExifTool payload for camera maker-note metadata used
+by autofocus-point detection. At runtime EasyCull checks `EASY_CULL_EXIFTOOL`
+first, then a bundled ExifTool payload when running from a packaged app, then
+`exiftool` from the system `PATH`. To point EasyCull at a specific local
+ExifTool binary while developing, set `EASY_CULL_EXIFTOOL` to that executable
+path before launching the app.
+
+### 2.1. macOS
+
+When EasyCull is launched as `python -m easy_cull`, macOS still sees the
+underlying Python executable as the running application. The in-app window
+title is correct, but app-level switchers can still show `python3.13` or the
+Python icon.
+
+Build and launch the macOS app bundle for native Finder, Dock, app switcher,
+and AltTab behavior:
+
+```bash
+uv sync --extra dev
+uv run python scripts/build_app/build_app_macos.py
+open dist/EasyCull.app
+```
+
+The generated `EasyCull.app` is a PyInstaller bundle with its own Python
+runtime, dependencies, bundled ExifTool payload, `Info.plist`, and
+`EasyCull.icns` app icon. It is much larger than a launcher stub because it
+contains the application runtime.
+
+For macOS distribution, ship `dist/EasyCull.app`. PyInstaller may also leave a
+separate `dist/EasyCull/` one-folder output beside the app bundle; users do not
+need that folder when receiving the `.app`, and shipping both duplicates the
+runtime payload. A simple zip package can be created with:
+
+```bash
+ditto -c -k --keepParent dist/EasyCull.app EasyCull-macos.zip
+```
+
+For macOS packaging diagnostics:
+
+```bash
+uv run python scripts/build_app/build_app_macos.py --diagnose
+```
+
+The diagnostic command prints the Python/PySide6/PyInstaller versions plus Qt,
+shiboken, and bundled ExifTool paths found inside `dist/EasyCull.app`.
+
+### 2.2. Windows
+
+Build the Windows executable on Windows:
+
+```powershell
+uv python pin 3.12
+uv sync --extra dev
+uv run python scripts/build_app/build_app_windows.py
+```
+
+The default output is a one-folder PyInstaller app at `dist\EasyCull\`. Run the
+executable from inside that folder:
+
+```powershell
+.\dist\EasyCull\EasyCull.exe
+```
+
+Do not copy only `EasyCull.exe` out of `dist\EasyCull\`. In the default
+one-folder build, the `.exe` is only the launcher; Qt, PySide6, Python, and
+other DLLs live next to it under the same output folder. If you want one file
+that can be moved by itself, build a single executable instead:
+
+```powershell
+uv run python scripts/build_app/build_app_windows.py --onefile
+```
+
+The one-file build should be much larger than the launcher `.exe` from the
+one-folder build because it embeds the dependency payload.
+
+The script creates `easy_cull\ui\assets\EasyCull.ico` from the packaged PNG
+when the `.ico` asset is missing.
+
+The Windows and macOS build scripts download the official ExifTool release
+payload from <https://exiftool.org/> / SourceForge into the ignored `build`
+cache when the local cache is missing, then package it into the app bundle. The
+downloaded payload is not committed to the repository.
+
+Both scripts embed the packaged EasyCull icon assets. Runtime Qt app identity
+also uses the same assets so Finder, Dock, app switcher, AltTab, Windows
+taskbar, and window chrome have the EasyCull name and icon where the platform
+allows it.
+
+PySide6, Pillow, rawpy, and imagehash are all PyInstaller-compatible in
+principle, but RAW support should be verified with sample RAW files on Windows.
+If `QtWidgets` still fails to import on a packaged build, first confirm that
+the whole `dist\EasyCull\` folder is intact and that the test machine is a
+supported Windows 10/11 system for the bundled Qt/PySide6 version.
+
+For packaging diagnostics on Windows:
+
+```powershell
+uv run python scripts/build_app/build_app_windows.py --diagnose
+uv run python scripts/build_app/build_app_windows.py --console
+.\dist\EasyCull\EasyCull.exe
+```
+
+The diagnostic command prints the Python/PySide6/PyInstaller versions plus the
+Qt DLLs and Windows platform plugin found under `dist\EasyCull\`. The console
+build keeps a terminal attached so startup errors include a normal traceback.
+
+## 3. Features
 
 - Opens folders through the native desktop folder picker.
 - Groups JPEG and RAW files by shared filename stem.
@@ -100,7 +215,7 @@ folder.
 - Writes visible metadata immediately to `easy-cull.json` in the selected
   folder.
 
-## 3. Modes and Transitions
+## 4. Modes and Transitions
 
 - `View mode` is the normal working mode. It shows the left thumbnail strip,
   the main viewer, and the horizontal scene strip when scene detection is
@@ -134,7 +249,7 @@ Common transitions:
   keyboard focus returns to the active navigation list instead of staying on
   the top-bar buttons.
 
-## 4. Keyboard Shortcuts
+## 5. Keyboard Shortcuts
 
 - Ratings: `1`-`5` assign, `0` clears
 - Color labels: `6` red, `7` yellow, `8` green, `9` blue, `` ` `` clears, and
@@ -150,7 +265,7 @@ Common transitions:
   tracks the current visible region while zoomed, and left/right arrows move
   within the current scene
 
-## 5. Metadata File
+## 6. Metadata File
 
 The app stores per-photo metadata in `easy-cull.json` inside the selected
 folder. Keys use the visible photo stem, not the filename with extension.

@@ -21,6 +21,7 @@ dev = [
   "muff>=0.14.5",
   "numpy>=1.26.0",
   "pre-commit>=4.3.0",
+  "pyinstaller>=6.20.0",
   "pytest>=8.3.2",
   "tox>=4.28.0",
   "ty>=0.0.1",
@@ -28,6 +29,9 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.setuptools.package-data]
+"easy_cull.ui.assets" = ["*.icns", "*.ico", "*.png", "*.svg"]
 
 [tool.setuptools.packages.find]
 include = ["easy_cull*"]

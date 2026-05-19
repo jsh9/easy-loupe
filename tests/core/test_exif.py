@@ -100,6 +100,138 @@ def test_resolve_image_size_uses_known_dimensions_in_priority_order(
     assert core_exif_module.resolve_image_size(metadata) == expected
 
 
+def test_resolve_exiftool_path_uses_environment_override(
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(core_exif_module.EXIFTOOL_ENV_VAR, '/custom/exiftool')
+    monkeypatch.setattr(
+        core_exif_module,
+        '_resolve_bundled_exiftool_path',
+        lambda: pytest.fail('bundled path should not be checked'),
+    )
+
+    assert core_exif_module._resolve_exiftool_path() == '/custom/exiftool'
+
+
+def test_resolve_exiftool_path_finds_pyinstaller_bundle(
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+) -> None:
+    bundled_exiftool = (
+        tmp_path
+        / 'easy_cull'
+        / 'vendor'
+        / 'exiftool'
+        / 'windows'
+        / 'exiftool.exe'
+    )
+    bundled_exiftool.parent.mkdir(parents=True)
+    bundled_exiftool.write_text('exiftool')
+    monkeypatch.delenv(core_exif_module.EXIFTOOL_ENV_VAR, raising=False)
+    monkeypatch.setattr(
+        core_exif_module.sys,
+        '_MEIPASS',
+        str(tmp_path),
+        raising=False,
+    )
+    monkeypatch.setattr(core_exif_module.shutil, 'which', lambda _name: None)
+
+    assert core_exif_module._resolve_exiftool_path() == str(bundled_exiftool)
+
+
+def test_resolve_exiftool_path_falls_back_to_system_path(
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(core_exif_module.EXIFTOOL_ENV_VAR, raising=False)
+    monkeypatch.setattr(
+        core_exif_module,
+        '_resolve_bundled_exiftool_path',
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        core_exif_module.shutil,
+        'which',
+        lambda name: '/usr/bin/exiftool' if name == 'exiftool' else None,
+    )
+
+    assert core_exif_module._resolve_exiftool_path() == '/usr/bin/exiftool'
+
+
+def test_exiftool_subprocess_kwargs_are_empty_without_windows_support(
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Non-Windows platforms should launch ExifTool normally.
+
+    The console-popup problem is Windows-specific. On macOS/Linux, Python's
+    subprocess module does not provide the Windows-only constants used to hide
+    a helper process window, so EasyCull should pass no extra options.
+    """
+    # Remove the Windows-only subprocess attributes even if the test happens to
+    # run on Windows, so this test behaves like a non-Windows Python runtime.
+    for attr in [
+        'CREATE_NO_WINDOW',
+        'STARTUPINFO',
+        'STARTF_USESHOWWINDOW',
+        'SW_HIDE',
+    ]:
+        monkeypatch.delattr(core_exif_module.subprocess, attr, raising=False)
+
+    assert core_exif_module._exiftool_subprocess_kwargs() == {}
+
+
+def test_exiftool_subprocess_kwargs_hide_windows_console(
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Windows should launch ExifTool without showing a terminal window.
+
+    The app itself is a PySide/Qt GUI, but ExifTool is a separate console
+    program. This test fakes the Windows-only subprocess constants/classes and
+    checks that EasyCull asks Windows to keep that helper process hidden.
+    """
+
+    class FakeStartupInfo:
+        """Tiny stand-in for subprocess.STARTUPINFO used on Windows."""
+
+        def __init__(self) -> None:
+            self.dwFlags = 0
+            self.wShowWindow = None
+
+    # These values mirror the shape of Windows subprocess attributes without
+    # requiring the test suite to actually run on Windows.
+    monkeypatch.setattr(
+        core_exif_module.subprocess,
+        'CREATE_NO_WINDOW',
+        0x08000000,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        core_exif_module.subprocess,
+        'STARTUPINFO',
+        FakeStartupInfo,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        core_exif_module.subprocess,
+        'STARTF_USESHOWWINDOW',
+        1,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        core_exif_module.subprocess,
+        'SW_HIDE',
+        0,
+        raising=False,
+    )
+
+    kwargs = core_exif_module._exiftool_subprocess_kwargs()
+
+    assert kwargs['creationflags'] == 0x08000000
+    assert kwargs['startupinfo'].dwFlags == 1
+    assert kwargs['startupinfo'].wShowWindow == 0
+
+
 @pytest.mark.parametrize(
     ('mode', 'stdout'),
     [
@@ -116,6 +248,12 @@ def test_read_exif_metadata_returns_empty_for_missing_and_failed_exiftool_paths(
 ) -> None:
     source = tmp_path / 'IMG_6100.JPG'
     source.write_bytes(b'jpeg')
+    monkeypatch.delenv(core_exif_module.EXIFTOOL_ENV_VAR, raising=False)
+    monkeypatch.setattr(
+        core_exif_module,
+        '_resolve_bundled_exiftool_path',
+        lambda: None,
+    )
 
     if mode == 'missing':
         monkeypatch.setattr(
@@ -157,13 +295,22 @@ def test_read_exif_metadata_returns_records_keyed_by_filename(
     second = tmp_path / 'IMG_6101.JPG'
     first.write_bytes(b'jpeg')
     second.write_bytes(b'jpeg')
+    captured_command: list[str] = []
+    captured_kwargs: dict[str, Any] = {}
+    monkeypatch.delenv(core_exif_module.EXIFTOOL_ENV_VAR, raising=False)
+    monkeypatch.setattr(
+        core_exif_module,
+        '_resolve_bundled_exiftool_path',
+        lambda: None,
+    )
     monkeypatch.setattr(
         core_exif_module.shutil, 'which', lambda _name: '/usr/bin/exiftool'
     )
-    monkeypatch.setattr(
-        core_exif_module.subprocess,
-        'run',
-        lambda *_args, **_kwargs: type(
+
+    def fake_run(*args: Any, **_kwargs: Any) -> object:
+        captured_command.extend(args[0])
+        captured_kwargs.update(_kwargs)
+        return type(
             'Result',
             (),
             {
@@ -179,7 +326,12 @@ def test_read_exif_metadata_returns_records_keyed_by_filename(
                     {'Make': 'Ignored Without SourceFile'},
                 ])
             },
-        )(),
+        )()
+
+    monkeypatch.setattr(
+        core_exif_module.subprocess,
+        'run',
+        fake_run,
     )
 
     assert core_exif_module.read_exif_metadata([first, second]) == {
@@ -189,6 +341,10 @@ def test_read_exif_metadata_returns_records_keyed_by_filename(
             'Make': 'NIKON CORPORATION',
         },
     }
+    assert captured_command[:4] == ['/usr/bin/exiftool', '-j', '-n', '-struct']
+    assert captured_kwargs['check'] is True
+    assert captured_kwargs['capture_output'] is True
+    assert captured_kwargs['text'] is True
 
 
 @pytest.mark.parametrize(

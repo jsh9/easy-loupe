@@ -8,6 +8,7 @@ from PySide6.QtGui import QAction, QKeySequence, QShortcut
 from PySide6.QtWidgets import QMainWindow
 
 from easy_cull.core.photo_library import PhotoLibrary
+from easy_cull.ui.identity import APP_NAME, easy_cull_icon
 from easy_cull.ui.main_window.build import MainWindowBuildMixin
 from easy_cull.ui.main_window.navigation import (
     MainWindowNavigationMixin,
@@ -66,7 +67,8 @@ class MainWindow(
         self._thumbnail_overlay_photo_id: str | None = None
         self._scene_overlay_photo_id: str | None = None
 
-        self.setWindowTitle('EasyCull')
+        self.setWindowTitle(APP_NAME)
+        self.setWindowIcon(easy_cull_icon())
         self.resize(1600, 980)
 
         self._build_ui()
