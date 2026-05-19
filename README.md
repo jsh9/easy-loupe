@@ -81,8 +81,8 @@ be built on Windows.
 Packaged builds include an ExifTool payload for camera maker-note metadata used
 by autofocus-point detection. Source/development runs still use `exiftool` from
 the system `PATH` by default. To point EasyCull at a specific local ExifTool
-binary while developing, set `EASY_CULL_EXIFTOOL` to that executable path before
-launching the app.
+binary while developing, set `EASY_CULL_EXIFTOOL` to that executable path
+before launching the app.
 
 ### 2.1. macOS
 
@@ -139,8 +139,8 @@ when the `.ico` asset is missing.
 
 The Windows and macOS build scripts download the official ExifTool release
 payload from <https://exiftool.org/> / SourceForge into the ignored `build`
-cache when the local cache is missing, then package it into the app bundle.
-The downloaded payload is not committed to the repository.
+cache when the local cache is missing, then package it into the app bundle. The
+downloaded payload is not committed to the repository.
 
 PySide6, Pillow, rawpy, and imagehash are all PyInstaller-compatible in
 principle, but RAW support should be verified with sample RAW files on Windows.

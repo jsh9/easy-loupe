@@ -79,6 +79,7 @@ def ensure_exiftool_payload() -> Path:
     extract_dir = EXIFTOOL_CACHE_DIR / f'macos-{EXIFTOOL_VERSION}'
     if extract_dir.exists():
         shutil.rmtree(extract_dir)
+
     extract_dir.mkdir(parents=True)
     with tarfile.open(EXIFTOOL_SOURCE_ARCHIVE, 'r:gz') as archive:
         archive.extractall(extract_dir, filter='data')
@@ -95,6 +96,7 @@ def ensure_exiftool_payload() -> Path:
 
     if EXIFTOOL_STAGE_DIR.exists():
         shutil.rmtree(EXIFTOOL_STAGE_DIR)
+
     EXIFTOOL_STAGE_DIR.mkdir(parents=True)
     shutil.copy2(source_exe, EXIFTOOL_STAGE_EXE)
     shutil.copytree(source_lib, EXIFTOOL_STAGE_LIB)
@@ -166,9 +168,7 @@ def _bundled_exiftool_paths() -> list[Path]:
     return [
         path
         for path in sorted(APP_PATH.rglob('exiftool'))
-        if path.as_posix().endswith(
-            'easy_cull/vendor/exiftool/macos/exiftool'
-        )
+        if path.as_posix().endswith('easy_cull/vendor/exiftool/macos/exiftool')
     ]
 
 

@@ -104,14 +104,20 @@ def ensure_exiftool_payload() -> Path:
     extract_dir = EXIFTOOL_CACHE_DIR / f'windows-{EXIFTOOL_VERSION}'
     if extract_dir.exists():
         shutil.rmtree(extract_dir)
+
     extract_dir.mkdir(parents=True)
     with zipfile.ZipFile(EXIFTOOL_WINDOWS_ARCHIVE) as archive:
         archive.extractall(extract_dir)
 
     source_exe = next(extract_dir.rglob('exiftool(-k).exe'), None)
-    source_files = next((
-        path for path in extract_dir.rglob('exiftool_files') if path.is_dir()
-    ), None)
+    source_files = next(
+        (
+            path
+            for path in extract_dir.rglob('exiftool_files')
+            if path.is_dir()
+        ),
+        None,
+    )
     if source_exe is None or source_files is None:
         raise RuntimeError(
             'Downloaded ExifTool archive has unexpected layout.'
@@ -119,6 +125,7 @@ def ensure_exiftool_payload() -> Path:
 
     if EXIFTOOL_STAGE_DIR.exists():
         shutil.rmtree(EXIFTOOL_STAGE_DIR)
+
     EXIFTOOL_STAGE_DIR.mkdir(parents=True)
     shutil.copy2(source_exe, EXIFTOOL_STAGE_EXE)
     shutil.copytree(source_files, EXIFTOOL_STAGE_FILES)

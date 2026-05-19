@@ -134,9 +134,7 @@ def test_resolve_exiftool_path_finds_pyinstaller_bundle(
         str(tmp_path),
         raising=False,
     )
-    monkeypatch.setattr(
-        core_exif_module.shutil, 'which', lambda _name: None
-    )
+    monkeypatch.setattr(core_exif_module.shutil, 'which', lambda _name: None)
 
     assert core_exif_module._resolve_exiftool_path() == str(bundled_exiftool)
 
