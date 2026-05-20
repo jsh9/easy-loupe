@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QGraphicsItem
 
 import easy_cull.ui.viewers.photo_viewer as photo_viewer_module
@@ -214,5 +216,117 @@ def test_photo_viewer_remembered_manual_zoom_precedes_af_point_zoom(
     assert viewer.normalized_viewport_center() == pytest.approx(
         remembered_center
     )
+
+    viewer.close()
+
+
+def test_photo_viewer_hold_zoom_temporarily_zooms_pans_and_restores_fit(
+        tmp_path: Path,
+) -> None:
+    """
+    Pressing and holding the left mouse button in fit-to-window view should
+    temporarily zoom the photo to 100%, let the user drag to pan that temporary
+    view, and return to fit-to-window as soon as the mouse button is released.
+    """
+    create_jpeg(tmp_path / 'IMG_7008.JPG', 'white')
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer(hold_zoom_enabled=True)
+    viewer.resize(320, 240)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_photo(tmp_path / 'IMG_7008.JPG', (0.5, 0.5))
+
+    assert viewer._mode == 'fit'
+    assert viewer.visible_region_rect() is None
+
+    QTest.mousePress(
+        viewer.viewport(),
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(160, 120),
+    )
+    app.processEvents()
+
+    visible_region_before = viewer.visible_region_rect()
+
+    assert viewer._hold_zoom_active is True
+    assert viewer._current_scale == pytest.approx(1.0)
+    assert visible_region_before is not None
+
+    center_before = viewer.normalized_viewport_center()
+    QTest.mouseMove(viewer.viewport(), QPoint(120, 90))
+    app.processEvents()
+    center_after = viewer.normalized_viewport_center()
+
+    assert center_after[0] > center_before[0]
+    assert center_after[1] > center_before[1]
+
+    QTest.mouseRelease(
+        viewer.viewport(),
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(120, 90),
+    )
+    app.processEvents()
+
+    assert viewer._hold_zoom_active is False
+    assert viewer._mode == 'fit'
+    assert viewer.visible_region_rect() is None
+
+    viewer.close()
+
+
+def test_photo_viewer_hold_zoom_does_not_change_remembered_manual_zoom(
+        tmp_path: Path,
+) -> None:
+    """
+    A click-and-hold inspection should be separate from normal manual zoom, so
+    using it must not overwrite the zoom level and center restored by Space.
+    """
+    create_jpeg(tmp_path / 'IMG_7009.JPG', 'white')
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer(hold_zoom_enabled=True)
+    viewer.resize(320, 240)
+    viewer.show()
+    app.processEvents()
+
+    image_path = tmp_path / 'IMG_7009.JPG'
+    viewer.set_photo(image_path, (0.8, 0.2))
+    viewer.toggle_focus_zoom()
+    viewer.zoom_step(1.25)
+    viewer.pan_by(-40, 30)
+    remembered_manual_view = viewer.current_manual_view()
+    stored_manual_views = dict(viewer._manual_views)
+
+    viewer.set_fit_view()
+
+    QTest.mousePress(
+        viewer.viewport(),
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(160, 120),
+    )
+    QTest.mouseMove(viewer.viewport(), QPoint(120, 90))
+    QTest.mouseRelease(
+        viewer.viewport(),
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(120, 90),
+    )
+    app.processEvents()
+
+    assert viewer._manual_views == stored_manual_views
+
+    viewer.toggle_focus_zoom()
+
+    restored_manual_view = viewer.current_manual_view()
+
+    assert restored_manual_view is not None
+    assert remembered_manual_view is not None
+    assert restored_manual_view[0] == pytest.approx(remembered_manual_view[0])
+    assert restored_manual_view[1] == pytest.approx(remembered_manual_view[1])
 
     viewer.close()

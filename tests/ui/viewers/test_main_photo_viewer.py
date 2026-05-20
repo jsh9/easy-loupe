@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtTest import QTest
 
 from tests.ui._helpers import (
     create_main_window_with_library,
@@ -129,6 +131,74 @@ def test_main_window_viewer_shortcuts_target_split_right_pane_only(
     assert (
         window.viewer.split_zoom_viewer.normalized_viewport_center()[0]
         > right_center_before[0]
+    )
+
+    window.close()
+
+
+def test_main_window_split_left_pane_hold_zoom_is_temporary_and_left_only(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    In split view, the left fit-to-window pane should support temporary
+    click-and-hold inspection without changing the right zoomed pane's scale or
+    center.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_8080', 'dimgray'), ('IMG_8081', 'green')],
+    )
+
+    window.resize(560, 420)
+    window.split_mode_shortcut.activated.emit()
+    app.processEvents()
+
+    left_viewer = window.viewer.split_fit_viewer
+    right_viewer = window.viewer.split_zoom_viewer
+    left_viewer.resize(240, 240)
+    app.processEvents()
+
+    right_scale_before = right_viewer._current_scale
+    right_center_before = right_viewer.normalized_viewport_center()
+
+    QTest.mousePress(
+        left_viewer.viewport(),
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(120, 120),
+    )
+    app.processEvents()
+
+    assert left_viewer._hold_zoom_active is True
+    assert left_viewer.visible_region_rect() is not None
+
+    left_center_before = left_viewer.normalized_viewport_center()
+    QTest.mouseMove(left_viewer.viewport(), QPoint(90, 90))
+    app.processEvents()
+    left_center_after = left_viewer.normalized_viewport_center()
+
+    assert left_center_after[0] > left_center_before[0]
+    assert left_center_after[1] > left_center_before[1]
+    assert right_viewer._current_scale == pytest.approx(right_scale_before)
+    assert right_viewer.normalized_viewport_center() == pytest.approx(
+        right_center_before
+    )
+
+    QTest.mouseRelease(
+        left_viewer.viewport(),
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(90, 90),
+    )
+    app.processEvents()
+
+    assert left_viewer._hold_zoom_active is False
+    assert left_viewer._mode == 'fit'
+    assert left_viewer.visible_region_rect() is None
+    assert right_viewer._current_scale == pytest.approx(right_scale_before)
+    assert right_viewer.normalized_viewport_center() == pytest.approx(
+        right_center_before
     )
 
     window.close()
