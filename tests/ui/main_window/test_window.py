@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtGui import QKeySequence
-from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtWidgets import QApplication, QMessageBox
 
+import easy_cull.ui.identity as identity_module
 import easy_cull.ui.main_window.window as main_window_module
 import easy_cull.ui.theme as theme_module
 from tests.ui._helpers import create_main_window_with_library
@@ -36,6 +37,9 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:
     )
     assert window.organize_action.isEnabled() is False
     assert window.assign_photo_menu.title() == 'Assign to &Photo'
+    assert window.help_menu.title() == '&Help'
+    assert window.about_action.text() == 'About EasyCull'
+    assert window.about_action.menuRole() == QAction.AboutRole
     assert (
         window.rating_actions[1].shortcut().toString(QKeySequence.PortableText)
         == '1'
@@ -148,6 +152,39 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:
         window.metadata_label.text()
         == f'Metadata: {theme_module.NO_METADATA_TEXT}'
     )
+
+    window.close()
+    del app
+
+
+def test_about_action_shows_easy_cull_version(
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    about_calls: list[tuple[object, str, str]] = []
+
+    monkeypatch.setattr(
+        QMessageBox,
+        'about',
+        lambda parent, title, text: about_calls.append((parent, title, text)),
+    )
+
+    window.about_action.trigger()
+
+    assert about_calls == [
+        (
+            window,
+            'About EasyCull',
+            (
+                'EasyCull\n\n'
+                f'Version {identity_module.APP_VERSION}\n\n'
+                'Photo culling made easy.'
+            ),
+        )
+    ]
+    assert 'Version 0.1.3' in about_calls[0][2]
 
     window.close()
     del app

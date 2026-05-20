@@ -45,6 +45,8 @@ def common_pyinstaller_args(
         'shiboken6',
         '--collect-data',
         'easy_cull.ui.assets',
+        '--copy-metadata',
+        'easy-cull',
         str(ENTRYPOINT),
     ]
     if windowed:

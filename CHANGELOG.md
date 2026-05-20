@@ -1,5 +1,14 @@
 # Change Log
 
+## [Unreleased]
+
+- Added
+  - Native `About EasyCull` menu item and dialog showing branded app details
+    plus the installed package version
+- Changed
+  - PyInstaller build commands now copy EasyCull package metadata so packaged
+    apps can resolve and display the installed version
+
 ## [0.1.3] - 2026-05-20
 
 - Added
