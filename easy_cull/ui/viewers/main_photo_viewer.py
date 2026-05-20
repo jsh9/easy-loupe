@@ -31,13 +31,17 @@ class MainPhotoViewer(QWidget):
         self._focus_point_marker_enabled = True
         self._mode = 'single-fit'
 
-        self.single_viewer = PhotoViewer(self, manual_views=self._manual_views)
+        self.single_viewer = PhotoViewer(
+            self, manual_views=self._manual_views, hold_zoom_enabled=True
+        )
         self.splitter = QSplitter(Qt.Horizontal, self)
         self.splitter.setObjectName('splitModeSplitter')
         self.splitter.setChildrenCollapsible(False)
         self.splitter.setHandleWidth(3)
 
-        self.split_fit_viewer = PhotoViewer(self.splitter)
+        self.split_fit_viewer = PhotoViewer(
+            self.splitter, hold_zoom_enabled=True
+        )
         self.split_zoom_viewer = PhotoViewer(
             self.splitter, manual_views=self._manual_views
         )

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPointF, QSize, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QPen, QPixmap
+from PySide6.QtGui import QBrush, QColor, QMouseEvent, QPen, QPixmap
 from PySide6.QtWidgets import (
     QGraphicsItem,
     QGraphicsPixmapItem,
@@ -60,6 +60,7 @@ class PhotoViewer(QGraphicsView):
             *,
             manual_views: dict[str, tuple[float, tuple[float, float]]]
             | None = None,
+            hold_zoom_enabled: bool = False,
     ) -> None:
         super().__init__(parent)
         self._scene = QGraphicsScene(self)
@@ -102,6 +103,9 @@ class PhotoViewer(QGraphicsView):
         self._manual_views = {} if manual_views is None else manual_views
         self._mode = 'fit'
         self._focus_point_marker_enabled = False
+        self._hold_zoom_enabled = hold_zoom_enabled
+        self._hold_zoom_active = False
+        self._last_hold_zoom_pos = QPointF()
         self.set_theme(THEMES['light'])
 
     def set_photo(
@@ -115,6 +119,7 @@ class PhotoViewer(QGraphicsView):
         """Load a photo and optionally restore a preserved manual zoom view."""
         zoom_factor = self.current_zoom_factor()
         pixmap = QPixmap(str(image_path))
+        self._hold_zoom_active = False
         self._current_image_key = str(image_path)
         self._pixmap_item.setPixmap(pixmap)
         self._scene.setSceneRect(pixmap.rect())
@@ -154,6 +159,7 @@ class PhotoViewer(QGraphicsView):
         self._center_point = QPointF(0.0, 0.0)
         self._current_image_key = None
         self._mode = 'fit'
+        self._hold_zoom_active = False
         self.resetTransform()
         self._update_focus_point_marker()
         self.visible_region_changed.emit()
@@ -166,6 +172,7 @@ class PhotoViewer(QGraphicsView):
         """Return whether the current state represents a manual zoom view."""
         return (
             not self._image_size.isEmpty()
+            and not self._hold_zoom_active
             and self._mode == 'manual'
             and self._current_scale > self._fit_scale + 0.001
         )
@@ -189,7 +196,9 @@ class PhotoViewer(QGraphicsView):
 
     def visible_region_rect(self) -> tuple[float, float, float, float] | None:
         """Return the normalized rectangle currently visible in manual zoom."""
-        if not self.should_preserve_zoom() or self._image_size.isEmpty():
+        if (
+            not self._hold_zoom_active and not self.should_preserve_zoom()
+        ) or self._image_size.isEmpty():
             return None
 
         viewport = self.viewport().size()
@@ -230,6 +239,7 @@ class PhotoViewer(QGraphicsView):
         if self._image_size.isEmpty():
             return
 
+        self._hold_zoom_active = False
         self._mode = 'fit'
         self._current_scale = self._compute_fit_scale()
         self._center_point = QPointF(
@@ -242,6 +252,7 @@ class PhotoViewer(QGraphicsView):
         if self._image_size.isEmpty():
             return
 
+        self._hold_zoom_active = False
         if (
             self._mode == 'fit'
             or self._current_scale <= self._fit_scale + 0.001
@@ -257,6 +268,7 @@ class PhotoViewer(QGraphicsView):
         if self._image_size.isEmpty():
             return
 
+        self._hold_zoom_active = False
         next_scale = max(
             self._fit_scale,
             min(self._max_scale(), self._current_scale * multiplier),
@@ -279,6 +291,7 @@ class PhotoViewer(QGraphicsView):
         ):
             return
 
+        self._hold_zoom_active = False
         self._mode = 'manual'
         self._center_point += QPointF(dx, dy)
         self._apply_transform()
@@ -289,6 +302,7 @@ class PhotoViewer(QGraphicsView):
         if self._image_size.isEmpty():
             return
 
+        self._hold_zoom_active = False
         if self._restore_manual_view():
             return
 
@@ -312,6 +326,7 @@ class PhotoViewer(QGraphicsView):
         if self._image_size.isEmpty():
             return
 
+        self._hold_zoom_active = False
         self._fit_scale = self._compute_fit_scale()
         self._mode = 'manual'
         self._current_scale = min(
@@ -327,7 +342,7 @@ class PhotoViewer(QGraphicsView):
 
     def current_manual_view(self) -> tuple[float, tuple[float, float]] | None:
         """Return the current manual zoom factor and normalized center."""
-        if not self.should_preserve_zoom():
+        if self._hold_zoom_active or not self.should_preserve_zoom():
             return None
 
         center = self.normalized_viewport_center()
@@ -351,11 +366,65 @@ class PhotoViewer(QGraphicsView):
             return
 
         self._fit_scale = self._compute_fit_scale()
-        if self._mode == 'fit':
+        if self._hold_zoom_active:
+            self._current_scale = min(
+                self._max_scale(), max(1.0, self._fit_scale)
+            )
+            self._apply_transform()
+        elif self._mode == 'fit':
             self.set_fit_view()
         elif not self._restore_manual_view():
             self._apply_transform()
             self._store_manual_view()
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt API
+        """Temporarily zoom fit-to-window views while left button is held."""
+        if (
+            self._hold_zoom_enabled
+            and event.button() == Qt.MouseButton.LeftButton
+            and self._mode == 'fit'
+            and not self._image_size.isEmpty()
+        ):
+            scene_pos = self.mapToScene(event.position().toPoint())
+            self._hold_zoom_active = True
+            self._last_hold_zoom_pos = event.position()
+            self._mode = 'fit'
+            self._current_scale = min(
+                self._max_scale(), max(1.0, self._fit_scale)
+            )
+            self._center_point = QPointF(scene_pos.x(), scene_pos.y())
+            self._apply_transform()
+            event.accept()
+            return
+
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt API
+        """Pan the temporary hold-zoom viewport without storing manual zoom."""
+        if self._hold_zoom_active:
+            delta = event.position() - self._last_hold_zoom_pos
+            self._last_hold_zoom_pos = event.position()
+            self._center_point -= QPointF(
+                delta.x() / max(self._current_scale, 0.001),
+                delta.y() / max(self._current_scale, 0.001),
+            )
+            self._apply_transform()
+            event.accept()
+            return
+
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt API
+        """Restore fit-to-window view when temporary hold-zoom finishes."""
+        if (
+            self._hold_zoom_active
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            self.set_fit_view()
+            event.accept()
+            return
+
+        super().mouseReleaseEvent(event)
 
     def _store_manual_view(self) -> None:
         if self._current_image_key is None or self._image_size.isEmpty():
@@ -410,7 +479,15 @@ class PhotoViewer(QGraphicsView):
 
     def _max_scale(self) -> float:
         """Return the maximum allowed absolute pixel scale."""
-        return max(MAX_ZOOM_FACTOR * self._fit_scale, self._fit_scale + 0.01)
+        # The temporary hold-zoom should always be able to inspect at 100%.
+        hold_zoom_scale = 1.0
+        # Keyboard/manual zoom remains capped relative to fit-to-window scale.
+        manual_zoom_cap = MAX_ZOOM_FACTOR * self._fit_scale
+        # When fit-to-window is already near 100%, keep one usable manual step.
+        minimum_manual_step_scale = self._fit_scale + 0.01
+
+        # Use the largest requirement so every zoom mode has enough headroom.
+        return max(hold_zoom_scale, manual_zoom_cap, minimum_manual_step_scale)
 
     def _compute_fit_scale(self) -> float:
         if self._image_size.isEmpty():
