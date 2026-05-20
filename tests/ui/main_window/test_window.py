@@ -180,8 +180,7 @@ def test_about_action_shows_easy_cull_version(
             (
                 'EasyCull\n\n'
                 f'Version {identity_module.APP_VERSION}\n\n'
-                'Desktop photo culling for JPEG and RAW folders, with '
-                'preview support for focused image selection.'
+                'Photo culling made easy.'
             ),
         )
     ]
