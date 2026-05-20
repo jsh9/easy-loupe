@@ -6,6 +6,8 @@ import ctypes
 import ctypes.util
 import importlib.resources
 import sys
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QCoreApplication
@@ -15,12 +17,22 @@ from PySide6.QtWidgets import QApplication
 if TYPE_CHECKING:
     from importlib.resources.abc import Traversable
 
-APP_NAME = 'EasyCull'
 ASSET_PACKAGE = 'easy_cull.ui.assets'
 ICON_PNG = 'EasyCull.png'
 ICON_SVG = 'EasyCull.svg'
 ICON_ICNS = 'EasyCull.icns'
 ICON_ICO = 'EasyCull.ico'
+
+
+def _package_version() -> str:
+    try:
+        return package_version('easy-cull')
+    except PackageNotFoundError:
+        return 'unknown'
+
+
+APP_NAME = 'EasyCull'
+APP_VERSION = _package_version()
 
 
 def asset_resource(name: str) -> Traversable:
@@ -57,7 +69,7 @@ def branded_argv(argv: list[str] | None = None) -> list[str]:
 def prepare_app_identity() -> None:
     """Set app metadata that can be consumed during Qt app construction."""
     QCoreApplication.setApplicationName(APP_NAME)
-    QCoreApplication.setApplicationVersion('')
+    QCoreApplication.setApplicationVersion(APP_VERSION)
     QCoreApplication.setOrganizationName(APP_NAME)
     QApplication.setApplicationDisplayName(APP_NAME)
     QApplication.setDesktopFileName(APP_NAME)

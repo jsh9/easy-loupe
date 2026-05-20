@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QListView,
     QListWidget,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QSplitter,
@@ -22,6 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from easy_cull.ui.identity import APP_NAME, APP_VERSION
 from easy_cull.ui.theme import NO_METADATA_TEXT
 from easy_cull.ui.viewers.main_photo_viewer import MainPhotoViewer
 from easy_cull.ui.widgets import SceneListWidget
@@ -312,6 +314,23 @@ class MainWindowBuildMixin:
                 self.flag_menu, 'Clear Flag', 'U', lambda: self._set_flag(None)
             ),
         }
+
+        self.help_menu = self.menuBar().addMenu('&Help')
+        self.about_action = QAction(f'About {APP_NAME}', self)
+        self.about_action.setMenuRole(QAction.AboutRole)
+        self.about_action.triggered.connect(self._show_about_dialog)
+        self.help_menu.addAction(self.about_action)
+
+    def _show_about_dialog(self: MainWindow) -> None:
+        QMessageBox.about(
+            self,
+            f'About {APP_NAME}',
+            (
+                f'{APP_NAME}\n\n'
+                f'Version {APP_VERSION}\n\n'
+                'Photo culling made easy.'
+            ),
+        )
 
     def _build_shortcuts(self: MainWindow) -> None:
         self.space_shortcut = self._make_shortcut(

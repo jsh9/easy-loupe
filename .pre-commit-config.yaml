@@ -1,6 +1,10 @@
 ---
 exclude: ^(tests/test_data/|\.codex/)
 repos:
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.11.15
+    hooks:
+      - id: uv-lock
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:

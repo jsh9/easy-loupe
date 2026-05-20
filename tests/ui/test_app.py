@@ -90,6 +90,7 @@ def test_apply_app_identity_sets_qt_name_and_icon() -> None:
     identity_module.apply_app_identity(app)
 
     assert app.applicationName() == 'EasyCull'
+    assert app.applicationVersion() == identity_module.APP_VERSION
     assert app.applicationDisplayName() == 'EasyCull'
     assert app.organizationName() == 'EasyCull'
     assert app.desktopFileName() == 'EasyCull'
