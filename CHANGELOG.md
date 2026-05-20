@@ -1,5 +1,16 @@
 # Change Log
 
+## [0.1.3] - 2026-05-20
+
+- Added
+  - Temporary click-and-hold 100% zoom for fit-to-window photo views, including
+    drag panning while the left mouse button is held
+  - Split-view support for click-and-hold inspection in the left fit-to-window
+    pane without changing the right zoomed pane
+- Fixed
+  - Preserved remembered manual zoom state when using temporary click-and-hold
+    inspection
+
 ## [0.1.2] - 2026-05-19
 
 - Added
@@ -21,8 +32,6 @@
 - Fixed
   - Windows packaged GUI builds now launch ExifTool without flashing a console
     window during metadata reads
-- Full diff
-  - https://github.com/jsh9/easy-cull/compare/17dc35d692cf45990fd3b1a2decf2f8a83c6e7a3...18c2a5ee4d5fd76eb00f10c53066fceeb91c7795
 
 ## [0.1.1] - 2026-05-18
 
@@ -33,5 +42,3 @@
 - Added
   - Regression tests covering inactive-window focus restoration and ensuring
     navigation focus restoration does not call `activateWindow()` or `raise_()`
-- Full diff
-  - https://github.com/jsh9/easy-cull/compare/3ad430e5e29c17f58687fa657f20dbf5cff48b13...17dc35d692cf45990fd3b1a2decf2f8a83c6e7a3
