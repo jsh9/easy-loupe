@@ -421,6 +421,12 @@ class MainWindowBuildMixin:
         self._scene_nav_shortcuts = [
             self._make_shortcut(Qt.Key_Left, lambda: self._navigate_scene(-1)),
             self._make_shortcut(Qt.Key_Right, lambda: self._navigate_scene(1)),
+            self._make_shortcut(
+                'Shift+Left', lambda: self._extend_scene_selection(-1)
+            ),
+            self._make_shortcut(
+                'Shift+Right', lambda: self._extend_scene_selection(1)
+            ),
         ]
         self._compare_nav_shortcuts = [
             self._make_shortcut(

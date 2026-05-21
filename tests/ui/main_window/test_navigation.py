@@ -6,6 +6,7 @@ from typing import Never
 import pytest
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QKeyEvent
+from PySide6.QtTest import QTest
 
 import easy_cull.ui.main_window.window as main_window_module
 from tests.ui._helpers import (
@@ -778,5 +779,83 @@ def test_scene_list_down_crosses_scene_without_full_refresh(
         window.thumbnail_list.currentItem().data(theme_module.PHOTO_ID_ROLE)
         == 'IMG_7632'
     )
+
+    window.close()
+
+
+def test_scene_mode_shift_up_down_selects_only_scene_cover_rows(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify vertical range selection keeps scene-stack rows as cover photos.
+
+    The vertical strip represents whole scene groups, but shift-selecting those
+    rows is still an exact row selection. This prevents compare and metadata
+    actions from unexpectedly expanding a selected scene cover to every photo
+    in that group.
+    """
+    theme_module, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7640', 'dimgray'),
+            ('IMG_7641', 'green'),
+            ('IMG_7642', 'blue'),
+        ],
+        scene_groups=[['IMG_7640', 'IMG_7641'], ['IMG_7642']],
+    )
+    window.thumbnail_list.setFocus(Qt.OtherFocusReason)
+    window.thumbnail_list.viewport().setFocus(Qt.OtherFocusReason)
+
+    QTest.keyClick(window.thumbnail_list, Qt.Key_Down, Qt.ShiftModifier)
+    app.processEvents()
+
+    assert [
+        item.data(theme_module.PHOTO_ID_ROLE)
+        for item in window.thumbnail_list.selectedItems()
+    ] == ['IMG_7640', 'IMG_7642']
+    assert window._resolved_selection_photo_ids() == [
+        'IMG_7640',
+        'IMG_7642',
+    ]
+
+    window.close()
+
+
+def test_scene_mode_shift_left_right_extends_selection_inside_scene(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify horizontal range selection chooses exact in-scene photos.
+
+    Users select non-cover photos from the scene strip with shift-left/right.
+    This keeps that shortcut path distinct from vertical scene-stack selection.
+    """
+    theme_module, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7650', 'dimgray'),
+            ('IMG_7651', 'green'),
+            ('IMG_7652', 'blue'),
+        ],
+        scene_groups=[['IMG_7650', 'IMG_7651', 'IMG_7652']],
+    )
+
+    trigger_scene_shortcut(window, 'Shift+Right')
+    app.processEvents()
+    trigger_scene_shortcut(window, 'Shift+Right')
+    app.processEvents()
+
+    assert [
+        item.data(theme_module.PHOTO_ID_ROLE)
+        for item in window.scene_list.selectedItems()
+    ] == ['IMG_7650', 'IMG_7651', 'IMG_7652']
+    assert window.current_photo_id == 'IMG_7652'
+    assert window._resolved_selection_photo_ids() == [
+        'IMG_7650',
+        'IMG_7651',
+        'IMG_7652',
+    ]
 
     window.close()

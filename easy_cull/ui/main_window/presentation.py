@@ -356,6 +356,7 @@ class MainWindowPresentationMixin:
             frame_size=frame_size,
             theme=self.current_theme,
             selected=selected,
+            current=selected,
             rejected=rejected,
             scene_count=scene_count,
             stacked=stacked,
@@ -481,6 +482,24 @@ class MainWindowPresentationMixin:
         item = list_widget.item(row)
         return item is not None and item.isSelected()
 
+    def _is_item_current(
+            self: MainWindow, list_widget: QListWidget, photo_id: str | None
+    ) -> bool:
+        if photo_id is None:
+            return False
+
+        row: int | None
+        if list_widget is self.thumbnail_list:
+            row = self._thumbnail_row_for_photo(photo_id)
+        elif list_widget is self.browse_list:
+            row = self._browse_photo_rows.get(photo_id)
+        elif list_widget is self.scene_list:
+            row = self._scene_photo_rows.get(photo_id)
+        else:
+            row = None
+
+        return row is not None and row == list_widget.currentRow()
+
     def _refresh_item_style_for_photo_id(
             self: MainWindow, list_widget: QListWidget, photo_id: str | None
     ) -> None:
@@ -513,6 +532,9 @@ class MainWindowPresentationMixin:
             selected=self._is_item_selected(
                 list_widget, item.data(PHOTO_ID_ROLE)
             ),
+            current=self._is_item_current(
+                list_widget, item.data(PHOTO_ID_ROLE)
+            ),
             rejected=item.data(FLAG_ROLE) == 'rejected',
         )
 
@@ -528,6 +550,9 @@ class MainWindowPresentationMixin:
             widget.apply_theme(
                 self.current_theme,
                 selected=self._is_item_selected(
+                    list_widget, item.data(PHOTO_ID_ROLE)
+                ),
+                current=self._is_item_current(
                     list_widget, item.data(PHOTO_ID_ROLE)
                 ),
                 rejected=item.data(FLAG_ROLE) == 'rejected',

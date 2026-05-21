@@ -9,7 +9,10 @@ from PySide6.QtTest import QTest
 
 from easy_cull.core.records import METADATA_FILENAME
 from easy_cull.ui.main_window.build import VIEWER_KEYBOARD_PAN_STEP
-from tests.ui._helpers import create_main_window_with_library
+from tests.ui._helpers import (
+    create_main_window_with_library,
+    trigger_scene_shortcut,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -127,15 +130,16 @@ def test_compare_mode_keyboard_pan_step_scales_with_zoom(
     window.close()
 
 
-def test_compare_mode_expands_selected_scene_stack_cover_photo(
+def test_compare_mode_uses_exact_scene_selection_instead_of_expanding_stack(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """
-    Verify selected scene-stack covers expand to their scene photos.
+    Verify scene-stack cover selection resolves to the exact cover photo.
 
-    The left strip can represent a whole scene as one item. Compare must open
-    the photos inside that stack, not just the cover image, or scene-oriented
-    culling would silently compare too little.
+    Scene mode has two selection surfaces: the vertical strip for scene covers
+    and the horizontal strip for photos inside the current scene. This protects
+    against accidentally comparing every photo in a scene when the user only
+    selected the cover row.
     """
     _, app, window = create_main_window_with_library(
         tmp_path,
@@ -151,15 +155,21 @@ def test_compare_mode_expands_selected_scene_stack_cover_photo(
     _select_rows(window.thumbnail_list, [0])
     app.processEvents()
 
+    assert window._resolved_selection_photo_ids() == ['IMG_9100']
+
+    window.compare_mode_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._compare_mode is False
+
+    trigger_scene_shortcut(window, 'Shift+Right')
+    app.processEvents()
+
     window.compare_mode_shortcut.activated.emit()
     app.processEvents()
 
     assert window._compare_mode is True
-    assert window.compare_viewer.photo_ids() == [
-        'IMG_9100',
-        'IMG_9101',
-        'IMG_9102',
-    ]
+    assert window.compare_viewer.photo_ids() == ['IMG_9100', 'IMG_9101']
     assert window.scene_list.isVisible() is False
 
     window.exit_compare_shortcut.activated.emit()
@@ -371,6 +381,143 @@ def test_compare_mode_g_from_browse_restores_all_compared_selection(
     assert [
         item.data(Qt.UserRole) for item in window.browse_list.selectedItems()
     ] == ['IMG_9710', 'IMG_9711', 'IMG_9712']
+
+    window.close()
+
+
+def test_compare_mode_esc_from_scene_restores_exact_mixed_selection(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify ``Esc`` restores mixed scene-cover and in-scene selections.
+
+    Scene-mode selections can span the vertical scene-stack strip and the
+    horizontal in-scene strip. Compare temporarily hides both strips, so this
+    guards the exact selection set from being reduced to only the active photo.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_9800', 'dimgray'),
+            ('IMG_9801', 'blue'),
+            ('IMG_9802', 'green'),
+            ('IMG_9803', 'yellow'),
+        ],
+        scene_groups=[['IMG_9800', 'IMG_9801'], ['IMG_9802'], ['IMG_9803']],
+    )
+    trigger_scene_shortcut(window, 'Shift+Right')
+    app.processEvents()
+    window.thumbnail_list.item(1).setSelected(True)
+    app.processEvents()
+
+    assert window._resolved_selection_photo_ids() == [
+        'IMG_9800',
+        'IMG_9801',
+        'IMG_9802',
+    ]
+
+    window.compare_mode_shortcut.activated.emit()
+    app.processEvents()
+    QTest.keyClick(window, Qt.Key_Right)
+    app.processEvents()
+    window.exit_compare_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._compare_mode is False
+    assert window.scene_list.isVisible() is True
+    assert window.current_photo_id == 'IMG_9801'
+    assert [
+        item.data(Qt.UserRole)
+        for item in window.thumbnail_list.selectedItems()
+    ] == ['IMG_9800', 'IMG_9802']
+    assert [
+        item.data(Qt.UserRole) for item in window.scene_list.selectedItems()
+    ] == ['IMG_9800', 'IMG_9801']
+    assert window._resolved_selection_photo_ids() == [
+        'IMG_9800',
+        'IMG_9801',
+        'IMG_9802',
+    ]
+
+    window.close()
+
+
+def test_compare_mode_g_from_scene_restores_exact_selection_in_browse(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify ``G`` from scene compare selects the same exact photos in browse.
+
+    Jumping directly from compare to browse rebuilds the target grid, so this
+    catches regressions where only compared panes or only visible strip rows
+    survive the transition.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_9810', 'dimgray'),
+            ('IMG_9811', 'blue'),
+            ('IMG_9812', 'green'),
+            ('IMG_9813', 'yellow'),
+        ],
+        scene_groups=[['IMG_9810', 'IMG_9811'], ['IMG_9812'], ['IMG_9813']],
+    )
+    trigger_scene_shortcut(window, 'Shift+Right')
+    app.processEvents()
+    window.thumbnail_list.item(1).setSelected(True)
+    app.processEvents()
+
+    window.compare_mode_shortcut.activated.emit()
+    app.processEvents()
+    QTest.keyClick(window, Qt.Key_Right)
+    app.processEvents()
+    window.browse_mode_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._browse_mode is True
+    assert window.current_photo_id == 'IMG_9811'
+    assert [
+        item.data(Qt.UserRole) for item in window.browse_list.selectedItems()
+    ] == ['IMG_9810', 'IMG_9811', 'IMG_9812']
+
+    window.close()
+
+
+def test_scene_mode_metadata_assignment_targets_exact_mixed_selection(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify scene-mode tagging uses exact selected photos across both strips.
+
+    Scene covers must not implicitly stand in for every photo in the scene, but
+    users still need batch metadata assignment for a mixed cover plus in-scene
+    selection.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_9820', 'dimgray'),
+            ('IMG_9821', 'blue'),
+            ('IMG_9822', 'green'),
+            ('IMG_9823', 'yellow'),
+        ],
+        scene_groups=[['IMG_9820', 'IMG_9821'], ['IMG_9822'], ['IMG_9823']],
+    )
+    trigger_scene_shortcut(window, 'Shift+Right')
+    app.processEvents()
+    window.thumbnail_list.item(1).setSelected(True)
+    app.processEvents()
+
+    window.rating_actions[3].trigger()
+    app.processEvents()
+
+    assert window.library.get_photo('IMG_9820').rating == 3
+    assert window.library.get_photo('IMG_9821').rating == 3
+    assert window.library.get_photo('IMG_9822').rating == 3
+    assert window.library.get_photo('IMG_9823').rating is None
 
     window.close()
 

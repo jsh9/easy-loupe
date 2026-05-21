@@ -48,6 +48,9 @@ class MainWindow(
         self._compare_mode = False
         self._compare_restore_browse_mode = False
         self._compare_restore_scene_visible = False
+        self._compare_restore_selection_photo_ids: list[str] = []
+        self._scene_selection_anchor_row: int | None = None
+        self._extending_scene_selection = False
         self._initial_folder_prompt_pending = True
         self._scene_thread: QThread | None = None
         self._scene_worker: SceneDetectionWorker | None = None

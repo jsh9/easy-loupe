@@ -177,6 +177,7 @@ class ThumbnailItemWidget(QWidget):
             frame_size: QSize,
             theme: ThemePalette,
             selected: bool = False,
+            current: bool = False,
             rejected: bool = False,
             scene_count: int | None = None,
             stacked: bool = False,
@@ -255,7 +256,9 @@ class ThumbnailItemWidget(QWidget):
             self._reserved_text_height(text_layout.spacing())
         )
         root.addWidget(text_widget)
-        self.apply_theme(theme, selected=selected, rejected=rejected)
+        self.apply_theme(
+            theme, selected=selected, rejected=rejected, current=current
+        )
 
     def _create_thumb_frame(
             self,
@@ -313,12 +316,18 @@ class ThumbnailItemWidget(QWidget):
         return self._front_image_widget.visible_region_overlay()
 
     def apply_theme(
-            self, theme: ThemePalette, *, selected: bool, rejected: bool
+            self,
+            theme: ThemePalette,
+            *,
+            selected: bool,
+            rejected: bool,
+            current: bool = False,
     ) -> None:
         """Apply theme colors and selection state to the thumbnail card."""
         frame_background = (
             theme.selected_background if selected else theme.strip_background
         )
+        border_color = theme.selected_name_color if current else 'transparent'
         name_color = (
             theme.selected_name_color if selected else theme.name_color
         )
@@ -330,6 +339,7 @@ class ThumbnailItemWidget(QWidget):
             f"""
             QWidget#thumbRoot {{
                 background-color: {frame_background};
+                border: 2px solid {border_color};
                 border-radius: 12px;
             }}
             """
