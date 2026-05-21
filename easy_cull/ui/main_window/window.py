@@ -45,6 +45,9 @@ class MainWindow(
         self.current_theme = THEMES['light']
         self._busy = False
         self._browse_mode = False
+        self._compare_mode = False
+        self._compare_restore_browse_mode = False
+        self._compare_restore_scene_visible = False
         self._initial_folder_prompt_pending = True
         self._scene_thread: QThread | None = None
         self._scene_worker: SceneDetectionWorker | None = None
@@ -56,6 +59,7 @@ class MainWindow(
         self._assignment_shortcuts: list[QShortcut] = []
         self._viewer_shortcuts: list[QShortcut] = []
         self._scene_nav_shortcuts: list[QShortcut] = []
+        self._compare_nav_shortcuts: list[QShortcut] = []
         self._browse_photo_rows: dict[str, int] = {}
         self._thumbnail_photo_rows: dict[str, int] = {}
         self._thumbnail_scene_rows: dict[str, int] = {}
@@ -66,6 +70,8 @@ class MainWindow(
         self._scene_list_scene_id: str | None = None
         self._thumbnail_overlay_photo_id: str | None = None
         self._scene_overlay_photo_id: str | None = None
+        self._metadata_undo_stack: list[object] = []
+        self._metadata_redo_stack: list[object] = []
 
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(easy_cull_icon())

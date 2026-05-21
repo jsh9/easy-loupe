@@ -42,6 +42,7 @@ photo bounds, and a tight cap would silently clip the zoom level.
 FOCUS_POINT_MARKER_SIZE = 28.0
 FOCUS_POINT_MARKER_PEN_WIDTH = 2
 FOCUS_POINT_MARKER_COLOR = '#ff3b30'
+LEFT_DRAG_THRESHOLD_PX = 4.0
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -53,6 +54,8 @@ class PhotoViewer(QGraphicsView):
     """Photo viewing widget with fit, zoom, pan, and region tracking."""
 
     visible_region_changed = Signal()
+    normalized_left_clicked = Signal(float, float)
+    image_dragged = Signal(float, float)
 
     def __init__(
             self,
@@ -106,6 +109,10 @@ class PhotoViewer(QGraphicsView):
         self._hold_zoom_enabled = hold_zoom_enabled
         self._hold_zoom_active = False
         self._last_hold_zoom_pos = QPointF()
+        self._left_press_pos = QPointF()
+        self._last_left_drag_pos = QPointF()
+        self._left_press_active = False
+        self._left_drag_active = False
         self.set_theme(THEMES['light'])
 
     def set_photo(
@@ -160,6 +167,8 @@ class PhotoViewer(QGraphicsView):
         self._current_image_key = None
         self._mode = 'fit'
         self._hold_zoom_active = False
+        self._left_press_active = False
+        self._left_drag_active = False
         self.resetTransform()
         self._update_focus_point_marker()
         self.visible_region_changed.emit()
@@ -297,6 +306,11 @@ class PhotoViewer(QGraphicsView):
         self._apply_transform()
         self._store_manual_view()
 
+    def keyboard_pan_by(self, base_dx: float, base_dy: float) -> None:
+        """Pan by a zoom-relative keyboard delta."""
+        zoom_factor = max(self.current_zoom_factor(), 0.001)
+        self.pan_by(base_dx / zoom_factor, base_dy / zoom_factor)
+
     def restore_or_focus_manual_view(self) -> None:
         """Restore the stored manual view or zoom to the focus point."""
         if self._image_size.isEmpty():
@@ -315,6 +329,46 @@ class PhotoViewer(QGraphicsView):
         self._center_point = QPointF(
             focus_center[0] * self._image_size.width(),
             focus_center[1] * self._image_size.height(),
+        )
+        self._apply_transform()
+        self._store_manual_view()
+
+    def zoom_to_focus_point(self) -> None:
+        """Zoom explicitly to the photo's autofocus point."""
+        self.zoom_to_normalized_center((
+            self._focus_point.x(),
+            self._focus_point.y(),
+        ))
+
+    def zoom_to_normalized_center(
+            self,
+            center: tuple[float, float],
+            *,
+            zoom_factor: float | None = None,
+    ) -> None:
+        """Zoom to a normalized image center without using stored views."""
+        if self._image_size.isEmpty():
+            return
+
+        self._hold_zoom_active = False
+        self._fit_scale = self._compute_fit_scale()
+        self._mode = 'manual'
+        normalized_center = (
+            max(0.0, min(1.0, center[0])),
+            max(0.0, min(1.0, center[1])),
+        )
+        target_scale = (
+            max(1.0, self._minimum_scale_for_center(normalized_center))
+            if zoom_factor is None
+            else max(
+                self._minimum_scale_for_center(normalized_center),
+                self._fit_scale * zoom_factor,
+            )
+        )
+        self._current_scale = min(self._max_scale(), target_scale)
+        self._center_point = QPointF(
+            normalized_center[0] * self._image_size.width(),
+            normalized_center[1] * self._image_size.height(),
         )
         self._apply_transform()
         self._store_manual_view()
@@ -354,6 +408,13 @@ class PhotoViewer(QGraphicsView):
     def current_zoom_factor(self) -> float:
         """Return the zoom level relative to fit-to-window scale."""
         return self._current_scale / max(self._fit_scale, 0.001)
+
+    def image_aspect_ratio(self) -> float | None:
+        """Return the loaded image width/height ratio."""
+        if self._image_size.isEmpty() or self._image_size.height() <= 0:
+            return None
+
+        return self._image_size.width() / self._image_size.height()
 
     def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802 - Qt API
         """Recompute fit or manual zoom state after a viewport resize."""
@@ -397,6 +458,17 @@ class PhotoViewer(QGraphicsView):
             event.accept()
             return
 
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and not self._image_size.isEmpty()
+        ):
+            self._left_press_pos = event.position()
+            self._last_left_drag_pos = event.position()
+            self._left_press_active = True
+            self._left_drag_active = False
+            event.accept()
+            return
+
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt API
@@ -412,6 +484,25 @@ class PhotoViewer(QGraphicsView):
             event.accept()
             return
 
+        if self._left_press_active:
+            delta_from_press = event.position() - self._left_press_pos
+            if (
+                not self._left_drag_active
+                and delta_from_press.manhattanLength()
+                >= LEFT_DRAG_THRESHOLD_PX
+            ):
+                self._left_drag_active = True
+
+            if self._left_drag_active:
+                delta = event.position() - self._last_left_drag_pos
+                self._last_left_drag_pos = event.position()
+                self.image_dragged.emit(
+                    -delta.x() / max(self._current_scale, 0.001),
+                    -delta.y() / max(self._current_scale, 0.001),
+                )
+                event.accept()
+                return
+
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt API
@@ -421,6 +512,22 @@ class PhotoViewer(QGraphicsView):
             and event.button() == Qt.MouseButton.LeftButton
         ):
             self.set_fit_view()
+            event.accept()
+            return
+
+        if (
+            self._left_press_active
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            if not self._left_drag_active:
+                normalized_point = self._normalized_point_from_viewport_pos(
+                    event.position().toPoint()
+                )
+                if normalized_point is not None:
+                    self.normalized_left_clicked.emit(*normalized_point)
+
+            self._left_press_active = False
+            self._left_drag_active = False
             event.accept()
             return
 
@@ -460,6 +567,20 @@ class PhotoViewer(QGraphicsView):
         )
         self._apply_transform_unclamped()
         return True
+
+    def _normalized_point_from_viewport_pos(
+            self, pos: object
+    ) -> tuple[float, float] | None:
+        if self._image_size.isEmpty():
+            return None
+
+        scene_pos = self.mapToScene(pos)
+        width = max(self._image_size.width(), 1)
+        height = max(self._image_size.height(), 1)
+        return (
+            max(0.0, min(1.0, scene_pos.x() / width)),
+            max(0.0, min(1.0, scene_pos.y() / height)),
+        )
 
     def _position_focus_point_marker(self) -> None:
         if self._image_size.isEmpty():

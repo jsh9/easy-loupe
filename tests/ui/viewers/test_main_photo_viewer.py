@@ -6,6 +6,7 @@ import pytest
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 
+from easy_cull.ui.main_window.build import VIEWER_KEYBOARD_PAN_STEP
 from tests.ui._helpers import (
     create_main_window_with_library,
     trigger_viewer_shortcut,
@@ -132,6 +133,67 @@ def test_main_window_viewer_shortcuts_target_split_right_pane_only(
         window.viewer.split_zoom_viewer.normalized_viewport_center()[0]
         > right_center_before[0]
     )
+
+    window.close()
+
+
+def test_main_window_keyboard_pan_step_scales_with_zoom(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify keyboard panning shrinks as zoom increases.
+
+    W/A/S/D should move the viewport by a consistent screen-feeling amount, not
+    a fixed image-space distance that becomes too large at high zoom. The split
+    assertion also protects the rule that only the zoom pane pans in split
+    view.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_8072', 'dimgray'), ('IMG_8073', 'green')],
+    )
+    window.resize(540, 420)
+    app.processEvents()
+
+    window.viewer.single_viewer.set_manual_view(4.0, (0.5, 0.5))
+    center_before = window.viewer.normalized_viewport_center()
+    window._keyboard_pan_by(1, 0)
+    center_after = window.viewer.normalized_viewport_center()
+    zoom_four_delta = center_after[0] - center_before[0]
+
+    window.viewer.single_viewer.set_manual_view(8.0, (0.5, 0.5))
+    center_before = window.viewer.normalized_viewport_center()
+    window._keyboard_pan_by(1, 0)
+    center_after = window.viewer.normalized_viewport_center()
+    zoom_eight_delta = center_after[0] - center_before[0]
+
+    assert zoom_four_delta == pytest.approx(
+        (VIEWER_KEYBOARD_PAN_STEP / 4.0) / 640
+    )
+    assert zoom_eight_delta == pytest.approx(
+        (VIEWER_KEYBOARD_PAN_STEP / 8.0) / 640
+    )
+    assert zoom_eight_delta < zoom_four_delta
+
+    window.split_mode_shortcut.activated.emit()
+    app.processEvents()
+    left_center_before = (
+        window.viewer.split_fit_viewer.normalized_viewport_center()
+    )
+    right_viewer = window.viewer.split_zoom_viewer
+    right_viewer.set_manual_view(8.0, (0.5, 0.5))
+    right_center_before = right_viewer.normalized_viewport_center()
+
+    window._keyboard_pan_by(1, 0)
+
+    assert (
+        window.viewer.split_fit_viewer.normalized_viewport_center()
+        == pytest.approx(left_center_before)
+    )
+    assert (
+        right_viewer.normalized_viewport_center()[0] - right_center_before[0]
+    ) == pytest.approx((VIEWER_KEYBOARD_PAN_STEP / 8.0) / 640)
 
     window.close()
 

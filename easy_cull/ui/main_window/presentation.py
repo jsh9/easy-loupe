@@ -90,6 +90,9 @@ class MainWindowPresentationMixin:
         if hasattr(self, 'organize_action'):
             self.organize_action.setEnabled(photo_actions_enabled)
 
+        if hasattr(self, 'undo_metadata_action'):
+            self._refresh_metadata_history_actions()
+
     def _refresh_selection_labels(self: MainWindow) -> None:
         if self.current_photo_id is None or not self.library.photos:
             self.selection_label.setText('Selection: Nothing selected')
@@ -98,12 +101,38 @@ class MainWindowPresentationMixin:
 
         photo = self.library.get_photo(self.current_photo_id)
         index = self._photo_position_by_id.get(photo.photo_id, 1)
-        self.selection_label.setText(
-            f'Selection: {photo.display_name}'
-            f' ({index}/{len(self.library.photos)})'
-        )
+        selected_count = len(self._resolved_selection_photo_ids())
+        if self._compare_mode:
+            self.selection_label.setText(
+                f'Selection: {photo.display_name}'
+                f' ({index}/{len(self.library.photos)})'
+            )
+            self.metadata_label.setText('')
+        elif selected_count > 1:
+            self.selection_label.setText(
+                f'Selection: {selected_count} photos'
+                f' ({index}/{len(self.library.photos)})'
+            )
+        else:
+            self.selection_label.setText(
+                f'Selection: {photo.display_name}'
+                f' ({index}/{len(self.library.photos)})'
+            )
+
         symbols = metadata_markup(photo)
-        self.metadata_label.setText(f'Metadata: {symbols or NO_METADATA_TEXT}')
+        if not self._compare_mode:
+            self.metadata_label.setText(
+                f'Metadata: {symbols or NO_METADATA_TEXT}'
+            )
+
+    def _refresh_compare_metadata_labels(self: MainWindow) -> None:
+        if not self._compare_mode:
+            return
+
+        self.compare_viewer.update_metadata_texts({
+            photo_id: metadata_markup(self.library.get_photo(photo_id))
+            for photo_id in self.compare_viewer.photo_ids()
+        })
 
     def _populate_thumbnail_list(
             self: MainWindow,
@@ -275,7 +304,9 @@ class MainWindowPresentationMixin:
             self.scene_list.setCurrentRow(current_row)
 
         self.scene_list.blockSignals(False)
-        self.scene_list.setVisible(not self._browse_mode)
+        self.scene_list.setVisible(
+            not self._browse_mode and not self._compare_mode
+        )
 
     def _toggle_theme_checked(
             self: MainWindow,
@@ -384,6 +415,7 @@ class MainWindowPresentationMixin:
         """
         self.open_button.setStyleSheet(button_style)
         self.detect_button.setStyleSheet(button_style)
+        self.organize_button.setStyleSheet(button_style)
         self.folder_label.setStyleSheet(label_style)
         self.selection_label.setStyleSheet(label_style)
         self.metadata_label.setStyleSheet(label_style)
@@ -421,6 +453,7 @@ class MainWindowPresentationMixin:
         self.browse_list.setStyleSheet(strip_style)
         self.scene_list.setStyleSheet(strip_style)
         self.viewer.set_theme(self.current_theme)
+        self.compare_viewer.set_theme(self.current_theme)
         self._refresh_item_styles(self.thumbnail_list)
         self._refresh_item_styles(self.browse_list)
         self._refresh_item_styles(self.scene_list)
@@ -432,19 +465,21 @@ class MainWindowPresentationMixin:
         if photo_id is None:
             return False
 
-        if (
-            list_widget is self.thumbnail_list
-            and self.library.scene_detection_done
-        ):
-            return photo_id == self._left_photo_id_for_photo(
-                self.current_photo_id
-            )
+        row: int | None
+        if list_widget is self.thumbnail_list:
+            row = self._thumbnail_row_for_photo(photo_id)
+        elif list_widget is self.browse_list:
+            row = self._browse_photo_rows.get(photo_id)
+        elif list_widget is self.scene_list:
+            row = self._scene_photo_rows.get(photo_id)
+        else:
+            row = None
 
-        current_item = list_widget.currentItem()
-        return (
-            current_item is not None
-            and current_item.data(PHOTO_ID_ROLE) == photo_id
-        )
+        if row is None:
+            return False
+
+        item = list_widget.item(row)
+        return item is not None and item.isSelected()
 
     def _refresh_item_style_for_photo_id(
             self: MainWindow, list_widget: QListWidget, photo_id: str | None
@@ -564,16 +599,26 @@ class MainWindowPresentationMixin:
             self: MainWindow, *, force_full: bool = False
     ) -> None:
         visible_region = (
-            None if self._browse_mode else self.viewer.visible_region_rect()
+            None
+            if self._browse_mode or self._compare_mode
+            else self.viewer.visible_region_rect()
         )
         thumb_photo_id = (
             None
-            if self._browse_mode or self.library.scene_detection_done
+            if (
+                self._browse_mode
+                or self._compare_mode
+                or self.library.scene_detection_done
+            )
             else self.current_photo_id
         )
         scene_photo_id = (
             self.current_photo_id
-            if not self._browse_mode and self.library.scene_detection_done
+            if (
+                not self._browse_mode
+                and not self._compare_mode
+                and self.library.scene_detection_done
+            )
             else None
         )
 
@@ -653,6 +698,8 @@ class MainWindowPresentationMixin:
             photo_actions_enabled=photo_actions_enabled
         )
         self._refresh_selection_labels()
+        if hasattr(self, 'compare_mode_shortcut'):
+            self._update_mode_shortcuts()
 
         if self.current_photo_id is None or not self.library.photos:
             self._refresh_strip_items()

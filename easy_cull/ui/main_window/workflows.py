@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QThread
 from PySide6.QtWidgets import (
@@ -28,6 +29,7 @@ from easy_cull.ui.main_window.dialogs import (
 from easy_cull.ui.theme import (
     LOAD_AND_PREVIEW_PROGRESS_MAX,
     LOAD_PROGRESS_MAX,
+    PHOTO_ID_ROLE,
 )
 from easy_cull.ui.workers import OperationWorker, SceneDetectionWorker
 
@@ -35,6 +37,15 @@ if TYPE_CHECKING:
     from easy_cull.ui.main_window.window import MainWindow
 
 ProgressCallback = Callable[[str, int], None]
+
+
+@dataclass(frozen=True)
+class MetadataEdit:
+    """In-memory undo record for a metadata assignment batch."""
+
+    field: str
+    before: dict[str, Any]
+    after: dict[str, Any]
 
 
 class MainWindowWorkflowMixin:
@@ -66,6 +77,7 @@ class MainWindowWorkflowMixin:
             return
 
         self._rebuild_loaded_views(show_progress=True)
+        self._clear_metadata_history()
         self._hide_progress()
         self.open_button.setEnabled(True)
         self._refresh_ui()
@@ -402,6 +414,7 @@ class MainWindowWorkflowMixin:
             current_folder, progress_callback=self._handle_load_progress
         )
         self._rebuild_loaded_views(show_progress=True)
+        self._clear_metadata_history()
 
     def _reload_current_folder_after_undo(self: MainWindow) -> None:
         current_folder = self.library.current_folder
@@ -412,6 +425,7 @@ class MainWindowWorkflowMixin:
             current_folder, progress_callback=self._handle_load_progress
         )
         self._rebuild_loaded_views(show_progress=True)
+        self._clear_metadata_history()
 
     def _rebuild_loaded_views(
             self: MainWindow, *, show_progress: bool = False
@@ -427,6 +441,7 @@ class MainWindowWorkflowMixin:
         self._populate_scene_list()
         self._display_current_photo()
         self._refresh_ui()
+        self._update_mode_shortcuts()
         if self._browse_mode:
             self._select_browse_item_for_current_photo()
 
@@ -463,7 +478,8 @@ class MainWindowWorkflowMixin:
         self._show_progress(message, progress)
 
     def _set_rating(self: MainWindow, rating: int | None) -> None:
-        if self.current_photo_id is None:
+        if hasattr(self, '_apply_metadata_to_selection'):
+            self._apply_metadata_to_selection('rating', rating)
             return
 
         self.library.update_metadata(
@@ -473,7 +489,8 @@ class MainWindowWorkflowMixin:
         self._after_metadata_change()
 
     def _set_color_label(self: MainWindow, color_label: str | None) -> None:
-        if self.current_photo_id is None:
+        if hasattr(self, '_apply_metadata_to_selection'):
+            self._apply_metadata_to_selection('color_label', color_label)
             return
 
         self.library.update_metadata(
@@ -485,7 +502,8 @@ class MainWindowWorkflowMixin:
         self._after_metadata_change()
 
     def _set_flag(self: MainWindow, flag: str | None) -> None:
-        if self.current_photo_id is None:
+        if hasattr(self, '_apply_metadata_to_selection'):
+            self._apply_metadata_to_selection('flag', flag)
             return
 
         self.library.update_metadata(
@@ -493,6 +511,94 @@ class MainWindowWorkflowMixin:
         )
         self.library.save_metadata()
         self._after_metadata_change()
+
+    def _apply_metadata_to_selection(
+            self: MainWindow, field: str, value: Any
+    ) -> None:
+        if self.current_photo_id is None:
+            return
+
+        if not hasattr(self.library, 'get_photo'):
+            self.library.update_metadata(
+                self.current_photo_id,
+                fields={field},
+                **{field: value},
+            )
+            self.library.save_metadata()
+            self._after_metadata_change()
+            return
+
+        photo_ids = self._resolved_selection_photo_ids()
+        if not photo_ids:
+            return
+
+        before = {
+            photo_id: getattr(self.library.get_photo(photo_id), field)
+            for photo_id in photo_ids
+        }
+        after = dict.fromkeys(photo_ids, value)
+        if before == after:
+            return
+
+        self._apply_metadata_values(field, after)
+        self._metadata_undo_stack.append(
+            MetadataEdit(field=field, before=before, after=after)
+        )
+        self._metadata_redo_stack.clear()
+        self.library.save_metadata()
+        self._after_metadata_change()
+        self._refresh_metadata_history_actions()
+
+    def _undo_metadata_edit(self: MainWindow) -> None:
+        if self._busy or not self._metadata_undo_stack:
+            return
+
+        edit = self._metadata_undo_stack.pop()
+        assert isinstance(edit, MetadataEdit)
+        self._apply_metadata_values(edit.field, edit.before)
+        self._metadata_redo_stack.append(edit)
+        self.library.save_metadata()
+        self._after_metadata_change()
+        self._refresh_metadata_history_actions()
+
+    def _redo_metadata_edit(self: MainWindow) -> None:
+        if self._busy or not self._metadata_redo_stack:
+            return
+
+        edit = self._metadata_redo_stack.pop()
+        assert isinstance(edit, MetadataEdit)
+        self._apply_metadata_values(edit.field, edit.after)
+        self._metadata_undo_stack.append(edit)
+        self.library.save_metadata()
+        self._after_metadata_change()
+        self._refresh_metadata_history_actions()
+
+    def _apply_metadata_values(
+            self: MainWindow, field: str, values: dict[str, Any]
+    ) -> None:
+        for photo_id, value in values.items():
+            self.library.update_metadata(
+                photo_id,
+                fields={field},
+                **{field: value},
+            )
+
+    def _clear_metadata_history(self: MainWindow) -> None:
+        self._metadata_undo_stack.clear()
+        self._metadata_redo_stack.clear()
+        self._refresh_metadata_history_actions()
+
+    def _refresh_metadata_history_actions(self: MainWindow) -> None:
+        enabled = not self._busy and self.menuBar().isEnabled()
+        if hasattr(self, 'undo_metadata_action'):
+            self.undo_metadata_action.setEnabled(
+                enabled and bool(self._metadata_undo_stack)
+            )
+
+        if hasattr(self, 'redo_metadata_action'):
+            self.redo_metadata_action.setEnabled(
+                enabled and bool(self._metadata_redo_stack)
+            )
 
     def _after_metadata_change(self: MainWindow) -> None:
         scroll_states = {
@@ -502,12 +608,25 @@ class MainWindowWorkflowMixin:
             self.browse_list: self._capture_scroll_state(self.browse_list),
             self.scene_list: self._capture_scroll_state(self.scene_list),
         }
+        selection_states = {
+            self.thumbnail_list: self._capture_selected_item_ids(
+                self.thumbnail_list
+            ),
+            self.browse_list: self._capture_selected_item_ids(
+                self.browse_list
+            ),
+            self.scene_list: self._capture_selected_item_ids(self.scene_list),
+        }
         self._populate_thumbnail_list(scroll_current_item_into_view=False)
         self._populate_browse_list(scroll_current_item_into_view=False)
         self._populate_scene_list()
+        for list_widget, selected_ids in selection_states.items():
+            self._restore_selected_item_ids(list_widget, selected_ids)
+
         for list_widget, scroll_state in scroll_states.items():
             self._restore_scroll_state(list_widget, scroll_state)
 
+        self._refresh_compare_metadata_labels()
         self._refresh_ui()
 
     def _set_interaction_enabled(self: MainWindow, *, enabled: bool) -> None:
@@ -523,6 +642,7 @@ class MainWindowWorkflowMixin:
         self.thumbnail_list.setEnabled(enabled)
         self.browse_list.setEnabled(enabled)
         self.scene_list.setEnabled(enabled)
+        self.compare_viewer.setEnabled(enabled)
         self.menuBar().setEnabled(enabled)
         if hasattr(self, 'open_action'):
             self.open_action.setEnabled(enabled)
@@ -535,6 +655,8 @@ class MainWindowWorkflowMixin:
 
         for action in self._assignment_actions:
             action.setEnabled(enabled)
+
+        self._refresh_metadata_history_actions()
 
     @staticmethod
     def _capture_scroll_state(
@@ -554,3 +676,28 @@ class MainWindowWorkflowMixin:
         vertical_bar = list_widget.verticalScrollBar()
         horizontal_bar.setValue(min(horizontal, horizontal_bar.maximum()))
         vertical_bar.setValue(min(vertical, vertical_bar.maximum()))
+
+    @staticmethod
+    def _capture_selected_item_ids(list_widget: QListWidget) -> set[str]:
+        selected_ids: set[str] = set()
+        for item in list_widget.selectedItems():
+            photo_id = item.data(PHOTO_ID_ROLE)
+            if photo_id is not None:
+                selected_ids.add(str(photo_id))
+
+        return selected_ids
+
+    @staticmethod
+    def _restore_selected_item_ids(
+            list_widget: QListWidget, selected_ids: set[str]
+    ) -> None:
+        if not selected_ids:
+            return
+
+        list_widget.blockSignals(True)
+        for index in range(list_widget.count()):
+            item = list_widget.item(index)
+            if item is not None:
+                item.setSelected(str(item.data(PHOTO_ID_ROLE)) in selected_ids)
+
+        list_widget.blockSignals(False)

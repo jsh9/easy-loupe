@@ -5,8 +5,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import QApplication
 
-from easy_cull.ui.theme import PHOTO_ID_ROLE
+from easy_cull.ui.theme import PHOTO_ID_ROLE, metadata_markup
+from easy_cull.ui.viewers.compare_photo_viewer import (
+    MIN_COMPARE_PHOTO_COUNT,
+    ComparePhoto,
+)
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QListWidget, QListWidgetItem
@@ -20,6 +25,9 @@ class MainWindowNavigationMixin:
 
     def _active_navigation_widget(self: MainWindow) -> QListWidget | None:
         """Return the list widget that should own keyboard navigation."""
+        if self._compare_mode:
+            return None
+
         if (
             self._browse_mode
             and self.browse_list.isVisible()
@@ -69,6 +77,27 @@ class MainWindowNavigationMixin:
         target.setFocus(Qt.OtherFocusReason)
         target.viewport().setFocus(Qt.OtherFocusReason)
 
+    def _list_selection_changed(self: MainWindow) -> None:
+        """Refresh selection-dependent presentation for multi-selection."""
+        if self._busy:
+            return
+
+        self._refresh_selection_labels()
+        sender = self.sender()
+        if sender not in {
+            self.thumbnail_list,
+            self.browse_list,
+            self.scene_list,
+        }:
+            return
+
+        for index in range(sender.count()):
+            item = sender.item(index)
+            if item is not None:
+                self._refresh_item_style_for_photo_id(
+                    sender, item.data(PHOTO_ID_ROLE)
+                )
+
     def _left_list_selection_changed(
             self: MainWindow,
             current: QListWidgetItem | None,
@@ -88,7 +117,9 @@ class MainWindowNavigationMixin:
             previous.data(PHOTO_ID_ROLE) if previous is not None else None
         )
         self.current_photo_id = str(photo_id)
-        self._display_current_photo()
+        if not self._compare_mode:
+            self._display_current_photo()
+
         if self.library.scene_detection_done:
             self._sync_scene_list_for_photo(
                 self.current_photo_id, rebuild_if_scene_changed=True
@@ -159,7 +190,9 @@ class MainWindowNavigationMixin:
             previous.data(PHOTO_ID_ROLE) if previous is not None else None
         )
         self.current_photo_id = str(photo_id)
-        self._display_current_photo()
+        if not self._compare_mode:
+            self._display_current_photo()
+
         self._sync_left_list_for_photo(
             self.current_photo_id, suppress_signals=True
         )
@@ -226,10 +259,181 @@ class MainWindowNavigationMixin:
             preserved_center=preserved_center,
         )
 
+    def _compare_active_photo_changed(self: MainWindow, photo_id: str) -> None:
+        self.current_photo_id = photo_id
+        self._refresh_selection_labels()
+
+    def _enter_compare_mode(self: MainWindow) -> None:
+        if self._compare_mode or self._busy or not self.library.photos:
+            return
+
+        photo_ids = self._resolved_selection_photo_ids(
+            limit=self.compare_viewer.photo_limit
+        )
+        if len(photo_ids) < MIN_COMPARE_PHOTO_COUNT:
+            return
+
+        self._compare_restore_browse_mode = self._browse_mode
+        self._compare_restore_scene_visible = self.scene_list.isVisible()
+        if self._browse_mode:
+            self._set_browse_mode(active=False)
+
+        compare_photos: list[ComparePhoto] = []
+        for photo_id in photo_ids:
+            photo = self.library.get_photo(photo_id)
+            compare_photos.append(
+                ComparePhoto(
+                    photo_id=photo.photo_id,
+                    image_path=self.library.get_preview_path(
+                        photo.photo_id, 'viewer'
+                    ),
+                    focus_point=photo.focus_point,
+                    display_name=photo.display_name,
+                    metadata_text=metadata_markup(photo),
+                )
+            )
+
+        self._compare_mode = True
+        self.compare_viewer.set_photos(compare_photos)
+        self.compare_viewer.lock_zoom_button.setChecked(True)
+        active_photo_id = self.compare_viewer.active_photo_id()
+        if active_photo_id is not None:
+            self.current_photo_id = active_photo_id
+
+        self.content_splitter.setVisible(True)
+        self.thumbnail_list.setVisible(False)
+        self.browse_list.setVisible(False)
+        self.scene_list.setVisible(False)
+        self.viewer_stack.setCurrentWidget(self.compare_viewer)
+        self._refresh_visible_region_overlay(force_full=True)
+        self._update_mode_shortcuts()
+        self.compare_viewer.setFocus(Qt.OtherFocusReason)
+
+    def _exit_compare_mode(
+            self: MainWindow, *, restore_previous: bool = True
+    ) -> None:
+        if not self._compare_mode:
+            return
+
+        restore_browse_mode = self._compare_restore_browse_mode
+        restore_scene_visible = self._compare_restore_scene_visible
+        compared_photo_ids = self.compare_viewer.selected_photo_ids()
+        active_photo_id = self.compare_viewer.active_photo_id()
+        if active_photo_id in compared_photo_ids:
+            self.current_photo_id = active_photo_id
+        elif compared_photo_ids:
+            self.current_photo_id = compared_photo_ids[0]
+
+        self._compare_mode = False
+        self._compare_restore_browse_mode = False
+        self._compare_restore_scene_visible = False
+        self.viewer_stack.setCurrentWidget(self.viewer)
+        self.compare_viewer.clear()
+
+        if not restore_previous:
+            self.content_splitter.setVisible(True)
+            self.thumbnail_list.setVisible(True)
+            self.browse_list.setVisible(False)
+            self.scene_list.setVisible(False)
+            self._update_mode_shortcuts()
+            return
+
+        if restore_browse_mode:
+            self._set_browse_mode(active=True)
+            self._refresh_browse_layout()
+            self._select_browse_items_for_photo_ids(compared_photo_ids)
+        else:
+            self.content_splitter.setVisible(True)
+            self.thumbnail_list.setVisible(True)
+            self.browse_list.setVisible(False)
+            if restore_scene_visible:
+                self._populate_scene_list()
+            else:
+                self.scene_list.setVisible(False)
+
+        self._refresh_ui()
+        self._refresh_visible_region_overlay(force_full=True)
+        self._update_mode_shortcuts()
+        self._restore_active_navigation_focus(defer=True)
+
+    def _resolved_selection_photo_ids(
+            self: MainWindow, *, limit: int | None = None
+    ) -> list[str]:
+        """Return active selected photo ids, expanding scene stacks."""
+        if self._compare_mode:
+            active_photo_id = self.compare_viewer.active_photo_id()
+            return [] if active_photo_id is None else [active_photo_id]
+
+        list_widget = self._selection_source_widget()
+        selected_items = sorted(
+            list_widget.selectedItems(),
+            key=list_widget.row,
+        )
+        if not selected_items and list_widget.currentItem() is not None:
+            selected_items = [list_widget.currentItem()]
+
+        resolved: list[str] = []
+        seen: set[str] = set()
+        for item in selected_items:
+            photo_id = item.data(PHOTO_ID_ROLE)
+            if photo_id is None:
+                continue
+
+            for candidate in self._photo_ids_for_selected_item(
+                list_widget, str(photo_id)
+            ):
+                if candidate in seen:
+                    continue
+
+                resolved.append(candidate)
+                seen.add(candidate)
+                if limit is not None and len(resolved) >= limit:
+                    return resolved
+
+        if not resolved and self.current_photo_id is not None:
+            resolved.append(self.current_photo_id)
+
+        return resolved
+
+    def _selection_source_widget(self: MainWindow) -> QListWidget:
+        if self._browse_mode and self.browse_list.isVisible():
+            return self.browse_list
+
+        focus_widget = QApplication.focusWidget()
+        if focus_widget in {self.scene_list, self.scene_list.viewport()}:
+            return self.scene_list
+
+        if focus_widget in {
+            self.thumbnail_list,
+            self.thumbnail_list.viewport(),
+        }:
+            return self.thumbnail_list
+
+        if self.scene_list.isVisible() and self.scene_list.selectedItems():
+            return self.scene_list
+
+        return self.thumbnail_list
+
+    def _photo_ids_for_selected_item(
+            self: MainWindow, list_widget: QListWidget, photo_id: str
+    ) -> list[str]:
+        if (
+            list_widget is self.thumbnail_list
+            and self.library.scene_detection_done
+        ):
+            scene = self._scene_for_photo_id(photo_id)
+            if scene is not None and scene.photo_ids:
+                return list(scene.photo_ids)
+
+        return [photo_id]
+
     def _set_browse_mode(self: MainWindow, *, active: bool) -> None:
         self._browse_mode = active
         self.content_splitter.setVisible(not active)
         self.browse_list.setVisible(active)
+        if not active:
+            self.thumbnail_list.setVisible(not self._compare_mode)
+
         if active:
             self.scene_list.setVisible(False)
 
@@ -253,6 +457,10 @@ class MainWindowNavigationMixin:
         self.browse_list.viewport().update()
 
     def _enter_browse_mode(self: MainWindow) -> None:
+        if self._compare_mode:
+            self._enter_browse_mode_from_compare()
+            return
+
         if self._browse_mode or not self.library.photos:
             return
 
@@ -263,6 +471,54 @@ class MainWindowNavigationMixin:
         self._select_browse_item_for_current_photo()
         self._refresh_ui()
         self.browse_list.setFocus(Qt.OtherFocusReason)
+
+    def _enter_browse_mode_from_compare(self: MainWindow) -> None:
+        compared_photo_ids = self.compare_viewer.selected_photo_ids()
+        active_photo_id = self.compare_viewer.active_photo_id()
+        if not compared_photo_ids:
+            self._exit_compare_mode()
+            self._enter_browse_mode()
+            return
+
+        self.current_photo_id = (
+            active_photo_id
+            if active_photo_id in compared_photo_ids
+            else compared_photo_ids[0]
+        )
+        self._exit_compare_mode(restore_previous=False)
+        self._populate_browse_list()
+        self._set_browse_mode(active=True)
+        self._refresh_browse_layout()
+        self._select_browse_items_for_photo_ids(compared_photo_ids)
+        self._refresh_ui()
+        self.browse_list.setFocus(Qt.OtherFocusReason)
+
+    def _select_browse_items_for_photo_ids(
+            self: MainWindow, photo_ids: list[str]
+    ) -> None:
+        selected = set(photo_ids)
+        self.browse_list.blockSignals(True)
+        self.browse_list.clearSelection()
+        current_row = self._browse_photo_rows.get(self.current_photo_id or '')
+        if current_row is not None:
+            self.browse_list.setCurrentRow(current_row)
+
+        for photo_id in photo_ids:
+            row = self._browse_photo_rows.get(photo_id)
+            if row is None:
+                continue
+
+            item = self.browse_list.item(row)
+            if item is not None:
+                item.setSelected(True)
+
+        self.browse_list.blockSignals(False)
+        for index in range(self.browse_list.count()):
+            item = self.browse_list.item(index)
+            if item is not None and item.data(PHOTO_ID_ROLE) in selected:
+                self._refresh_item_style_for_photo_id(
+                    self.browse_list, item.data(PHOTO_ID_ROLE)
+                )
 
     def _exit_browse_mode(
             self: MainWindow, *, force_fit_photo: bool = False
@@ -313,7 +569,9 @@ class MainWindowNavigationMixin:
             self.scene_list.setCurrentRow(target_row)
             self.scene_list.blockSignals(False)
 
-        self.scene_list.setVisible(not self._browse_mode)
+        self.scene_list.setVisible(
+            not self._browse_mode and not self._compare_mode
+        )
 
     def _sync_left_list_for_photo(
             self: MainWindow,

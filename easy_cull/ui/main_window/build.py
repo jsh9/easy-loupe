@@ -19,12 +19,14 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QSplitter,
+    QStackedLayout,
     QVBoxLayout,
     QWidget,
 )
 
 from easy_cull.ui.identity import APP_NAME, APP_VERSION
 from easy_cull.ui.theme import NO_METADATA_TEXT
+from easy_cull.ui.viewers.compare_photo_viewer import ComparePhotoViewer
 from easy_cull.ui.viewers.main_photo_viewer import MainPhotoViewer
 from easy_cull.ui.widgets import SceneListWidget
 
@@ -35,6 +37,8 @@ if TYPE_CHECKING:
     from PySide6.QtWidgets import QMenu
 
     from easy_cull.ui.main_window.window import MainWindow
+
+VIEWER_KEYBOARD_PAN_STEP = 120
 
 
 class MainWindowBuildMixin:
@@ -91,7 +95,7 @@ class MainWindowBuildMixin:
             self._shortcut_tooltip('Show AF point', 'F')
         )
         self.show_af_point_toggle.toggled.connect(
-            lambda checked: self.viewer.set_focus_point_marker_visible(
+            lambda checked: self._set_focus_point_marker_visible(
                 enabled=checked
             )
         )
@@ -122,7 +126,9 @@ class MainWindowBuildMixin:
         self.thumbnail_list = QListWidget()
         self.thumbnail_list.setMinimumWidth(300)
         self.thumbnail_list.setSpacing(8)
-        self.thumbnail_list.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.thumbnail_list.setSelectionMode(
+            QAbstractItemView.ExtendedSelection
+        )
         self.thumbnail_list.setVerticalScrollMode(
             QAbstractItemView.ScrollPerPixel
         )
@@ -130,16 +136,12 @@ class MainWindowBuildMixin:
         self.thumbnail_list.currentItemChanged.connect(
             self._left_list_selection_changed
         )
+        self.thumbnail_list.itemSelectionChanged.connect(
+            self._list_selection_changed
+        )
         content_splitter.addWidget(self.thumbnail_list)
 
-        self.viewer = MainPhotoViewer()
-        self.viewer.set_focus_point_marker_visible(
-            enabled=self.show_af_point_toggle.isChecked()
-        )
-        self.viewer.visible_region_changed.connect(
-            self._refresh_visible_region_overlay
-        )
-        content_splitter.addWidget(self.viewer)
+        self._build_viewer_stack(content_splitter)
         content_splitter.setStretchFactor(1, 1)
 
         self.browse_list = QListWidget()
@@ -149,7 +151,7 @@ class MainWindowBuildMixin:
         self.browse_list.setMovement(QListView.Static)
         self.browse_list.setFlow(QListWidget.LeftToRight)
         self.browse_list.setWrapping(True)
-        self.browse_list.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.browse_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.browse_list.setVerticalScrollMode(
             QAbstractItemView.ScrollPerPixel
         )
@@ -157,6 +159,9 @@ class MainWindowBuildMixin:
         self.browse_list.viewport().setFocusPolicy(Qt.StrongFocus)
         self.browse_list.currentItemChanged.connect(
             self._browse_list_selection_changed
+        )
+        self.browse_list.itemSelectionChanged.connect(
+            self._list_selection_changed
         )
         self.browse_list.itemDoubleClicked.connect(
             self._browse_item_double_clicked
@@ -169,7 +174,7 @@ class MainWindowBuildMixin:
         self.scene_list.setWrapping(False)
         self.scene_list.setSpacing(8)
         self.scene_list.setFixedHeight(215)
-        self.scene_list.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.scene_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.scene_list.setHorizontalScrollMode(
             QAbstractItemView.ScrollPerPixel
         )
@@ -177,8 +182,35 @@ class MainWindowBuildMixin:
         self.scene_list.currentItemChanged.connect(
             self._scene_list_selection_changed
         )
+        self.scene_list.itemSelectionChanged.connect(
+            self._list_selection_changed
+        )
         self.scene_list.setVisible(False)
         root.addWidget(self.scene_list)
+
+    def _build_viewer_stack(
+            self: MainWindow, content_splitter: QSplitter
+    ) -> None:
+        self.viewer = MainPhotoViewer()
+        self.viewer.set_focus_point_marker_visible(
+            enabled=self.show_af_point_toggle.isChecked()
+        )
+        self.viewer.visible_region_changed.connect(
+            self._refresh_visible_region_overlay
+        )
+        self.compare_viewer = ComparePhotoViewer()
+        self.compare_viewer.set_focus_point_marker_visible(
+            enabled=self.show_af_point_toggle.isChecked()
+        )
+        self.compare_viewer.active_photo_changed.connect(
+            self._compare_active_photo_changed
+        )
+        self.viewer_stack_widget = QWidget()
+        self.viewer_stack = QStackedLayout(self.viewer_stack_widget)
+        self.viewer_stack.setContentsMargins(0, 0, 0, 0)
+        self.viewer_stack.addWidget(self.viewer)
+        self.viewer_stack.addWidget(self.compare_viewer)
+        content_splitter.addWidget(self.viewer_stack_widget)
 
     def _build_progress_overlay(self: MainWindow) -> None:
         self.progress_overlay = QWidget(self.central_widget)
@@ -230,6 +262,27 @@ class MainWindowBuildMixin:
         self.organize_action.triggered.connect(self.open_organizer_dialog)
         self.addAction(self.organize_action)
         file_menu.addAction(self.organize_action)
+
+        self.edit_menu = self.menuBar().addMenu('&Edit')
+        self.undo_metadata_action = QAction('Undo', self)
+        self.undo_metadata_action.setShortcut(QKeySequence('Ctrl+Z'))
+        self.undo_metadata_action.setShortcutContext(Qt.WindowShortcut)
+        self.undo_metadata_action.setEnabled(False)
+        self.undo_metadata_action.triggered.connect(
+            lambda *_: None if self._busy else self._undo_metadata_edit()
+        )
+        self.addAction(self.undo_metadata_action)
+        self.edit_menu.addAction(self.undo_metadata_action)
+
+        self.redo_metadata_action = QAction('Redo', self)
+        self.redo_metadata_action.setShortcut(QKeySequence('Ctrl+Y'))
+        self.redo_metadata_action.setShortcutContext(Qt.WindowShortcut)
+        self.redo_metadata_action.setEnabled(False)
+        self.redo_metadata_action.triggered.connect(
+            lambda *_: None if self._busy else self._redo_metadata_edit()
+        )
+        self.addAction(self.redo_metadata_action)
+        self.edit_menu.addAction(self.redo_metadata_action)
 
         self.assign_photo_menu = self.menuBar().addMenu('Assign to &Photo')
 
@@ -345,25 +398,43 @@ class MainWindowBuildMixin:
         self.show_af_point_shortcut = self._make_shortcut(
             'F', self._toggle_show_af_point
         )
+        self.compare_mode_shortcut = self._make_shortcut(
+            'C', self._enter_compare_mode
+        )
+        self.exit_compare_shortcut = self._make_shortcut(
+            Qt.Key_Escape, self._exit_compare_mode
+        )
         self._assignment_shortcuts = [
             self._make_shortcut(
                 Qt.Key_QuoteLeft, lambda: self._set_color_label(None)
             )
         ]
         self._viewer_shortcuts = [
-            self._make_shortcut('-', lambda: self.viewer.zoom_step(0.8)),
-            self._make_shortcut('=', lambda: self.viewer.zoom_step(1.25)),
-            self._make_shortcut(
-                Qt.Key_Plus, lambda: self.viewer.zoom_step(1.25)
-            ),
-            self._make_shortcut('W', lambda: self.viewer.pan_by(0, -120)),
-            self._make_shortcut('A', lambda: self.viewer.pan_by(-120, 0)),
-            self._make_shortcut('S', lambda: self.viewer.pan_by(0, 120)),
-            self._make_shortcut('D', lambda: self.viewer.pan_by(120, 0)),
+            self._make_shortcut('-', lambda: self._zoom_step(0.8)),
+            self._make_shortcut('=', lambda: self._zoom_step(1.25)),
+            self._make_shortcut(Qt.Key_Plus, lambda: self._zoom_step(1.25)),
+            self._make_shortcut('W', lambda: self._keyboard_pan_by(0, -1)),
+            self._make_shortcut('A', lambda: self._keyboard_pan_by(-1, 0)),
+            self._make_shortcut('S', lambda: self._keyboard_pan_by(0, 1)),
+            self._make_shortcut('D', lambda: self._keyboard_pan_by(1, 0)),
         ]
         self._scene_nav_shortcuts = [
             self._make_shortcut(Qt.Key_Left, lambda: self._navigate_scene(-1)),
             self._make_shortcut(Qt.Key_Right, lambda: self._navigate_scene(1)),
+        ]
+        self._compare_nav_shortcuts = [
+            self._make_shortcut(
+                Qt.Key_Left, lambda: self._move_compare_selection(0, -1)
+            ),
+            self._make_shortcut(
+                Qt.Key_Right, lambda: self._move_compare_selection(0, 1)
+            ),
+            self._make_shortcut(
+                Qt.Key_Up, lambda: self._move_compare_selection(-1, 0)
+            ),
+            self._make_shortcut(
+                Qt.Key_Down, lambda: self._move_compare_selection(1, 0)
+            ),
         ]
         self._update_mode_shortcuts()
 
@@ -378,15 +449,30 @@ class MainWindowBuildMixin:
         return shortcut
 
     def _update_mode_shortcuts(self: MainWindow) -> None:
-        shortcuts_enabled = not self._browse_mode
-        self.split_mode_shortcut.setEnabled(shortcuts_enabled)
+        normal_view_shortcuts_enabled = (
+            not self._browse_mode and not self._compare_mode
+        )
+        viewer_shortcuts_enabled = not self._browse_mode or self._compare_mode
+        self.split_mode_shortcut.setEnabled(normal_view_shortcuts_enabled)
+        self.browse_mode_shortcut.setEnabled(bool(self.library.photos))
+        self.compare_mode_shortcut.setEnabled(
+            not self._compare_mode and bool(self.library.photos)
+        )
+        self.exit_compare_shortcut.setEnabled(self._compare_mode)
         for shortcut in self._viewer_shortcuts:
-            shortcut.setEnabled(shortcuts_enabled)
+            shortcut.setEnabled(viewer_shortcuts_enabled)
 
         for shortcut in self._scene_nav_shortcuts:
-            shortcut.setEnabled(shortcuts_enabled)
+            shortcut.setEnabled(normal_view_shortcuts_enabled)
+
+        for shortcut in self._compare_nav_shortcuts:
+            shortcut.setEnabled(self._compare_mode)
 
     def _handle_space_shortcut(self: MainWindow) -> None:
+        if self._compare_mode:
+            self.compare_viewer.toggle_focus_zoom()
+            return
+
         if self._browse_mode:
             self._exit_browse_mode(force_fit_photo=True)
             return
@@ -394,10 +480,52 @@ class MainWindowBuildMixin:
         self.viewer.toggle_focus_zoom()
 
     def _handle_split_shortcut(self: MainWindow) -> None:
-        if self._browse_mode:
+        if self._browse_mode or self._compare_mode:
             return
 
         self.viewer.toggle_split_view()
+
+    def _move_compare_selection(
+            self: MainWindow, row_delta: int, column_delta: int
+    ) -> None:
+        if self._compare_mode:
+            self.compare_viewer.move_active_selection(row_delta, column_delta)
+
+    def _set_focus_point_marker_visible(
+            self: MainWindow, *, enabled: bool
+    ) -> None:
+        """Apply AF marker visibility to every viewer mode."""
+        self.viewer.set_focus_point_marker_visible(enabled=enabled)
+        if hasattr(self, 'compare_viewer'):
+            self.compare_viewer.set_focus_point_marker_visible(enabled=enabled)
+
+    def _zoom_step(self: MainWindow, multiplier: float) -> None:
+        """Route zoom shortcuts to the active viewer mode."""
+        if self._compare_mode:
+            self.compare_viewer.zoom_step(multiplier)
+            return
+
+        self.viewer.zoom_step(multiplier)
+
+    def _pan_by(self: MainWindow, dx: float, dy: float) -> None:
+        """Route pan shortcuts to the active viewer mode."""
+        if self._compare_mode:
+            self.compare_viewer.pan_by(dx, dy)
+            return
+
+        self.viewer.pan_by(dx, dy)
+
+    def _keyboard_pan_by(
+            self: MainWindow, x_direction: int, y_direction: int
+    ) -> None:
+        """Pan by the keyboard step for the active viewer mode."""
+        base_dx = x_direction * VIEWER_KEYBOARD_PAN_STEP
+        base_dy = y_direction * VIEWER_KEYBOARD_PAN_STEP
+        if self._compare_mode:
+            self.compare_viewer.keyboard_pan_by(base_dx, base_dy)
+            return
+
+        self.viewer.keyboard_pan_by(base_dx, base_dy)
 
     def _toggle_show_af_point(self: MainWindow) -> None:
         """Toggle the autofocus point overlay checkbox."""

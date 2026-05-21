@@ -222,6 +222,11 @@ class MainPhotoViewer(QWidget):
         self._active_zoom_viewer().pan_by(dx, dy)
         self._sync_mode()
 
+    def keyboard_pan_by(self, base_dx: float, base_dy: float) -> None:
+        """Pan the active zoom viewer by a zoom-relative keyboard delta."""
+        self._active_zoom_viewer().keyboard_pan_by(base_dx, base_dy)
+        self._sync_mode()
+
     def _active_zoom_viewer(self) -> PhotoViewer:
         return (
             self.split_zoom_viewer
