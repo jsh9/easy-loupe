@@ -656,6 +656,10 @@ Additional assignment-menu behavior:
   coordinate through shared mutable state such as `current_photo_id`, `_busy`,
   `_scene_thread`, and `scene_detection_done`.
 - Keep README and tests aligned with any user-visible behavior change.
+- When adding inline comments, explain both what the line or block is doing and
+  why that line or block is necessary. Prefer this for non-obvious control
+  flow, state preservation, timing, or framework behavior; avoid comments that
+  only restate obvious code.
 - When adding or materially changing a test, include a docstring or nearby
   comment that states what behavior the test verifies and why the test is
   necessary, especially for regression tests covering subtle UI state,
