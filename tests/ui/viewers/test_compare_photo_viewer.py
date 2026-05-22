@@ -7,6 +7,7 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
+from easy_cull.ui.theme import THEMES
 from easy_cull.ui.viewers.compare_photo_viewer import (
     ACTIVE_COMPARE_BORDER_WIDTH,
     COMPARE_HELP_TEXT,
@@ -207,6 +208,36 @@ def test_compare_photo_viewer_shows_helper_metadata_and_active_border(
     )
     assert f'border: {ACTIVE_COMPARE_BORDER_WIDTH}px' in (
         viewer._frames[1].styleSheet()
+    )
+
+    _close_viewer(viewer, app)
+
+
+def test_compare_photo_viewer_styles_metadata_labels_created_after_theme_change(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify compare metadata labels inherit a preselected theme.
+
+    Compare panes are created after the user enters compare mode, so labels
+    must be styled as they are constructed rather than only during earlier
+    theme application.
+    """
+    create_jpeg(tmp_path / 'IMG_9004.JPG', 'dimgray')
+    create_jpeg(tmp_path / 'IMG_9005.JPG', 'blue')
+
+    app = QApplication.instance() or QApplication([])
+    viewer = ComparePhotoViewer()
+    viewer.set_theme(THEMES['dark'])
+    viewer.set_photos([
+        ComparePhoto('IMG_9004', tmp_path / 'IMG_9004.JPG', (0.5, 0.5)),
+        ComparePhoto('IMG_9005', tmp_path / 'IMG_9005.JPG', (0.5, 0.5)),
+    ])
+    app.processEvents()
+
+    assert all(
+        THEMES['dark'].meta_color in label.styleSheet()
+        for label in viewer._metadata_labels
     )
 
     _close_viewer(viewer, app)

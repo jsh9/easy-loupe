@@ -385,6 +385,48 @@ def test_compare_mode_g_from_browse_restores_all_compared_selection(
     window.close()
 
 
+def test_compare_mode_g_from_overselected_browse_restores_original_selection(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify ``G`` from compare restores the full pre-compare selection.
+
+    Compare mode caps oversized selections visually, but browse remains the
+    place for managing the whole selected set. Leaving compare with ``G`` must
+    not silently drop selected photos that were beyond the compare display cap.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[(f'IMG_972{index}', 'dimgray') for index in range(11)],
+    )
+    window.browse_mode_shortcut.activated.emit()
+    app.processEvents()
+    _select_rows(window.browse_list, range(11))
+    app.processEvents()
+
+    window.compare_mode_shortcut.activated.emit()
+    app.processEvents()
+    QTest.keyClick(window, Qt.Key_Right)
+    app.processEvents()
+
+    assert window.compare_viewer.photo_ids() == [
+        f'IMG_972{index}' for index in range(8)
+    ]
+    assert window.compare_viewer.active_photo_id() == 'IMG_9721'
+
+    window.browse_mode_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._browse_mode is True
+    assert window.current_photo_id == 'IMG_9721'
+    assert [
+        item.data(Qt.UserRole) for item in window.browse_list.selectedItems()
+    ] == [f'IMG_972{index}' for index in range(11)]
+
+    window.close()
+
+
 def test_compare_mode_esc_from_scene_restores_exact_mixed_selection(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

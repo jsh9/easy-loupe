@@ -162,6 +162,7 @@ class ComparePhotoViewer(QWidget):
         metadata_label.setObjectName('compareMetadataLabel')
         metadata_label.setAlignment(Qt.AlignCenter)
         metadata_label.setTextFormat(Qt.RichText)
+        metadata_label.setStyleSheet(self._metadata_label_style())
         metadata_label.setFixedHeight(
             metadata_label.fontMetrics().height() + 4
         )
@@ -291,20 +292,22 @@ class ComparePhotoViewer(QWidget):
             }}
             """
         )
-        metadata_style = f"""
-        QLabel#compareMetadataLabel {{
-            color: {theme.meta_color};
-            background: transparent;
-            font-weight: 600;
-        }}
-        """
         for label in self._metadata_labels:
-            label.setStyleSheet(metadata_style)
+            label.setStyleSheet(self._metadata_label_style())
 
         for viewer in self._viewers:
             viewer.set_theme(theme)
 
         self._sync_active_frame_styles()
+
+    def _metadata_label_style(self) -> str:
+        return f"""
+        QLabel#compareMetadataLabel {{
+            color: {self._theme.meta_color};
+            background: transparent;
+            font-weight: 600;
+        }}
+        """
 
     def set_fit_view(self) -> None:
         """Return every compared photo to fit view."""
