@@ -398,7 +398,9 @@ def test_compare_mode_g_from_overselected_browse_restores_original_selection(
     _, app, window = create_main_window_with_library(
         tmp_path,
         monkeypatch,
-        photo_specs=[(f'IMG_972{index}', 'dimgray') for index in range(11)],
+        photo_specs=[
+            (f'IMG_972{index:02d}', 'dimgray') for index in range(11)
+        ],
     )
     window.browse_mode_shortcut.activated.emit()
     app.processEvents()
@@ -411,18 +413,18 @@ def test_compare_mode_g_from_overselected_browse_restores_original_selection(
     app.processEvents()
 
     assert window.compare_viewer.photo_ids() == [
-        f'IMG_972{index}' for index in range(8)
+        f'IMG_972{index:02d}' for index in range(8)
     ]
-    assert window.compare_viewer.active_photo_id() == 'IMG_9721'
+    assert window.compare_viewer.active_photo_id() == 'IMG_97201'
 
     window.browse_mode_shortcut.activated.emit()
     app.processEvents()
 
     assert window._browse_mode is True
-    assert window.current_photo_id == 'IMG_9721'
+    assert window.current_photo_id == 'IMG_97201'
     assert [
         item.data(Qt.UserRole) for item in window.browse_list.selectedItems()
-    ] == [f'IMG_972{index}' for index in range(11)]
+    ] == [f'IMG_972{index:02d}' for index in range(11)]
 
     window.close()
 
