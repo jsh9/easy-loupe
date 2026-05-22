@@ -656,6 +656,10 @@ Additional assignment-menu behavior:
   coordinate through shared mutable state such as `current_photo_id`, `_busy`,
   `_scene_thread`, and `scene_detection_done`.
 - Keep README and tests aligned with any user-visible behavior change.
+- When adding or materially changing a test, include a docstring or nearby
+  comment that states what behavior the test verifies and why the test is
+  necessary, especially for regression tests covering subtle UI state,
+  threading, focus, or timing behavior.
 - When adding a feature, decide first whether it belongs in `PhotoLibrary` or
   in the UI layer. Business logic should usually land in `PhotoLibrary`, not in
   widget code.

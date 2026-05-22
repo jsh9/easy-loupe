@@ -256,7 +256,7 @@ class MainWindowWorkflowMixin:
             self.viewer.set_fit_view()
 
         self._refresh_ui()
-        self._restore_active_navigation_focus(defer=True)
+        self._restore_thumbnail_strip_focus(defer=True)
 
     def _handle_scene_failed(self: MainWindow, error: str) -> None:
         self._hide_progress()
@@ -268,6 +268,7 @@ class MainWindowWorkflowMixin:
         self._scene_worker = None
         self.detect_button.setEnabled(bool(self.library.photos))
         self._refresh_ui()
+        self._restore_thumbnail_strip_focus(defer=True)
 
     def _handle_operation_progress(
             self: MainWindow, message: str, progress: int
@@ -639,6 +640,7 @@ class MainWindowWorkflowMixin:
         self.detect_button.setEnabled(photo_actions_enabled)
         self.organize_button.setEnabled(photo_actions_enabled)
         self.theme_toggle.setEnabled(enabled)
+        self.show_af_point_toggle.setEnabled(enabled)
         self.thumbnail_list.setEnabled(enabled)
         self.browse_list.setEnabled(enabled)
         self.scene_list.setEnabled(enabled)

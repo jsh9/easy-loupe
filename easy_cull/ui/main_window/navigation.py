@@ -77,6 +77,37 @@ class MainWindowNavigationMixin:
         target.setFocus(Qt.OtherFocusReason)
         target.viewport().setFocus(Qt.OtherFocusReason)
 
+    def _restore_thumbnail_strip_focus(
+            self: MainWindow, *, defer: bool = False
+    ) -> None:
+        """Restore focus specifically to the vertical thumbnail strip."""
+        if defer:
+            QTimer.singleShot(0, self._restore_thumbnail_strip_focus)
+            return
+
+        if (
+            not self.isActiveWindow()
+            or self._busy
+            or self._background_task_active()
+            or self._compare_mode
+            or self._browse_mode
+            or not self.library.photos
+            or not self.content_splitter.isVisible()
+            or not self.thumbnail_list.isVisible()
+            or not self.thumbnail_list.isEnabled()
+            or self.thumbnail_list.count() == 0
+        ):
+            return
+
+        if self.thumbnail_list.currentRow() < 0:
+            self._select_left_item_for_current_photo(suppress_signals=True)
+
+        if self.thumbnail_list.currentRow() < 0:
+            self.thumbnail_list.setCurrentRow(0)
+
+        self.thumbnail_list.setFocus(Qt.OtherFocusReason)
+        self.thumbnail_list.viewport().setFocus(Qt.OtherFocusReason)
+
     def _list_selection_changed(self: MainWindow) -> None:
         """Refresh selection-dependent presentation for multi-selection."""
         if self._busy:
