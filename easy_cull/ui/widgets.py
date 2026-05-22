@@ -26,7 +26,9 @@ if TYPE_CHECKING:
 class _SceneNavigator(Protocol):
     """Minimal interface required by SceneListWidget."""
 
-    def navigate_global_from_scene(self, direction: int) -> bool: ...
+    def navigate_global_from_scene(
+            self, direction: int, *, extend_selection: bool = False
+    ) -> bool: ...
 
 
 class ThumbnailPreviewWidget(QWidget):
@@ -405,10 +407,14 @@ class SceneListWidget(QListWidget):
             super().keyPressEvent(event)  # type: ignore[arg-type]
             return
 
+        extend_selection = bool(event.modifiers() & _Qt.ShiftModifier)
+
         # fmt: off
         if (
             event.key() == _Qt.Key_Up
-            and self._owner.navigate_global_from_scene(-1)
+            and self._owner.navigate_global_from_scene(
+                -1, extend_selection=extend_selection
+            )
         ):
             event.accept()
             return
@@ -416,7 +422,9 @@ class SceneListWidget(QListWidget):
 
         if (
             event.key() == _Qt.Key_Down
-            and self._owner.navigate_global_from_scene(1)
+            and self._owner.navigate_global_from_scene(
+                1, extend_selection=extend_selection
+            )
         ):
             event.accept()
             return

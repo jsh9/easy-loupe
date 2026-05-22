@@ -113,13 +113,17 @@ class MainWindowNavigationMixin:
         if self._busy:
             return
 
-        self._refresh_selection_labels()
         sender = self.sender()
-        if sender not in {
+        list_widgets = {
             self.thumbnail_list,
             self.browse_list,
             self.scene_list,
-        }:
+        }
+        if sender in list_widgets:
+            self._clear_preserved_scene_selection_if_restarted(sender)
+
+        self._refresh_selection_labels()
+        if sender not in list_widgets:
             return
 
         for index in range(sender.count()):
@@ -148,7 +152,12 @@ class MainWindowNavigationMixin:
             previous.data(PHOTO_ID_ROLE) if previous is not None else None
         )
         self._scene_selection_anchor_row = None
-        self.current_photo_id = str(photo_id)
+        photo_id = str(photo_id)
+        preserved_selection_photo_ids = (
+            self._capture_scene_selection_for_left_change(photo_id)
+        )
+
+        self.current_photo_id = photo_id
         if not self._compare_mode:
             self._display_current_photo()
 
@@ -156,6 +165,10 @@ class MainWindowNavigationMixin:
             self._sync_scene_list_for_photo(
                 self.current_photo_id, rebuild_if_scene_changed=True
             )
+
+        self._restore_scene_selection_after_left_change(
+            preserved_selection_photo_ids
+        )
 
         self._refresh_selection_labels()
         self._refresh_selection_styles(
@@ -177,6 +190,7 @@ class MainWindowNavigationMixin:
         if photo_id is None or photo_id == self.current_photo_id:
             return
 
+        self._preserved_scene_selection_photo_ids.clear()
         previous_photo_id = self.current_photo_id
         self.current_photo_id = str(photo_id)
         self._sync_left_list_for_photo(
@@ -223,6 +237,8 @@ class MainWindowNavigationMixin:
         )
         if not self._extending_scene_selection:
             self._scene_selection_anchor_row = None
+            if not self._selection_extending_modifier_active():
+                self._preserved_scene_selection_photo_ids.clear()
 
         self.current_photo_id = str(photo_id)
         if not self._compare_mode:
@@ -237,6 +253,70 @@ class MainWindowNavigationMixin:
         self._refresh_selection_styles(
             previous_photo_id, self.current_photo_id, 'scene'
         )
+
+    def _clear_preserved_scene_selection_if_restarted(
+            self: MainWindow, sender: object
+    ) -> None:
+        """Clear hidden scene selections when selection starts over."""
+        if sender is self.browse_list:
+            self._preserved_scene_selection_photo_ids.clear()
+            return
+
+        if (
+            not self._extending_scene_selection
+            and not self._selection_extending_modifier_active()
+        ):
+            self._preserved_scene_selection_photo_ids.clear()
+
+    @staticmethod
+    def _selection_extending_modifier_active() -> bool:
+        """Return True while user input should preserve extended selection."""
+        modifiers = QApplication.keyboardModifiers()
+        return bool(modifiers & Qt.ShiftModifier) or bool(
+            modifiers & Qt.ControlModifier
+        )
+
+    def _capture_scene_selection_for_left_change(
+            self: MainWindow, photo_id: str
+    ) -> list[str] | None:
+        """
+        Capture exact selected photos before a left-strip move rebuilds scenes.
+
+        Moving the vertical scene-stack selection can replace ``scene_list``.
+        This snapshot keeps previously selected non-cover scene photos in the
+        logical selection even when their old horizontal rows disappear.
+        """
+        if (
+            not self.library.scene_detection_done
+            or not self._selection_extending_modifier_active()
+        ):
+            self._preserved_scene_selection_photo_ids.clear()
+            return None
+
+        photo_ids = self._resolved_scene_selection_photo_ids()
+        if photo_id not in photo_ids:
+            photo_ids.append(photo_id)
+
+        return photo_ids
+
+    def _restore_scene_selection_after_left_change(
+            self: MainWindow, photo_ids: list[str] | None
+    ) -> None:
+        if photo_ids is None:
+            return
+
+        if QApplication.keyboardModifiers() & Qt.ControlModifier:
+            # Qt applies Ctrl-click item toggling after currentItemChanged.
+            # Defer restoration so its built-in toggle cannot drop the row.
+            QTimer.singleShot(
+                0,
+                lambda captured_photo_ids=list(photo_ids): (
+                    self._restore_photo_selection(captured_photo_ids)
+                ),
+            )
+            return
+
+        self._restore_photo_selection(photo_ids)
 
     def _navigate_scene(self: MainWindow, direction: int) -> None:
         if (
@@ -265,6 +345,7 @@ class MainWindowNavigationMixin:
             return
 
         self._scene_selection_anchor_row = None
+        self._preserved_scene_selection_photo_ids.clear()
         next_row = current_row + direction
         if next_row < 0 or next_row >= self.scene_list.count():
             return
@@ -505,6 +586,8 @@ class MainWindowNavigationMixin:
             photo_ids.extend(thumbnail_photo_ids)
 
         photo_ids.extend(scene_photo_ids)
+        # Include non-cover scene photos selected before scene_list rebuilt.
+        photo_ids.extend(self._preserved_scene_selection_photo_ids)
         if not photo_ids and self.current_photo_id is not None:
             photo_ids.append(self.current_photo_id)
 
@@ -644,6 +727,7 @@ class MainWindowNavigationMixin:
             self: MainWindow, photo_ids: list[str]
     ) -> None:
         selected = set(photo_ids)
+        self._preserved_scene_selection_photo_ids.clear()
         self.browse_list.blockSignals(True)
         self.browse_list.clearSelection()
         current_row = self._browse_photo_rows.get(self.current_photo_id or '')
@@ -675,6 +759,7 @@ class MainWindowNavigationMixin:
             return
 
         if not self.library.scene_detection_done:
+            self._preserved_scene_selection_photo_ids.clear()
             selected = set(photo_ids)
             self.thumbnail_list.blockSignals(True)
             self.thumbnail_list.clearSelection()
@@ -697,6 +782,7 @@ class MainWindowNavigationMixin:
             return
 
         selected = set(photo_ids)
+        hidden_scene_photo_ids: set[str] = set()
         self.thumbnail_list.blockSignals(True)
         self.scene_list.blockSignals(True)
         self.thumbnail_list.clearSelection()
@@ -715,7 +801,12 @@ class MainWindowNavigationMixin:
                 item = self.scene_list.item(scene_row)
                 if item is not None:
                     item.setSelected(True)
+            elif left_photo_id != photo_id:
+                # The photo belongs to a different scene than the visible
+                # scene_list; keep it selected until selection resets.
+                hidden_scene_photo_ids.add(photo_id)
 
+        self._preserved_scene_selection_photo_ids = hidden_scene_photo_ids
         self.thumbnail_list.blockSignals(False)
         self.scene_list.blockSignals(False)
         self._refresh_item_styles(self.thumbnail_list)
@@ -806,7 +897,12 @@ class MainWindowNavigationMixin:
         if suppress_signals:
             self.thumbnail_list.blockSignals(False)
 
-    def navigate_global_from_scene(self: MainWindow, direction: int) -> bool:
+    def navigate_global_from_scene(
+            self: MainWindow,
+            direction: int,
+            *,
+            extend_selection: bool = False,
+    ) -> bool:
         """Move the left-strip selection relative to the current scene item."""
         if self.thumbnail_list.count() == 0:
             return False
@@ -822,7 +918,26 @@ class MainWindowNavigationMixin:
         next_row = max(
             0, min(self.thumbnail_list.count() - 1, current_row + direction)
         )
-        self.thumbnail_list.setCurrentRow(next_row)
+        if extend_selection:
+            # Shift+Up/Down from scene_list moves in the vertical strip while
+            # keeping exact in-scene selections from the previous scene.
+            selection_photo_ids = self._resolved_scene_selection_photo_ids()
+            item = self.thumbnail_list.item(next_row)
+            if item is not None:
+                photo_id = item.data(PHOTO_ID_ROLE)
+                if photo_id is not None:
+                    selection_photo_ids.append(str(photo_id))
+
+                self.thumbnail_list.selectionModel().setCurrentIndex(
+                    self.thumbnail_list.indexFromItem(item),
+                    QItemSelectionModel.SelectionFlag.NoUpdate,
+                )
+
+            self._restore_photo_selection(selection_photo_ids)
+        else:
+            self._preserved_scene_selection_photo_ids.clear()
+            self.thumbnail_list.setCurrentRow(next_row)
+
         self.thumbnail_list.setFocus(Qt.OtherFocusReason)
         return True
 
