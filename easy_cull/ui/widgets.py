@@ -327,7 +327,7 @@ class ThumbnailItemWidget(QWidget):
         frame_background = (
             theme.selected_background if selected else theme.strip_background
         )
-        border_color = theme.selected_name_color if current else 'transparent'
+        border_color = theme.current_border_color if current else 'transparent'
         name_color = (
             theme.selected_name_color if selected else theme.name_color
         )
@@ -339,7 +339,7 @@ class ThumbnailItemWidget(QWidget):
             f"""
             QWidget#thumbRoot {{
                 background-color: {frame_background};
-                border: 2px solid {border_color};
+                border: 3px solid {border_color};
                 border-radius: 12px;
             }}
             """

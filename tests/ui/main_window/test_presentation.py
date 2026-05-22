@@ -74,17 +74,19 @@ def test_current_thumbnail_has_visible_border_without_resizing_selection(
     current_widget = thumbnail_item_widget(window.thumbnail_list, 0)
     inactive_widget = thumbnail_item_widget(window.thumbnail_list, 1)
 
-    assert f'border: 2px solid {window.current_theme.selected_name_color}' in (
-        current_widget.styleSheet()
+    assert (
+        f'border: 3px solid {window.current_theme.current_border_color}'
+        in (current_widget.styleSheet())
     )
-    assert 'border: 2px solid transparent' in inactive_widget.styleSheet()
+    assert 'border: 3px solid transparent' in inactive_widget.styleSheet()
 
     window.thumbnail_list.setCurrentRow(1)
     app.processEvents()
 
-    assert 'border: 2px solid transparent' in current_widget.styleSheet()
-    assert f'border: 2px solid {window.current_theme.selected_name_color}' in (
-        inactive_widget.styleSheet()
+    assert 'border: 3px solid transparent' in current_widget.styleSheet()
+    assert (
+        f'border: 3px solid {window.current_theme.current_border_color}'
+        in (inactive_widget.styleSheet())
     )
 
     window.close()
