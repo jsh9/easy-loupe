@@ -265,9 +265,14 @@ class ComparePhotoViewer(QWidget):
     @staticmethod
     def normalized_photo_limit(limit: object) -> int:
         """Return a supported compare photo limit."""
-        try:
-            candidate = int(limit)
-        except (TypeError, ValueError):
+        if isinstance(limit, int):
+            candidate = limit
+        elif isinstance(limit, str):
+            try:
+                candidate = int(limit)
+            except ValueError:
+                return DEFAULT_COMPARE_PHOTO_LIMIT
+        else:
             return DEFAULT_COMPARE_PHOTO_LIMIT
 
         if candidate in COMPARE_PHOTO_LIMIT_OPTIONS:
