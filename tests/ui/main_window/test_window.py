@@ -254,7 +254,7 @@ def test_about_action_shows_easy_cull_version(
             ),
         )
     ]
-    assert 'Version 0.1.3' in about_calls[0][2]
+    assert 'Version 0.1.4' in about_calls[0][2]
 
     window.close()
     del app
