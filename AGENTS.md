@@ -702,6 +702,9 @@ Additional assignment-menu behavior:
   comment that states what behavior the test verifies and why the test is
   necessary, especially for regression tests covering subtle UI state,
   threading, focus, or timing behavior.
+- When multiple tests differ only by inputs and expected outputs for the same
+  behavior, prefer `pytest.mark.parametrize` with clear case IDs instead of
+  copying near-identical test bodies.
 - When adding a feature, decide first whether it belongs in `PhotoLibrary` or
   in the UI layer. Business logic should usually land in `PhotoLibrary`, not in
   widget code.

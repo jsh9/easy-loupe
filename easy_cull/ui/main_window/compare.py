@@ -1,4 +1,11 @@
-"""Compare-mode entry, exit, and active-photo helpers."""
+"""
+Compare-mode entry, exit, and active-photo helpers.
+
+This mixin is tested through ``MainWindow`` compare-mode behavior rather than
+direct unit tests. Its methods coordinate real widgets, shortcuts, selection
+state, and viewer state, so direct mixin tests would duplicate implementation
+details while missing the integration boundary users actually exercise.
+"""
 
 from __future__ import annotations
 

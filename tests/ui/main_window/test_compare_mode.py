@@ -1,3 +1,11 @@
+"""
+Behavior tests for compare-mode flows through the real ``MainWindow``.
+
+``easy_cull.ui.main_window.compare`` is intentionally covered here instead of
+with direct mixin unit tests because compare behavior is the integration of
+shortcuts, selection restoration, pane state, and metadata assignment.
+"""
+
 from __future__ import annotations
 
 import json
@@ -302,24 +310,36 @@ def test_compare_mode_g_enters_browse_with_compared_photos_selected(
     window.close()
 
 
-def test_compare_mode_esc_from_browse_restores_compared_selection(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ('exit_shortcut_attr', 'photo_prefix'),
+    [
+        pytest.param(
+            'exit_compare_shortcut', 'IMG_970', id='esc-restores-browse'
+        ),
+        pytest.param('browse_mode_shortcut', 'IMG_971', id='g-enters-browse'),
+    ],
+)
+def test_compare_mode_from_browse_restores_original_selection(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        exit_shortcut_attr: str,
+        photo_prefix: str,
 ) -> None:
     """
-    Verify ``Esc`` from compare restores the original browse selection.
+    Verify leaving compare from browse restores the selected working set.
 
-    Compare entered from browse temporarily hides the browse grid. Exiting with
-    ``Esc`` should return users to the same selected working set, not collapse
-    the selection to only the active compare photo.
+    ``Esc`` and ``G`` use different compare-exit paths, but both must preserve
+    the original browse selection and keep the active compare pane current.
+    This guards against Qt current-row updates dropping an extended selection.
     """
     _, app, window = create_main_window_with_library(
         tmp_path,
         monkeypatch,
         photo_specs=[
-            ('IMG_9700', 'dimgray'),
-            ('IMG_9701', 'blue'),
-            ('IMG_9702', 'green'),
-            ('IMG_9703', 'yellow'),
+            (f'{photo_prefix}0', 'dimgray'),
+            (f'{photo_prefix}1', 'blue'),
+            (f'{photo_prefix}2', 'green'),
+            (f'{photo_prefix}3', 'yellow'),
         ],
     )
     window.browse_mode_shortcut.activated.emit()
@@ -332,55 +352,14 @@ def test_compare_mode_esc_from_browse_restores_compared_selection(
     QTest.keyClick(window, Qt.Key_Right)
     app.processEvents()
 
-    window.exit_compare_shortcut.activated.emit()
+    getattr(window, exit_shortcut_attr).activated.emit()
     app.processEvents()
 
     assert window._browse_mode is True
-    assert window.current_photo_id == 'IMG_9701'
+    assert window.current_photo_id == f'{photo_prefix}1'
     assert [
         item.data(Qt.UserRole) for item in window.browse_list.selectedItems()
-    ] == ['IMG_9700', 'IMG_9701', 'IMG_9702']
-
-    window.close()
-
-
-def test_compare_mode_g_from_browse_restores_all_compared_selection(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """
-    Verify ``G`` from compare keeps every compared browse item selected.
-
-    Setting the current browse row after selecting items can make Qt drop one
-    item from an extended selection. This catches that ordering-sensitive bug.
-    """
-    _, app, window = create_main_window_with_library(
-        tmp_path,
-        monkeypatch,
-        photo_specs=[
-            ('IMG_9710', 'dimgray'),
-            ('IMG_9711', 'blue'),
-            ('IMG_9712', 'green'),
-            ('IMG_9713', 'yellow'),
-        ],
-    )
-    window.browse_mode_shortcut.activated.emit()
-    app.processEvents()
-    _select_rows(window.browse_list, [0, 1, 2])
-    app.processEvents()
-
-    window.compare_mode_shortcut.activated.emit()
-    app.processEvents()
-    QTest.keyClick(window, Qt.Key_Right)
-    app.processEvents()
-
-    window.browse_mode_shortcut.activated.emit()
-    app.processEvents()
-
-    assert window._browse_mode is True
-    assert window.current_photo_id == 'IMG_9711'
-    assert [
-        item.data(Qt.UserRole) for item in window.browse_list.selectedItems()
-    ] == ['IMG_9710', 'IMG_9711', 'IMG_9712']
+    ] == [f'{photo_prefix}0', f'{photo_prefix}1', f'{photo_prefix}2']
 
     window.close()
 
@@ -429,26 +408,51 @@ def test_compare_mode_g_from_overselected_browse_restores_original_selection(
     window.close()
 
 
-def test_compare_mode_esc_from_scene_restores_exact_mixed_selection(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ('exit_shortcut_attr', 'photo_prefix', 'expected_target'),
+    [
+        pytest.param(
+            'exit_compare_shortcut',
+            'IMG_980',
+            'scene',
+            id='esc-restores-scene',
+        ),
+        pytest.param(
+            'browse_mode_shortcut',
+            'IMG_981',
+            'browse',
+            id='g-enters-browse',
+        ),
+    ],
+)
+def test_compare_mode_from_scene_restores_exact_mixed_selection(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        exit_shortcut_attr: str,
+        photo_prefix: str,
+        expected_target: str,
 ) -> None:
     """
-    Verify ``Esc`` restores mixed scene-cover and in-scene selections.
+    Verify scene compare exits preserve mixed exact selections.
 
     Scene-mode selections can span the vertical scene-stack strip and the
-    horizontal in-scene strip. Compare temporarily hides both strips, so this
-    guards the exact selection set from being reduced to only the active photo.
+    horizontal in-scene strip. ``Esc`` must restore those widgets directly,
+    while ``G`` rebuilds browse mode with the same logical photo set selected.
     """
     _, app, window = create_main_window_with_library(
         tmp_path,
         monkeypatch,
         photo_specs=[
-            ('IMG_9800', 'dimgray'),
-            ('IMG_9801', 'blue'),
-            ('IMG_9802', 'green'),
-            ('IMG_9803', 'yellow'),
+            (f'{photo_prefix}0', 'dimgray'),
+            (f'{photo_prefix}1', 'blue'),
+            (f'{photo_prefix}2', 'green'),
+            (f'{photo_prefix}3', 'yellow'),
         ],
-        scene_groups=[['IMG_9800', 'IMG_9801'], ['IMG_9802'], ['IMG_9803']],
+        scene_groups=[
+            [f'{photo_prefix}0', f'{photo_prefix}1'],
+            [f'{photo_prefix}2'],
+            [f'{photo_prefix}3'],
+        ],
     )
     trigger_scene_shortcut(window, 'Shift+Right')
     app.processEvents()
@@ -456,75 +460,41 @@ def test_compare_mode_esc_from_scene_restores_exact_mixed_selection(
     app.processEvents()
 
     assert window._resolved_selection_photo_ids() == [
-        'IMG_9800',
-        'IMG_9801',
-        'IMG_9802',
+        f'{photo_prefix}0',
+        f'{photo_prefix}1',
+        f'{photo_prefix}2',
     ]
 
     window.compare_mode_shortcut.activated.emit()
     app.processEvents()
     QTest.keyClick(window, Qt.Key_Right)
     app.processEvents()
-    window.exit_compare_shortcut.activated.emit()
+    getattr(window, exit_shortcut_attr).activated.emit()
     app.processEvents()
 
-    assert window._compare_mode is False
-    assert window.scene_list.isVisible() is True
-    assert window.current_photo_id == 'IMG_9801'
-    assert [
-        item.data(Qt.UserRole)
-        for item in window.thumbnail_list.selectedItems()
-    ] == ['IMG_9800', 'IMG_9802']
-    assert [
-        item.data(Qt.UserRole) for item in window.scene_list.selectedItems()
-    ] == ['IMG_9800', 'IMG_9801']
-    assert window._resolved_selection_photo_ids() == [
-        'IMG_9800',
-        'IMG_9801',
-        'IMG_9802',
-    ]
-
-    window.close()
-
-
-def test_compare_mode_g_from_scene_restores_exact_selection_in_browse(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """
-    Verify ``G`` from scene compare selects the same exact photos in browse.
-
-    Jumping directly from compare to browse rebuilds the target grid, so this
-    catches regressions where only compared panes or only visible strip rows
-    survive the transition.
-    """
-    _, app, window = create_main_window_with_library(
-        tmp_path,
-        monkeypatch,
-        photo_specs=[
-            ('IMG_9810', 'dimgray'),
-            ('IMG_9811', 'blue'),
-            ('IMG_9812', 'green'),
-            ('IMG_9813', 'yellow'),
-        ],
-        scene_groups=[['IMG_9810', 'IMG_9811'], ['IMG_9812'], ['IMG_9813']],
-    )
-    trigger_scene_shortcut(window, 'Shift+Right')
-    app.processEvents()
-    window.thumbnail_list.item(1).setSelected(True)
-    app.processEvents()
-
-    window.compare_mode_shortcut.activated.emit()
-    app.processEvents()
-    QTest.keyClick(window, Qt.Key_Right)
-    app.processEvents()
-    window.browse_mode_shortcut.activated.emit()
-    app.processEvents()
-
-    assert window._browse_mode is True
-    assert window.current_photo_id == 'IMG_9811'
-    assert [
-        item.data(Qt.UserRole) for item in window.browse_list.selectedItems()
-    ] == ['IMG_9810', 'IMG_9811', 'IMG_9812']
+    assert window.current_photo_id == f'{photo_prefix}1'
+    if expected_target == 'browse':
+        assert window._browse_mode is True
+        assert [
+            item.data(Qt.UserRole)
+            for item in window.browse_list.selectedItems()
+        ] == [f'{photo_prefix}0', f'{photo_prefix}1', f'{photo_prefix}2']
+    else:
+        assert window._compare_mode is False
+        assert window.scene_list.isVisible() is True
+        assert [
+            item.data(Qt.UserRole)
+            for item in window.thumbnail_list.selectedItems()
+        ] == [f'{photo_prefix}0', f'{photo_prefix}2']
+        assert [
+            item.data(Qt.UserRole)
+            for item in window.scene_list.selectedItems()
+        ] == [f'{photo_prefix}0', f'{photo_prefix}1']
+        assert window._resolved_selection_photo_ids() == [
+            f'{photo_prefix}0',
+            f'{photo_prefix}1',
+            f'{photo_prefix}2',
+        ]
 
     window.close()
 

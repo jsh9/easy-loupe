@@ -1,4 +1,11 @@
-"""Selection resolution and restoration helpers for MainWindow."""
+"""
+Selection resolution and restoration helpers for MainWindow.
+
+This mixin is tested through ``MainWindow`` navigation and compare workflows
+rather than direct unit tests. Its behavior depends on live Qt list widgets,
+scene-strip state, and hidden selection preservation, so the main-window tests
+cover the meaningful contract without binding tests to the mixin extraction.
+"""
 
 from __future__ import annotations
 

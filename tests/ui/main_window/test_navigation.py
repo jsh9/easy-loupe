@@ -1,3 +1,11 @@
+"""
+Behavior tests for main-window navigation and selection workflows.
+
+``easy_cull.ui.main_window.selection`` is intentionally covered here through
+the real ``MainWindow`` because selection resolution depends on live Qt list
+widgets, scene-strip rebuilding, hidden selections, and shortcut routing.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -589,12 +597,20 @@ def test_restore_active_navigation_focus_ignores_inactive_window(
     window.close()
 
 
+@pytest.mark.parametrize(
+    'shortcut_name',
+    [
+        pytest.param('Right', id='right'),
+        pytest.param('Left', id='left'),
+    ],
+)
 def test_scene_navigation_does_nothing_when_no_scenes_detected(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
+        shortcut_name: str,
 ) -> None:
     """
-    Ignore scene navigation shortcuts until scene detection is available.
+    Ignore each scene navigation shortcut until scene detection is available.
 
     This prevents left/right arrow handling from mutating selection before the
     scene-strip workflow is active.
@@ -607,12 +623,7 @@ def test_scene_navigation_does_nothing_when_no_scenes_detected(
 
     assert window.library.scene_detection_done is False
 
-    trigger_scene_shortcut(window, 'Right')
-    app.processEvents()
-
-    assert window.current_photo_id == 'IMG_9100'
-
-    trigger_scene_shortcut(window, 'Left')
+    trigger_scene_shortcut(window, shortcut_name)
     app.processEvents()
 
     assert window.current_photo_id == 'IMG_9100'
