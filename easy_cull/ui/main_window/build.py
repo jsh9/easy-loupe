@@ -443,7 +443,8 @@ class MainWindowBuildMixin:
             self._load_compare_photo_limit(), persist=False
         )
 
-    def _settings(self: MainWindow) -> QSettings:
+    @staticmethod
+    def _settings() -> QSettings:
         return QSettings(APP_NAME, APP_NAME)
 
     def _load_compare_photo_limit(self: MainWindow) -> int:
