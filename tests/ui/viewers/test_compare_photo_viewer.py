@@ -219,9 +219,10 @@ def test_compare_photo_viewer_styles_metadata_labels_created_after_theme_change(
     """
     Verify compare metadata labels inherit a preselected theme.
 
-    Compare panes are created after the user enters compare mode, so labels
-    must be styled as they are constructed rather than only during earlier
-    theme application.
+    This makes sure that if the app theme was changed before entering Compare
+    mode, the metadata labels (such as ★ & ☆) created for the new compare panes
+    are consistent with the active theme. Otherwise, users would see dark stars
+    on a dark background or light stars on a light background.
     """
     create_jpeg(tmp_path / 'IMG_9004.JPG', 'dimgray')
     create_jpeg(tmp_path / 'IMG_9005.JPG', 'blue')
