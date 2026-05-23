@@ -10,12 +10,14 @@ from PySide6.QtWidgets import QMainWindow
 from easy_cull.core.photo_library import PhotoLibrary
 from easy_cull.ui.identity import APP_NAME, easy_cull_icon
 from easy_cull.ui.main_window.build import MainWindowBuildMixin
+from easy_cull.ui.main_window.compare import MainWindowCompareMixin
 from easy_cull.ui.main_window.navigation import (
     MainWindowNavigationMixin,
 )
 from easy_cull.ui.main_window.presentation import (
     MainWindowPresentationMixin,
 )
+from easy_cull.ui.main_window.selection import MainWindowSelectionMixin
 from easy_cull.ui.main_window.workflows import MainWindowWorkflowMixin
 from easy_cull.ui.theme import THEMES
 
@@ -32,6 +34,8 @@ if TYPE_CHECKING:
 class MainWindow(
     MainWindowBuildMixin,
     MainWindowWorkflowMixin,
+    MainWindowCompareMixin,
+    MainWindowSelectionMixin,
     MainWindowNavigationMixin,
     MainWindowPresentationMixin,
     QMainWindow,

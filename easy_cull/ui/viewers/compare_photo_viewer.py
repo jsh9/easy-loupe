@@ -46,7 +46,6 @@ class ComparePhoto:
     photo_id: str
     image_path: Path
     focus_point: tuple[float, float]
-    display_name: str = ''
     metadata_text: str = ''
 
 
@@ -215,10 +214,6 @@ class ComparePhotoViewer(QWidget):
         """Return the photo ids currently shown in compare mode."""
         return [photo.photo_id for photo in self._photos]
 
-    def selected_photo_ids(self) -> list[str]:
-        """Return all photo ids currently participating in compare."""
-        return self.photo_ids()
-
     def active_photo_id(self) -> str | None:
         """Return the active compare photo id."""
         if not self._photos:
@@ -249,7 +244,6 @@ class ComparePhotoViewer(QWidget):
                     photo_id=photo.photo_id,
                     image_path=photo.image_path,
                     focus_point=photo.focus_point,
-                    display_name=photo.display_name,
                     metadata_text=metadata_text,
                 )
             )

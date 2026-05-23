@@ -513,14 +513,6 @@ class MainWindowBuildMixin:
 
         self.viewer.zoom_step(multiplier)
 
-    def _pan_by(self: MainWindow, dx: float, dy: float) -> None:
-        """Route pan shortcuts to the active viewer mode."""
-        if self._compare_mode:
-            self.compare_viewer.pan_by(dx, dy)
-            return
-
-        self.viewer.pan_by(dx, dy)
-
     def _keyboard_pan_by(
             self: MainWindow, x_direction: int, y_direction: int
     ) -> None:

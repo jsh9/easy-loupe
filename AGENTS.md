@@ -336,21 +336,38 @@ Mode-transition summary:
 
 #### 8.1.2. View Modes And Mode Transitions
 
-- There are three user-visible presentation states:
+- There are four user-visible presentation states:
   - normal view mode with the left thumbnail strip and a single-pane viewer
   - normal view mode with the left thumbnail strip and split view
   - browse mode with the full photo grid
+  - compare mode with a capped side-by-side grid of selected photos
 - Browse mode is entered with `G` only when photos are loaded.
+- Compare mode is entered with `C` only when photos are loaded and at least two
+  photos are selected or otherwise resolvable from the current item.
 - Entering browse mode:
   - shows the browse grid
   - hides the normal content splitter
   - hides the horizontal scene strip
   - disables split/viewer/scene-navigation shortcuts
   - preserves the current photo selection
+- Entering compare mode:
+  - displays up to eight photos from the resolved current selection
+  - stores the full pre-compare selection for later restoration
+  - hides the thumbnail, browse, and scene lists
+  - makes the first compared photo current
+  - starts with locked zoom/pan enabled
 - Browse mode always shows every individual photo, even when normal view mode
   is currently using scene stacks in the left strip.
 - Pressing `Space` while in browse mode exits browse mode and forces the main
   viewer back to fit view for the current photo.
+- Pressing `Space` while in compare mode toggles every compared pane between
+  fit view and AF-centered zoom.
+- Pressing `Esc` while in compare mode restores the previous view/browse state
+  and the stored pre-compare selection.
+- Pressing `G` while in compare mode enters browse mode and restores the stored
+  pre-compare selection. If the user selected more than eight photos before
+  compare, compare shows only the capped first eight but browse restores the
+  whole original selection.
 - Exiting browse mode:
   - restores the normal content splitter
   - re-selects the appropriate item in the left strip
@@ -402,6 +419,11 @@ Mode-transition summary:
 - When scene detection is complete, the left strip represents scene stacks, so
   the selected left item is the first photo of the current scene rather than
   necessarily the exact current photo.
+- Multi-selection is preserved in thumbnail, browse, and scene workflows when
+  the user extends selection with Shift or Control.
+- In scene mode, `Shift+Left` and `Shift+Right` extend the horizontal in-scene
+  selection, while `Shift+Up` and `Shift+Down` extend across vertical
+  scene-stack rows and preserve exact hidden in-scene selections.
 - In browse mode, selecting a grid item updates the current photo and keeps the
   left strip and scene strip synchronized in the background.
 - Double-clicking a browse-grid photo exits browse mode and opens that photo in
@@ -465,6 +487,10 @@ Mode-transition summary:
   - color labels: red/yellow/green/blue with `6`-`9`, clear with `` ` ``
   - flags: pick/reject/clear with `P`, `X`, `U`
 - `Assign to Photo > Color Label > Purple` exists without a keyboard shortcut.
+- `Ctrl+Z` and `Ctrl+Y` undo and redo metadata assignment batches.
+- In compare mode, metadata shortcuts and assignment menu actions target only
+  the active compare pane, not every compared photo or the hidden restore
+  selection.
 - Metadata changes write immediately through `library.save_metadata()`.
 - Metadata-only refreshes keep the current selection and preserve the current
   scroll position in the left thumbnail strip and browse grid.
@@ -512,6 +538,9 @@ Keep these expectations intact unless intentionally redesigning the UI:
 - View mode is the vertical thumbnail strip, optional horizontal scene strip,
   and either a single-pane viewer or split view with fit-left and zoom-right
   panes.
+- Compare mode is the side-by-side selected-photo grid entered with `C`; it
+  caps display at eight photos but preserves the full original selection when
+  returning to browse or the previous mode.
 - When `Show AF point` is checked, the main viewer shows the fixed-size red AF
   point marker in fit view, manual/focus zoom, and both split-view panes.
 - First-time manual/focus zoom starts at the extracted AF point. Remembered
@@ -529,7 +558,10 @@ Keep these expectations intact unless intentionally redesigning the UI:
   labels, and pick/reject state together.
 - The menu bar includes `Assign to Photo` with rating, color-label, and flag
   assignment actions for the current selection.
+- In compare mode, the active pane is the current selection for assignment.
 - Metadata changes write immediately through `library.save_metadata()`.
+- Metadata assignment undo/redo uses `Ctrl+Z` / `Ctrl+Y` and preserves the
+  usual selection refresh behavior.
 - Metadata-only tagging refreshes must not cause implicit scroll jumps in the
   thumbnail strip or browse grid.
 - Keyboard shortcuts are part of the product behavior, not incidental
@@ -544,14 +576,20 @@ Current shortcut coverage in code includes:
 - `6`-`9`: red/yellow/green/blue color labels
 - `` ` ``: clear color label
 - `P`, `X`, `U`: picked/rejected/clear flag
+- `Ctrl+Z`, `Ctrl+Y`: undo/redo metadata assignment batches
 - `G`: enter browse mode
+- `C`: enter compare mode
+- `Esc`: exit compare mode and restore the prior selection/view state
 - `F`: toggle the `Show AF point` overlay
 - `Space`: exit browse mode into fit-to-window view mode, promote split view
-  into full zoom, or toggle focus zoom while already in single-pane view mode
+  into full zoom, toggle focus zoom while already in single-pane view mode, or
+  toggle focus zoom in compare mode
 - `\`: toggle split view while in view mode
 - `-`, `=`, `+`: zoom
 - `W`, `A`, `S`, `D`: pan the active zoomed view
-- left/right arrows: scene navigation
+- left/right arrows: scene navigation in view mode; active-pane navigation in
+  compare mode
+- up/down arrows: active-pane navigation in compare mode
 
 Additional assignment-menu behavior:
 

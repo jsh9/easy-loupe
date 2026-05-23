@@ -439,7 +439,13 @@ class PhotoViewer(QGraphicsView):
             self._store_manual_view()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt API
-        """Temporarily zoom fit-to-window views while left button is held."""
+        """
+        Start hold-zoom or arm compare click/drag signaling.
+
+        Hold-zoom needs the press position to center a temporary inspection
+        zoom, while compare mode needs the same left-button press to decide
+        later whether the gesture was a pane click or an image drag.
+        """
         if (
             self._hold_zoom_enabled
             and event.button() == Qt.MouseButton.LeftButton
@@ -472,7 +478,13 @@ class PhotoViewer(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt API
-        """Pan the temporary hold-zoom viewport without storing manual zoom."""
+        """
+        Pan hold-zoom or emit compare drag deltas after the drag threshold.
+
+        Hold-zoom moves a temporary viewport without storing manual state;
+        compare mode receives image-space drag deltas so locked panes can pan
+        together while small pointer movement still counts as a click.
+        """
         if self._hold_zoom_active:
             delta = event.position() - self._last_hold_zoom_pos
             self._last_hold_zoom_pos = event.position()
@@ -506,7 +518,13 @@ class PhotoViewer(QGraphicsView):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt API
-        """Restore fit-to-window view when temporary hold-zoom finishes."""
+        """
+        Finish hold-zoom or emit a normalized compare click.
+
+        Releasing hold-zoom restores fit view immediately. A non-drag
+        left-button release emits the normalized image point so compare mode
+        can select and optionally synchronize the clicked pane.
+        """
         if (
             self._hold_zoom_active
             and event.button() == Qt.MouseButton.LeftButton
