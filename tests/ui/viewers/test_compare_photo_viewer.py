@@ -10,8 +10,8 @@ from PySide6.QtWidgets import QApplication
 from easy_cull.ui.theme import THEMES
 from easy_cull.ui.viewers.compare_photo_viewer import (
     ACTIVE_COMPARE_BORDER_WIDTH,
-    COMPARE_PHOTO_LIMIT_OPTIONS,
     COMPARE_HELP_TEXT,
+    COMPARE_PHOTO_LIMIT_OPTIONS,
     DEFAULT_COMPARE_PHOTO_LIMIT,
     ComparePhoto,
     ComparePhotoViewer,

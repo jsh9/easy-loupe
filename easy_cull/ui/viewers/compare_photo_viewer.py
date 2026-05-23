@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPointF, Qt, Signal
-from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -22,6 +21,8 @@ from easy_cull.ui.viewers.photo_viewer import PhotoViewer
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from PySide6.QtGui import QMouseEvent
 
 DEFAULT_COMPARE_PHOTO_LIMIT = 8
 COMPARE_PHOTO_LIMIT_OPTIONS = (2, 3, 4, 6, 8, 10, 12, 16, 20)
