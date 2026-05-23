@@ -1,8 +1,11 @@
 # Change Log
 
-## [Unreleased]
+## [0.1.4] - 2026-05-23
 
 - Added
+  - Compare mode for selected photos with configurable limits, adaptive grids,
+    active-pane tagging, synchronized zoom/pan, live grid refreshes, and
+    transient in-mode guidance
   - Native `About EasyCull` menu item and dialog showing branded app details
     plus the installed package version
 - Changed

@@ -330,3 +330,46 @@ def test_photo_viewer_hold_zoom_does_not_change_remembered_manual_zoom(
     assert restored_manual_view[1] == pytest.approx(remembered_manual_view[1])
 
     viewer.close()
+
+
+def test_photo_viewer_does_not_expose_compare_gesture_api(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify the shared viewer does not own compare-only mouse gestures.
+
+    Compare panes use a dedicated subclass for click-to-recenter and
+    drag-to-pan signaling. This prevents normal single and split viewers from
+    carrying hidden compare gesture state or signals they do not use.
+    """
+    create_jpeg(tmp_path / 'IMG_7010.JPG', 'white')
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(320, 240)
+    viewer.show()
+    app.processEvents()
+    viewer.set_photo(tmp_path / 'IMG_7010.JPG', (0.5, 0.5))
+
+    assert not hasattr(viewer, 'normalized_left_clicked')
+    assert not hasattr(viewer, 'image_dragged')
+
+    QTest.mousePress(
+        viewer.viewport(),
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(160, 120),
+    )
+    QTest.mouseMove(viewer.viewport(), QPoint(120, 90))
+    QTest.mouseRelease(
+        viewer.viewport(),
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(120, 90),
+    )
+    app.processEvents()
+
+    assert not hasattr(viewer, '_left_press_active')
+    assert not hasattr(viewer, '_left_drag_active')
+
+    viewer.close()

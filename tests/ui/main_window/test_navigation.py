@@ -1,3 +1,11 @@
+"""
+Behavior tests for main-window navigation and selection workflows.
+
+``easy_cull.ui.main_window.selection`` is intentionally covered here through
+the real ``MainWindow`` because selection resolution depends on live Qt list
+widgets, scene-strip rebuilding, hidden selections, and shortcut routing.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -6,6 +14,7 @@ from typing import Never
 import pytest
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QKeyEvent
+from PySide6.QtTest import QTest
 
 import easy_cull.ui.main_window.window as main_window_module
 from tests.ui._helpers import (
@@ -29,6 +38,18 @@ def _record_method_calls(window: object, method_name: str) -> list[tuple]:
 
     setattr(window, method_name, wrapper)
     return calls
+
+
+def _ctrl_click_item(list_widget: object, row: int) -> None:
+    item = list_widget.item(row)
+    assert item is not None
+    item_rect = list_widget.visualItemRect(item)
+    QTest.mouseClick(
+        list_widget.viewport(),
+        Qt.LeftButton,
+        Qt.ControlModifier,
+        item_rect.center(),
+    )
 
 
 def test_main_window_uses_viewer_preview_for_central_image() -> None:
@@ -576,12 +597,20 @@ def test_restore_active_navigation_focus_ignores_inactive_window(
     window.close()
 
 
+@pytest.mark.parametrize(
+    'shortcut_name',
+    [
+        pytest.param('Right', id='right'),
+        pytest.param('Left', id='left'),
+    ],
+)
 def test_scene_navigation_does_nothing_when_no_scenes_detected(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
+        shortcut_name: str,
 ) -> None:
     """
-    Ignore scene navigation shortcuts until scene detection is available.
+    Ignore each scene navigation shortcut until scene detection is available.
 
     This prevents left/right arrow handling from mutating selection before the
     scene-strip workflow is active.
@@ -594,12 +623,7 @@ def test_scene_navigation_does_nothing_when_no_scenes_detected(
 
     assert window.library.scene_detection_done is False
 
-    trigger_scene_shortcut(window, 'Right')
-    app.processEvents()
-
-    assert window.current_photo_id == 'IMG_9100'
-
-    trigger_scene_shortcut(window, 'Left')
+    trigger_scene_shortcut(window, shortcut_name)
     app.processEvents()
 
     assert window.current_photo_id == 'IMG_9100'
@@ -778,5 +802,278 @@ def test_scene_list_down_crosses_scene_without_full_refresh(
         window.thumbnail_list.currentItem().data(theme_module.PHOTO_ID_ROLE)
         == 'IMG_7632'
     )
+
+    window.close()
+
+
+def test_scene_mode_shift_up_down_selects_only_scene_cover_rows(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify vertical range selection keeps scene-stack rows as cover photos.
+
+    The vertical strip represents whole scene groups, but shift-selecting those
+    rows is still an exact row selection. This prevents compare and metadata
+    actions from unexpectedly expanding a selected scene cover to every photo
+    in that group.
+    """
+    theme_module, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7640', 'dimgray'),
+            ('IMG_7641', 'green'),
+            ('IMG_7642', 'blue'),
+        ],
+        scene_groups=[['IMG_7640', 'IMG_7641'], ['IMG_7642']],
+    )
+    window.thumbnail_list.setFocus(Qt.OtherFocusReason)
+    window.thumbnail_list.viewport().setFocus(Qt.OtherFocusReason)
+
+    QTest.keyClick(window.thumbnail_list, Qt.Key_Down, Qt.ShiftModifier)
+    app.processEvents()
+
+    assert [
+        item.data(theme_module.PHOTO_ID_ROLE)
+        for item in window.thumbnail_list.selectedItems()
+    ] == ['IMG_7640', 'IMG_7642']
+    assert window._resolved_selection_photo_ids() == [
+        'IMG_7640',
+        'IMG_7642',
+    ]
+
+    window.close()
+
+
+def test_scene_mode_shift_left_right_extends_selection_inside_scene(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify horizontal range selection chooses exact in-scene photos.
+
+    Users select non-cover photos from the scene strip with shift-left/right.
+    This keeps that shortcut path distinct from vertical scene-stack selection.
+    """
+    theme_module, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7650', 'dimgray'),
+            ('IMG_7651', 'green'),
+            ('IMG_7652', 'blue'),
+        ],
+        scene_groups=[['IMG_7650', 'IMG_7651', 'IMG_7652']],
+    )
+
+    trigger_scene_shortcut(window, 'Shift+Right')
+    app.processEvents()
+    trigger_scene_shortcut(window, 'Shift+Right')
+    app.processEvents()
+
+    assert [
+        item.data(theme_module.PHOTO_ID_ROLE)
+        for item in window.scene_list.selectedItems()
+    ] == ['IMG_7650', 'IMG_7651', 'IMG_7652']
+    assert window.current_photo_id == 'IMG_7652'
+    assert window._resolved_selection_photo_ids() == [
+        'IMG_7650',
+        'IMG_7651',
+        'IMG_7652',
+    ]
+
+    window.close()
+
+
+def test_scene_mode_shift_down_from_scene_strip_preserves_mixed_selection(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Preserve exact mixed selections when shift-moving out of a scene strip.
+
+    This follows the keyboard workflow used for Compare mode: select vertical
+    scene rows, extend into a scene with Shift+Right, then keep holding Shift
+    and move down to the next vertical scene row. The in-scene photo that is no
+    longer visible must remain part of the logical selection.
+    """
+    theme_module, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7660', 'dimgray'),
+            ('IMG_7661', 'green'),
+            ('IMG_7662', 'blue'),
+            ('IMG_7663', 'yellow'),
+        ],
+        scene_groups=[
+            ['IMG_7660'],
+            ['IMG_7661', 'IMG_7662'],
+            ['IMG_7663'],
+        ],
+    )
+    window.thumbnail_list.setFocus(Qt.OtherFocusReason)
+    window.thumbnail_list.viewport().setFocus(Qt.OtherFocusReason)
+
+    QTest.keyClick(window.thumbnail_list, Qt.Key_Down, Qt.ShiftModifier)
+    app.processEvents()
+    trigger_scene_shortcut(window, 'Shift+Right')
+    app.processEvents()
+
+    assert window.current_photo_id == 'IMG_7662'
+    assert window._resolved_selection_photo_ids() == [
+        'IMG_7660',
+        'IMG_7661',
+        'IMG_7662',
+    ]
+
+    down_event = QKeyEvent(QEvent.KeyPress, Qt.Key_Down, Qt.ShiftModifier)
+    window.scene_list.keyPressEvent(down_event)
+    app.processEvents()
+
+    assert down_event.isAccepted() is True
+    assert window.current_photo_id == 'IMG_7663'
+    assert [
+        item.data(theme_module.PHOTO_ID_ROLE)
+        for item in window.thumbnail_list.selectedItems()
+    ] == ['IMG_7660', 'IMG_7661', 'IMG_7663']
+    assert [
+        item.data(theme_module.PHOTO_ID_ROLE)
+        for item in window.scene_list.selectedItems()
+    ] == ['IMG_7663']
+    assert window._resolved_selection_photo_ids() == [
+        'IMG_7660',
+        'IMG_7661',
+        'IMG_7662',
+        'IMG_7663',
+    ]
+
+    window.compare_mode_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._compare_mode is True
+    assert window.compare_viewer.photo_ids() == [
+        'IMG_7660',
+        'IMG_7661',
+        'IMG_7662',
+        'IMG_7663',
+    ]
+
+    window.close()
+
+
+def test_scene_mode_ctrl_click_preserves_hidden_scene_selection_for_compare(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Preserve in-scene Ctrl-click selections after moving to another scene row.
+
+    Ctrl-clicking a vertical thumbnail can rebuild the horizontal scene strip.
+    Non-cover photos selected in the previous strip must stay in the logical
+    selection so Compare mode receives the exact selected photos.
+    """
+    theme_module, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7670', 'dimgray'),
+            ('IMG_7671', 'green'),
+            ('IMG_7672', 'blue'),
+            ('IMG_7673', 'yellow'),
+        ],
+        scene_groups=[
+            ['IMG_7670', 'IMG_7671', 'IMG_7672'],
+            ['IMG_7673'],
+        ],
+    )
+
+    _ctrl_click_item(window.scene_list, 1)
+    app.processEvents()
+    _ctrl_click_item(window.scene_list, 2)
+    app.processEvents()
+
+    assert window._resolved_selection_photo_ids() == [
+        'IMG_7670',
+        'IMG_7671',
+        'IMG_7672',
+    ]
+
+    _ctrl_click_item(window.thumbnail_list, 1)
+    app.processEvents()
+
+    assert window.current_photo_id == 'IMG_7673'
+    assert [
+        item.data(theme_module.PHOTO_ID_ROLE)
+        for item in window.thumbnail_list.selectedItems()
+    ] == ['IMG_7670', 'IMG_7673']
+    assert [
+        item.data(theme_module.PHOTO_ID_ROLE)
+        for item in window.scene_list.selectedItems()
+    ] == ['IMG_7673']
+    assert window._resolved_selection_photo_ids() == [
+        'IMG_7670',
+        'IMG_7671',
+        'IMG_7672',
+        'IMG_7673',
+    ]
+
+    window.compare_mode_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._compare_mode is True
+    assert window.compare_viewer.photo_ids() == [
+        'IMG_7670',
+        'IMG_7671',
+        'IMG_7672',
+        'IMG_7673',
+    ]
+
+    window.close()
+
+
+def test_scene_mode_ctrl_click_then_shift_down_preserves_hidden_selection(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Preserve Ctrl-clicked in-scene photos through later Shift navigation.
+
+    This covers the hybrid selection workflow where mouse and keyboard
+    extension are mixed before entering Compare mode.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7680', 'dimgray'),
+            ('IMG_7681', 'green'),
+            ('IMG_7682', 'blue'),
+        ],
+        scene_groups=[
+            ['IMG_7680', 'IMG_7681'],
+            ['IMG_7682'],
+        ],
+    )
+
+    _ctrl_click_item(window.scene_list, 1)
+    app.processEvents()
+
+    down_event = QKeyEvent(QEvent.KeyPress, Qt.Key_Down, Qt.ShiftModifier)
+    window.scene_list.keyPressEvent(down_event)
+    app.processEvents()
+
+    assert window.current_photo_id == 'IMG_7682'
+    assert window._resolved_selection_photo_ids() == [
+        'IMG_7680',
+        'IMG_7681',
+        'IMG_7682',
+    ]
+
+    window.compare_mode_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._compare_mode is True
+    assert window.compare_viewer.photo_ids() == [
+        'IMG_7680',
+        'IMG_7681',
+        'IMG_7682',
+    ]
 
     window.close()

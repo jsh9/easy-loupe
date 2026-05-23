@@ -188,13 +188,15 @@ build keeps a terminal attached so startup errors include a normal traceback.
 
 - Opens folders through the native desktop folder picker.
 - Groups JPEG and RAW files by shared filename stem.
-- Shows two primary UI states: browse mode for the full-grid thumbnail view,
-  and view mode for the vertical thumbnail strip, central photo viewer,
-  optional split view, and scene strip after scene detection.
+- Shows view mode, browse mode, and compare mode: view mode uses the vertical
+  thumbnail strip, central photo viewer, optional split view, and scene strip;
+  browse mode shows a full-photo grid; compare mode displays up to the
+  configured number of selected photos side by side.
 - Supports scene detection that rebuilds the left strip into scene stacks while
   keeping browse mode as a full per-photo grid.
-- Supports keyboard-based ratings, color labels, picked/reject flags, and an
-  `Assign to Photo` menu for the current selection.
+- Supports multi-selection plus keyboard-based ratings, color labels,
+  picked/reject flags, metadata undo/redo, and an `Assign to Photo` menu for
+  the current selection.
 - Supports an `Organize Photos` workflow from the top bar, File menu, or
   `Ctrl+Shift+E` to either reorganize files by one tag criterion or write
   shared XMP sidecars for Lightroom/Capture One style metadata exchange, then
@@ -228,12 +230,25 @@ build keeps a terminal attached so startup errors include a normal traceback.
 - `Split view` is an alternate view-mode layout with a fit-view pane on the
   left and a zoom/focus pane on the right.
 - `Browse mode` is the full-photo grid view.
+- `Compare mode` is a side-by-side inspection grid entered from the current
+  selection. It displays up to the configured compare limit, tracks one active
+  pane for tagging, and can lock zoom/pan across panes. The default limit is 8
+  photos, configurable from `Compare > Limit` with options 2, 3, 4, 6, 8, 10,
+  12, 16, and 20.
 
 Common transitions:
 
 - Press `G` to enter browse mode from normal view mode.
+- Press `C` to enter compare mode for the current selection when at least two
+  photos are selected.
+- Press `Esc` in compare mode to restore the previous view or browse selection.
+- Press `G` in compare mode to enter browse mode with the original pre-compare
+  selection restored. If more photos were selected than the configured compare
+  limit, compare displays only the capped set, but browse restores the full
+  original selection.
 - Press `Space` in browse mode to return to single-pane fit view for the
   current photo.
+- Press `Space` in compare mode to toggle focus zoom for the compared panes.
 - Press `Space` in single-pane fit view to enter manual/focus zoom.
 - Press `Space` in single-pane manual view to return to fit view.
 - Press `\` in normal view mode to toggle split view on or off.
@@ -255,15 +270,23 @@ Common transitions:
 - Color labels: `6` red, `7` yellow, `8` green, `9` blue, `` ` `` clears, and
   purple is available from `Assign to Photo > Color Label`
 - Flags: `P` pick, `X` reject, `U` clear
+- Metadata history: `Ctrl+Z` undoes the last metadata assignment batch,
+  `Ctrl+Y` redoes it
 - Organizer: `Ctrl+Shift+E` opens the organizer/XMP dialog
-- Browse and view mode: `G` enters browse mode, `Space` exits browse mode into
-  fit-to-window view mode, promotes split view into full zoom, or toggles focus
-  zoom while already in single-pane view mode, and double-clicking a browse
-  thumbnail opens that photo in fit-to-window view mode
-- Zoom and pan in view mode: `\` toggles split view, `-` zooms out, `=` / `+`
-  zoom in, `W/A/S/D` pan the active zoomed view, the strip thumbnail overlay
-  tracks the current visible region while zoomed, and left/right arrows move
-  within the current scene
+- Browse, view, and compare mode: `G` enters browse mode, `C` enters compare
+  mode, `Esc` exits compare mode, `Space` exits browse mode into fit-to-window
+  view mode, promotes split view into full zoom, toggles focus zoom in
+  single-pane view mode, or toggles compare focus zoom, and double-clicking a
+  browse thumbnail opens that photo in fit-to-window view mode
+- Selection: use normal extended-selection gestures in the thumbnail and browse
+  lists; after scene detection, `Shift+Left` / `Shift+Right` extends the
+  horizontal scene-strip selection and `Shift+Up` / `Shift+Down` extends across
+  scene-stack rows
+- Zoom and pan: `\` toggles split view, `-` zooms out, `=` / `+` zoom in,
+  `W/A/S/D` pan the active zoomed view or compare pane set, the strip thumbnail
+  overlay tracks the current visible region while zoomed, left/right arrows
+  move within the current scene in view mode, and arrow keys move the active
+  pane in compare mode
 
 ## 6. Metadata File
 

@@ -55,6 +55,43 @@ def test_main_window_thumbnail_list_shows_visible_region_for_zoomed_photo(
     window.close()
 
 
+def test_current_thumbnail_has_visible_border_without_resizing_selection(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify the current thumbnail gets a border while other rows reserve space.
+
+    Multi-selected thumbnails already use a shaded background. The extra border
+    identifies the current photo, and a transparent border on inactive rows
+    prevents layout shifts as the current item changes.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_8330', 'dimgray'), ('IMG_8331', 'blue')],
+    )
+
+    current_widget = thumbnail_item_widget(window.thumbnail_list, 0)
+    inactive_widget = thumbnail_item_widget(window.thumbnail_list, 1)
+
+    assert (
+        f'border: 3px solid {window.current_theme.current_border_color}'
+        in (current_widget.styleSheet())
+    )
+    assert 'border: 3px solid transparent' in inactive_widget.styleSheet()
+
+    window.thumbnail_list.setCurrentRow(1)
+    app.processEvents()
+
+    assert 'border: 3px solid transparent' in current_widget.styleSheet()
+    assert (
+        f'border: 3px solid {window.current_theme.current_border_color}'
+        in (inactive_widget.styleSheet())
+    )
+
+    window.close()
+
+
 def test_main_window_scene_mode_shows_visible_region_on_horizontal_strip_only(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

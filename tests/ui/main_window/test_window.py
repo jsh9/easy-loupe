@@ -2,12 +2,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import QSettings
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 import easy_cull.ui.identity as identity_module
+import easy_cull.ui.main_window.build as build_module
 import easy_cull.ui.main_window.window as main_window_module
 import easy_cull.ui.theme as theme_module
+from easy_cull.ui.viewers.compare_photo_viewer import (
+    COMPARE_PHOTO_LIMIT_OPTIONS,
+    DEFAULT_COMPARE_PHOTO_LIMIT,
+)
 from tests.ui._helpers import create_main_window_with_library
 
 if TYPE_CHECKING:
@@ -36,6 +42,16 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:
         == 'Ctrl+Shift+E'
     )
     assert window.organize_action.isEnabled() is False
+    assert window.history_menu.title() == '&History'
+    assert window.compare_menu.title() == '&Compare'
+    assert window.compare_limit_menu.title() == '&Limit'
+    assert list(window.compare_limit_actions) == list(
+        COMPARE_PHOTO_LIMIT_OPTIONS
+    )
+    assert window.compare_limit_actions[
+        DEFAULT_COMPARE_PHOTO_LIMIT
+    ].isChecked()
+    assert window.compare_viewer.photo_limit == DEFAULT_COMPARE_PHOTO_LIMIT
     assert window.assign_photo_menu.title() == 'Assign to &Photo'
     assert window.help_menu.title() == '&Help'
     assert window.about_action.text() == 'About EasyCull'
@@ -157,6 +173,60 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:
     del app
 
 
+def test_main_window_compare_limit_menu_persists_selection() -> None:
+    """
+    Verify the View menu updates and restores the compare photo limit.
+
+    Compare limit is a user preference rather than folder metadata, so it is
+    stored in QSettings and restored for the next main-window instance.
+    """
+    app = QApplication.instance() or QApplication([])
+    settings = QSettings(identity_module.APP_NAME, identity_module.APP_NAME)
+    window = main_window_module.MainWindow()
+
+    window.compare_limit_actions[12].trigger()
+
+    assert window.compare_viewer.photo_limit == 12
+    assert window.compare_limit_actions[12].isChecked() is True
+    assert (
+        int(settings.value(build_module.COMPARE_PHOTO_LIMIT_SETTINGS_KEY))
+        == 12
+    )
+
+    window.close()
+
+    restored_window = main_window_module.MainWindow()
+
+    assert restored_window.compare_viewer.photo_limit == 12
+    assert restored_window.compare_limit_actions[12].isChecked() is True
+
+    restored_window.close()
+    del app
+
+
+def test_main_window_invalid_stored_compare_limit_uses_default() -> None:
+    """
+    Verify invalid persisted compare limits fall back to the default.
+
+    This protects startup from stale or manually edited QSettings values that
+    are not part of the supported discrete compare-limit options.
+    """
+    app = QApplication.instance() or QApplication([])
+    settings = QSettings(identity_module.APP_NAME, identity_module.APP_NAME)
+    settings.setValue(build_module.COMPARE_PHOTO_LIMIT_SETTINGS_KEY, 9)
+    settings.sync()
+
+    window = main_window_module.MainWindow()
+
+    assert window.compare_viewer.photo_limit == DEFAULT_COMPARE_PHOTO_LIMIT
+    assert window.compare_limit_actions[
+        DEFAULT_COMPARE_PHOTO_LIMIT
+    ].isChecked()
+
+    window.close()
+    del app
+
+
 def test_about_action_shows_easy_cull_version(
         monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -184,7 +254,7 @@ def test_about_action_shows_easy_cull_version(
             ),
         )
     ]
-    assert 'Version 0.1.3' in about_calls[0][2]
+    assert 'Version 0.1.4' in about_calls[0][2]
 
     window.close()
     del app

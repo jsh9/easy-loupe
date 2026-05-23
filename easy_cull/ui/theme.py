@@ -42,6 +42,7 @@ class ThemePalette:
     meta_color: str
     selected_name_color: str
     selected_meta_color: str
+    current_border_color: str
     badge_background: str
     badge_text_color: str
 
@@ -60,6 +61,7 @@ THEMES = {
         meta_color='#c7d1db',
         selected_name_color='#101317',
         selected_meta_color='#20262d',
+        current_border_color='#8f98a2',
         badge_background='rgba(45, 166, 78, 230)',
         badge_text_color='#ffffff',
     ),
@@ -76,6 +78,7 @@ THEMES = {
         meta_color='#4f5a66',
         selected_name_color='#f5f7f9',
         selected_meta_color='#f0f3f6',
+        current_border_color='#343b44',
         badge_background='rgba(45, 166, 78, 230)',
         badge_text_color='#ffffff',
     ),

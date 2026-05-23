@@ -26,7 +26,9 @@ if TYPE_CHECKING:
 class _SceneNavigator(Protocol):
     """Minimal interface required by SceneListWidget."""
 
-    def navigate_global_from_scene(self, direction: int) -> bool: ...
+    def navigate_global_from_scene(
+            self, direction: int, *, extend_selection: bool = False
+    ) -> bool: ...
 
 
 class ThumbnailPreviewWidget(QWidget):
@@ -177,6 +179,7 @@ class ThumbnailItemWidget(QWidget):
             frame_size: QSize,
             theme: ThemePalette,
             selected: bool = False,
+            current: bool = False,
             rejected: bool = False,
             scene_count: int | None = None,
             stacked: bool = False,
@@ -255,7 +258,9 @@ class ThumbnailItemWidget(QWidget):
             self._reserved_text_height(text_layout.spacing())
         )
         root.addWidget(text_widget)
-        self.apply_theme(theme, selected=selected, rejected=rejected)
+        self.apply_theme(
+            theme, selected=selected, rejected=rejected, current=current
+        )
 
     def _create_thumb_frame(
             self,
@@ -313,12 +318,18 @@ class ThumbnailItemWidget(QWidget):
         return self._front_image_widget.visible_region_overlay()
 
     def apply_theme(
-            self, theme: ThemePalette, *, selected: bool, rejected: bool
+            self,
+            theme: ThemePalette,
+            *,
+            selected: bool,
+            rejected: bool,
+            current: bool = False,
     ) -> None:
         """Apply theme colors and selection state to the thumbnail card."""
         frame_background = (
             theme.selected_background if selected else theme.strip_background
         )
+        border_color = theme.current_border_color if current else 'transparent'
         name_color = (
             theme.selected_name_color if selected else theme.name_color
         )
@@ -330,6 +341,7 @@ class ThumbnailItemWidget(QWidget):
             f"""
             QWidget#thumbRoot {{
                 background-color: {frame_background};
+                border: 3px solid {border_color};
                 border-radius: 12px;
             }}
             """
@@ -395,10 +407,14 @@ class SceneListWidget(QListWidget):
             super().keyPressEvent(event)  # type: ignore[arg-type]
             return
 
+        extend_selection = bool(event.modifiers() & _Qt.ShiftModifier)
+
         # fmt: off
         if (
             event.key() == _Qt.Key_Up
-            and self._owner.navigate_global_from_scene(-1)
+            and self._owner.navigate_global_from_scene(
+                -1, extend_selection=extend_selection
+            )
         ):
             event.accept()
             return
@@ -406,7 +422,9 @@ class SceneListWidget(QListWidget):
 
         if (
             event.key() == _Qt.Key_Down
-            and self._owner.navigate_global_from_scene(1)
+            and self._owner.navigate_global_from_scene(
+                1, extend_selection=extend_selection
+            )
         ):
             event.accept()
             return

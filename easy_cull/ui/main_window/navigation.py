@@ -1,10 +1,10 @@
-"""Selection, browse-mode, and current-photo navigation helpers."""
+"""Browse-mode and current-photo navigation helpers."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QItemSelectionModel, Qt, QTimer
 
 from easy_cull.ui.theme import PHOTO_ID_ROLE
 
@@ -16,10 +16,13 @@ if TYPE_CHECKING:
 
 
 class MainWindowNavigationMixin:
-    """Navigation and selection handlers for MainWindow."""
+    """Browse, scene, focus, and current-photo handlers for MainWindow."""
 
     def _active_navigation_widget(self: MainWindow) -> QListWidget | None:
         """Return the list widget that should own keyboard navigation."""
+        if self._compare_mode:
+            return None
+
         if (
             self._browse_mode
             and self.browse_list.isVisible()
@@ -69,6 +72,62 @@ class MainWindowNavigationMixin:
         target.setFocus(Qt.OtherFocusReason)
         target.viewport().setFocus(Qt.OtherFocusReason)
 
+    def _restore_thumbnail_strip_focus(
+            self: MainWindow, *, defer: bool = False
+    ) -> None:
+        """Restore focus specifically to the vertical thumbnail strip."""
+        if defer:
+            QTimer.singleShot(0, self._restore_thumbnail_strip_focus)
+            return
+
+        if (
+            not self.isActiveWindow()
+            or self._busy
+            or self._background_task_active()
+            or self._compare_mode
+            or self._browse_mode
+            or not self.library.photos
+            or not self.content_splitter.isVisible()
+            or not self.thumbnail_list.isVisible()
+            or not self.thumbnail_list.isEnabled()
+            or self.thumbnail_list.count() == 0
+        ):
+            return
+
+        if self.thumbnail_list.currentRow() < 0:
+            self._select_left_item_for_current_photo(suppress_signals=True)
+
+        if self.thumbnail_list.currentRow() < 0:
+            self.thumbnail_list.setCurrentRow(0)
+
+        self.thumbnail_list.setFocus(Qt.OtherFocusReason)
+        self.thumbnail_list.viewport().setFocus(Qt.OtherFocusReason)
+
+    def _list_selection_changed(self: MainWindow) -> None:
+        """Refresh selection-dependent presentation for multi-selection."""
+        if self._busy:
+            return
+
+        sender = self.sender()
+        list_widgets = {
+            self.thumbnail_list,
+            self.browse_list,
+            self.scene_list,
+        }
+        if sender in list_widgets:
+            self._clear_preserved_scene_selection_if_restarted(sender)
+
+        self._refresh_selection_labels()
+        if sender not in list_widgets:
+            return
+
+        for index in range(sender.count()):
+            item = sender.item(index)
+            if item is not None:
+                self._refresh_item_style_for_photo_id(
+                    sender, item.data(PHOTO_ID_ROLE)
+                )
+
     def _left_list_selection_changed(
             self: MainWindow,
             current: QListWidgetItem | None,
@@ -87,12 +146,24 @@ class MainWindowNavigationMixin:
         previous_photo_id = (
             previous.data(PHOTO_ID_ROLE) if previous is not None else None
         )
-        self.current_photo_id = str(photo_id)
-        self._display_current_photo()
+        self._scene_selection_anchor_row = None
+        photo_id = str(photo_id)
+        preserved_selection_photo_ids = (
+            self._capture_scene_selection_for_left_change(photo_id)
+        )
+
+        self.current_photo_id = photo_id
+        if not self._compare_mode:
+            self._display_current_photo()
+
         if self.library.scene_detection_done:
             self._sync_scene_list_for_photo(
                 self.current_photo_id, rebuild_if_scene_changed=True
             )
+
+        self._restore_scene_selection_after_left_change(
+            preserved_selection_photo_ids
+        )
 
         self._refresh_selection_labels()
         self._refresh_selection_styles(
@@ -114,6 +185,7 @@ class MainWindowNavigationMixin:
         if photo_id is None or photo_id == self.current_photo_id:
             return
 
+        self._preserved_scene_selection_photo_ids.clear()
         previous_photo_id = self.current_photo_id
         self.current_photo_id = str(photo_id)
         self._sync_left_list_for_photo(
@@ -158,10 +230,19 @@ class MainWindowNavigationMixin:
         previous_photo_id = (
             previous.data(PHOTO_ID_ROLE) if previous is not None else None
         )
+        if not self._extending_scene_selection:
+            self._scene_selection_anchor_row = None
+            if not self._selection_extending_modifier_active():
+                self._preserved_scene_selection_photo_ids.clear()
+
         self.current_photo_id = str(photo_id)
-        self._display_current_photo()
+        if not self._compare_mode:
+            self._display_current_photo()
+
         self._sync_left_list_for_photo(
-            self.current_photo_id, suppress_signals=True
+            self.current_photo_id,
+            suppress_signals=True,
+            preserve_selection=True,
         )
         self._refresh_selection_labels()
         self._refresh_selection_styles(
@@ -194,11 +275,53 @@ class MainWindowNavigationMixin:
         if current_row < 0:
             return
 
+        self._scene_selection_anchor_row = None
+        self._preserved_scene_selection_photo_ids.clear()
         next_row = current_row + direction
         if next_row < 0 or next_row >= self.scene_list.count():
             return
 
         self.scene_list.setCurrentRow(next_row)
+        self.scene_list.setFocus(Qt.OtherFocusReason)
+
+    def _extend_scene_selection(self: MainWindow, direction: int) -> None:
+        if (
+            not self.library.scene_detection_done
+            or self.current_photo_id is None
+            or self.scene_list.count() == 0
+        ):
+            return
+
+        current_row = self.scene_list.currentRow()
+        if current_row < 0:
+            current_row = self._scene_photo_rows.get(self.current_photo_id, -1)
+
+        if current_row < 0:
+            return
+
+        if self._scene_selection_anchor_row is None:
+            self._scene_selection_anchor_row = current_row
+
+        next_row = current_row + direction
+        if next_row < 0 or next_row >= self.scene_list.count():
+            return
+
+        self._extending_scene_selection = True
+        self.scene_list.setCurrentRow(next_row)
+        self._extending_scene_selection = False
+
+        first_row = min(self._scene_selection_anchor_row, next_row)
+        last_row = max(self._scene_selection_anchor_row, next_row)
+        self.scene_list.blockSignals(True)
+        self.scene_list.clearSelection()
+        for row in range(first_row, last_row + 1):
+            item = self.scene_list.item(row)
+            if item is not None:
+                item.setSelected(True)
+
+        self.scene_list.blockSignals(False)
+        self._refresh_selection_labels()
+        self._refresh_item_styles(self.scene_list)
         self.scene_list.setFocus(Qt.OtherFocusReason)
 
     def _display_current_photo(
@@ -230,6 +353,9 @@ class MainWindowNavigationMixin:
         self._browse_mode = active
         self.content_splitter.setVisible(not active)
         self.browse_list.setVisible(active)
+        if not active:
+            self.thumbnail_list.setVisible(not self._compare_mode)
+
         if active:
             self.scene_list.setVisible(False)
 
@@ -253,6 +379,10 @@ class MainWindowNavigationMixin:
         self.browse_list.viewport().update()
 
     def _enter_browse_mode(self: MainWindow) -> None:
+        if self._compare_mode:
+            self._enter_browse_mode_from_compare()
+            return
+
         if self._browse_mode or not self.library.photos:
             return
 
@@ -261,6 +391,31 @@ class MainWindowNavigationMixin:
         self._refresh_browse_layout()
         QTimer.singleShot(0, self._refresh_browse_layout)
         self._select_browse_item_for_current_photo()
+        self._refresh_ui()
+        self.browse_list.setFocus(Qt.OtherFocusReason)
+
+    def _enter_browse_mode_from_compare(self: MainWindow) -> None:
+        compared_photo_ids = self.compare_viewer.photo_ids()
+        restore_photo_ids = (
+            list(self._compare_restore_selection_photo_ids)
+            or compared_photo_ids
+        )
+        active_photo_id = self.compare_viewer.active_photo_id()
+        if not restore_photo_ids:
+            self._exit_compare_mode()
+            self._enter_browse_mode()
+            return
+
+        self.current_photo_id = (
+            active_photo_id
+            if active_photo_id in restore_photo_ids
+            else restore_photo_ids[0]
+        )
+        self._exit_compare_mode(restore_previous=False)
+        self._populate_browse_list()
+        self._set_browse_mode(active=True)
+        self._refresh_browse_layout()
+        self._select_browse_items_for_photo_ids(restore_photo_ids)
         self._refresh_ui()
         self.browse_list.setFocus(Qt.OtherFocusReason)
 
@@ -313,7 +468,9 @@ class MainWindowNavigationMixin:
             self.scene_list.setCurrentRow(target_row)
             self.scene_list.blockSignals(False)
 
-        self.scene_list.setVisible(not self._browse_mode)
+        self.scene_list.setVisible(
+            not self._browse_mode and not self._compare_mode
+        )
 
     def _sync_left_list_for_photo(
             self: MainWindow,
@@ -321,6 +478,7 @@ class MainWindowNavigationMixin:
             *,
             suppress_signals: bool = False,
             restyle_only: bool = False,
+            preserve_selection: bool = False,
     ) -> None:
         if restyle_only:
             return
@@ -332,12 +490,25 @@ class MainWindowNavigationMixin:
         if suppress_signals:
             self.thumbnail_list.blockSignals(True)
 
-        self.thumbnail_list.setCurrentRow(target_row)
+        if preserve_selection:
+            item = self.thumbnail_list.item(target_row)
+            if item is not None:
+                self.thumbnail_list.selectionModel().setCurrentIndex(
+                    self.thumbnail_list.indexFromItem(item),
+                    QItemSelectionModel.SelectionFlag.NoUpdate,
+                )
+        else:
+            self.thumbnail_list.setCurrentRow(target_row)
 
         if suppress_signals:
             self.thumbnail_list.blockSignals(False)
 
-    def navigate_global_from_scene(self: MainWindow, direction: int) -> bool:
+    def navigate_global_from_scene(
+            self: MainWindow,
+            direction: int,
+            *,
+            extend_selection: bool = False,
+    ) -> bool:
         """Move the left-strip selection relative to the current scene item."""
         if self.thumbnail_list.count() == 0:
             return False
@@ -353,7 +524,26 @@ class MainWindowNavigationMixin:
         next_row = max(
             0, min(self.thumbnail_list.count() - 1, current_row + direction)
         )
-        self.thumbnail_list.setCurrentRow(next_row)
+        if extend_selection:
+            # Shift+Up/Down from scene_list moves in the vertical strip while
+            # keeping exact in-scene selections from the previous scene.
+            selection_photo_ids = self._resolved_scene_selection_photo_ids()
+            item = self.thumbnail_list.item(next_row)
+            if item is not None:
+                photo_id = item.data(PHOTO_ID_ROLE)
+                if photo_id is not None:
+                    selection_photo_ids.append(str(photo_id))
+
+                self.thumbnail_list.selectionModel().setCurrentIndex(
+                    self.thumbnail_list.indexFromItem(item),
+                    QItemSelectionModel.SelectionFlag.NoUpdate,
+                )
+
+            self._restore_photo_selection(selection_photo_ids)
+        else:
+            self._preserved_scene_selection_photo_ids.clear()
+            self.thumbnail_list.setCurrentRow(next_row)
+
         self.thumbnail_list.setFocus(Qt.OtherFocusReason)
         return True
 

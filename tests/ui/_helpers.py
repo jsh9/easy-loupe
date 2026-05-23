@@ -28,8 +28,10 @@ def stub_read_exif(
     )
 
 
-def create_jpeg(path: Path, color: str) -> None:
-    Image.new('RGB', (640, 480), color=color).save(path, format='JPEG')
+def create_jpeg(
+        path: Path, color: str, *, size: tuple[int, int] = (640, 480)
+) -> None:
+    Image.new('RGB', size, color=color).save(path, format='JPEG')
 
 
 def make_photo_record(

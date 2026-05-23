@@ -177,19 +177,34 @@ def test_main_window_detect_scenes_starts_worker_thread_and_sets_busy_state(
 def test_main_window_progress_overlay_disables_and_restores_interaction(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """
+    Verify progress overlays disable and then restore interactive controls.
+
+    This is necessary because long-running workflows temporarily disable the
+    main UI, and every focusable top-bar control must follow that busy state so
+    keyboard focus does not jump to a still-enabled control behind the overlay.
+    """
     _, app, window = create_main_window_with_library(
         tmp_path,
         monkeypatch,
         photo_specs=[('IMG_7410', 'dimgray')],
     )
+    window.activateWindow()
+    window.raise_()
+    app.processEvents()
+
+    window.thumbnail_list.setFocus(Qt.OtherFocusReason)
+    app.processEvents()
 
     window._show_progress('Loading', 50)
 
     assert window._busy is True
+    assert app.focusWidget() is not window.show_af_point_toggle
     assert window.menuBar().isEnabled() is False
     assert window.open_button.isEnabled() is False
     assert window.organize_button.isEnabled() is False
     assert window.theme_toggle.isEnabled() is False
+    assert window.show_af_point_toggle.isEnabled() is False
     assert all(
         action.isEnabled() is False for action in window._assignment_actions
     )
@@ -202,10 +217,31 @@ def test_main_window_progress_overlay_disables_and_restores_interaction(
     assert window.open_button.isEnabled() is True
     assert window.organize_button.isEnabled() is True
     assert window.theme_toggle.isEnabled() is True
+    assert window.show_af_point_toggle.isEnabled() is True
     assert all(
         action.isEnabled() is True for action in window._assignment_actions
     )
     assert window.organize_action.isEnabled() is True
+
+    window._show_progress('Re-rendering comparison grid...', 0, show_bar=False)
+
+    assert window._busy is True
+    assert window.progress_overlay.isVisible() is True
+    assert window.overlay_message_label.text() == (
+        'Re-rendering comparison grid...'
+    )
+    assert window.overlay_progress_bar.isVisible() is False
+
+    window._hide_progress()
+
+    assert window._busy is False
+    assert window.progress_overlay.isHidden() is True
+
+    window._show_progress('Loading again', 50)
+
+    assert window.overlay_progress_bar.isVisible() is True
+
+    window._hide_progress()
 
     window.close()
     del app
@@ -1013,6 +1049,69 @@ def test_main_window_scene_detection_finish_updates_view_mode_by_entry_state(
         assert window.viewer.normalized_viewport_center() == pytest.approx(
             remembered_center
         )
+
+    window.close()
+    del app
+
+
+def test_scene_detection_finish_restores_thumbnail_strip_focus(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify scene detection returns focus to the vertical thumbnail strip.
+
+    This covers the completion path that rebuilds the strip into scene stacks
+    while preserving the current photo's represented row. The regression test
+    is necessary because the newly visible scene strip and re-enabled top-bar
+    controls can otherwise steal focus after the progress overlay is dismissed.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_8210', 'dimgray'),
+            ('IMG_8211', 'green'),
+            ('IMG_8212', 'blue'),
+        ],
+    )
+    window.activateWindow()
+    window.raise_()
+    app.processEvents()
+
+    window.thumbnail_list.setCurrentRow(1)
+    window.thumbnail_list.setFocus(Qt.OtherFocusReason)
+    app.processEvents()
+
+    assert window.current_photo_id == 'IMG_8211'
+    assert _list_widget_has_focus(app, window.thumbnail_list) is True
+
+    set_scene_detection_result(
+        window,
+        [
+            ['IMG_8210'],
+            ['IMG_8211', 'IMG_8212'],
+        ],
+    )
+
+    # Start from the user workflow: a non-first photo is selected and the
+    # vertical strip owns keyboard focus before scene detection starts.
+    window._scene_thread = object()
+    window._handle_scene_finished()
+    app.processEvents()
+
+    assert window.thumbnail_list.count() == 2
+    assert window.thumbnail_list.currentRow() == 1
+
+    # The real restore opportunity happens after the worker thread is cleared;
+    # before that, background-task guards intentionally block focus changes.
+    window._clear_scene_worker()
+    app.processEvents()
+
+    assert _list_widget_has_focus(app, window.thumbnail_list) is True
+    assert app.focusWidget() is not window.theme_toggle
+    assert app.focusWidget() is not window.show_af_point_toggle
+    assert window.current_photo_id == 'IMG_8211'
+    assert window.thumbnail_list.currentRow() == 1
 
     window.close()
     del app
