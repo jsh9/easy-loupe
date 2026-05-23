@@ -555,7 +555,6 @@ class MainWindowWorkflowMixin:
             return
 
         edit = self._metadata_undo_stack.pop()
-        assert isinstance(edit, MetadataEdit)
         self._apply_metadata_values(edit.field, edit.before)
         self._metadata_redo_stack.append(edit)
         self.library.save_metadata()
@@ -567,7 +566,6 @@ class MainWindowWorkflowMixin:
             return
 
         edit = self._metadata_redo_stack.pop()
-        assert isinstance(edit, MetadataEdit)
         self._apply_metadata_values(edit.field, edit.after)
         self._metadata_undo_stack.append(edit)
         self.library.save_metadata()

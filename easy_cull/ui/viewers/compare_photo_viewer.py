@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QPointF, Qt, Signal
+from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -25,11 +26,11 @@ if TYPE_CHECKING:
 DEFAULT_COMPARE_PHOTO_LIMIT = 8
 MIN_COMPARE_PHOTO_COUNT = 2
 COMPARE_ZOOM_EPSILON = 1.001
+COMPARE_PANE_DRAG_THRESHOLD_PX = 4.0
 SMALL_GRID_MAX_PHOTOS = 4
 MEDIUM_GRID_MAX_PHOTOS = 6
 MEDIUM_GRID_COLUMNS = 3
 ACTIVE_COMPARE_BORDER_WIDTH = 4
-INACTIVE_COMPARE_BORDER_WIDTH = 1
 SHORT_ROW_MAX_PHOTOS = 3
 VERTICAL_ASPECT_RATIO_MAX = 1.0
 VERTICAL_FOUR_PHOTO_ROW_THRESHOLD = 3
@@ -47,6 +48,117 @@ class ComparePhoto:
     image_path: Path
     focus_point: tuple[float, float]
     metadata_text: str = ''
+
+
+class ComparePanePhotoViewer(PhotoViewer):
+    """
+    Photo viewer variant that emits compare click and drag gestures.
+
+    Compare mode needs left-click to select/recenter panes and left-drag to pan
+    locked panes together. Keeping those signals and gesture state in this
+    subclass prevents normal single and split viewers from carrying unused
+    compare-only behavior.
+    """
+
+    normalized_left_clicked = Signal(float, float)
+    image_dragged = Signal(float, float)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._left_press_pos = QPointF()
+        self._last_left_drag_pos = QPointF()
+        self._left_press_active = False
+        self._left_drag_active = False
+
+    def clear_photo(self) -> None:
+        """Clear the photo and reset compare gesture state."""
+        self._left_press_active = False
+        self._left_drag_active = False
+        super().clear_photo()
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt API
+        """
+        Arm compare click or drag gestures from a left-button press.
+
+        Compare mode uses left-click to select/recenter a pane and left-drag to
+        pan one or more panes, so this subclass consumes that input before the
+        generic graphics-view handler sees it.
+        """
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and not self._image_size.isEmpty()
+        ):
+            self._left_press_pos = event.position()
+            self._last_left_drag_pos = event.position()
+            self._left_press_active = True
+            self._left_drag_active = False
+            event.accept()
+            return
+
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt API
+        """
+        Emit compare drag deltas after small pointer movement is exceeded.
+
+        Drag deltas are emitted in image-space units so locked compare panes
+        can pan together even when each pane has its own widget size or zoom
+        factor.
+        """
+        if self._left_press_active:
+            delta_from_press = event.position() - self._left_press_pos
+            if (
+                not self._left_drag_active
+                and delta_from_press.manhattanLength()
+                >= COMPARE_PANE_DRAG_THRESHOLD_PX
+            ):
+                self._left_drag_active = True
+
+            if self._left_drag_active:
+                delta = event.position() - self._last_left_drag_pos
+                self._last_left_drag_pos = event.position()
+                self.image_dragged.emit(
+                    -delta.x() / max(self._current_scale, 0.001),
+                    -delta.y() / max(self._current_scale, 0.001),
+                )
+                event.accept()
+                return
+
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt API
+        """Emit a normalized compare click when the press was not a drag."""
+        if (
+            self._left_press_active
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            if not self._left_drag_active:
+                normalized_point = self._normalized_point_from_viewport_pos(
+                    event.position().toPoint()
+                )
+                if normalized_point is not None:
+                    self.normalized_left_clicked.emit(*normalized_point)
+
+            self._left_press_active = False
+            self._left_drag_active = False
+            event.accept()
+            return
+
+        super().mouseReleaseEvent(event)
+
+    def _normalized_point_from_viewport_pos(
+            self, pos: object
+    ) -> tuple[float, float] | None:
+        if self._image_size.isEmpty():
+            return None
+
+        scene_pos = self.mapToScene(pos)
+        width = max(self._image_size.width(), 1)
+        height = max(self._image_size.height(), 1)
+        return (
+            max(0.0, min(1.0, scene_pos.x() / width)),
+            max(0.0, min(1.0, scene_pos.y() / height)),
+        )
 
 
 class ComparePhotoViewer(QWidget):
@@ -139,7 +251,7 @@ class ComparePhotoViewer(QWidget):
         frame_layout.setContentsMargins(4, 4, 4, 4)
         frame_layout.setSpacing(4)
 
-        viewer = PhotoViewer(frame)
+        viewer = ComparePanePhotoViewer(frame)
         viewer.set_focus_point_marker_visible(
             enabled=self._focus_point_marker_enabled
         )
@@ -419,16 +531,11 @@ class ComparePhotoViewer(QWidget):
                 if is_active
                 else self._theme.button_border
             )
-            border_width = (
-                ACTIVE_COMPARE_BORDER_WIDTH
-                if is_active
-                else INACTIVE_COMPARE_BORDER_WIDTH
-            )
             frame.setStyleSheet(
                 f"""
                 QFrame#comparePane {{
                     background-color: {self._theme.viewer_background};
-                    border: {border_width}px solid {border};
+                    border: {ACTIVE_COMPARE_BORDER_WIDTH}px solid {border};
                     border-radius: 4px;
                 }}
                 """

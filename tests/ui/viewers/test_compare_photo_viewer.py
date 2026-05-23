@@ -11,7 +11,6 @@ from easy_cull.ui.theme import THEMES
 from easy_cull.ui.viewers.compare_photo_viewer import (
     ACTIVE_COMPARE_BORDER_WIDTH,
     COMPARE_HELP_TEXT,
-    INACTIVE_COMPARE_BORDER_WIDTH,
     ComparePhoto,
     ComparePhotoViewer,
 )
@@ -193,9 +192,11 @@ def test_compare_photo_viewer_shows_helper_metadata_and_active_border(
     assert f'border: {ACTIVE_COMPARE_BORDER_WIDTH}px' in (
         viewer._frames[0].styleSheet()
     )
-    assert f'border: {INACTIVE_COMPARE_BORDER_WIDTH}px' in (
+    assert f'border: {ACTIVE_COMPARE_BORDER_WIDTH}px' in (
         viewer._frames[1].styleSheet()
     )
+    assert viewer._theme.selected_background in viewer._frames[0].styleSheet()
+    assert viewer._theme.button_border in viewer._frames[1].styleSheet()
 
     viewer.lock_zoom_button.setChecked(True)
     assert f'border: {ACTIVE_COMPARE_BORDER_WIDTH}px' in (
@@ -203,12 +204,14 @@ def test_compare_photo_viewer_shows_helper_metadata_and_active_border(
     )
 
     viewer.move_active_selection(0, 1)
-    assert f'border: {INACTIVE_COMPARE_BORDER_WIDTH}px' in (
+    assert f'border: {ACTIVE_COMPARE_BORDER_WIDTH}px' in (
         viewer._frames[0].styleSheet()
     )
     assert f'border: {ACTIVE_COMPARE_BORDER_WIDTH}px' in (
         viewer._frames[1].styleSheet()
     )
+    assert viewer._theme.button_border in viewer._frames[0].styleSheet()
+    assert viewer._theme.selected_background in viewer._frames[1].styleSheet()
 
     _close_viewer(viewer, app)
 

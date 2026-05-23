@@ -42,7 +42,6 @@ photo bounds, and a tight cap would silently clip the zoom level.
 FOCUS_POINT_MARKER_SIZE = 28.0
 FOCUS_POINT_MARKER_PEN_WIDTH = 2
 FOCUS_POINT_MARKER_COLOR = '#ff3b30'
-LEFT_DRAG_THRESHOLD_PX = 4.0
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -54,8 +53,6 @@ class PhotoViewer(QGraphicsView):
     """Photo viewing widget with fit, zoom, pan, and region tracking."""
 
     visible_region_changed = Signal()
-    normalized_left_clicked = Signal(float, float)
-    image_dragged = Signal(float, float)
 
     def __init__(
             self,
@@ -109,10 +106,6 @@ class PhotoViewer(QGraphicsView):
         self._hold_zoom_enabled = hold_zoom_enabled
         self._hold_zoom_active = False
         self._last_hold_zoom_pos = QPointF()
-        self._left_press_pos = QPointF()
-        self._last_left_drag_pos = QPointF()
-        self._left_press_active = False
-        self._left_drag_active = False
         self.set_theme(THEMES['light'])
 
     def set_photo(
@@ -167,8 +160,6 @@ class PhotoViewer(QGraphicsView):
         self._current_image_key = None
         self._mode = 'fit'
         self._hold_zoom_active = False
-        self._left_press_active = False
-        self._left_drag_active = False
         self.resetTransform()
         self._update_focus_point_marker()
         self.visible_region_changed.emit()
@@ -439,13 +430,7 @@ class PhotoViewer(QGraphicsView):
             self._store_manual_view()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt API
-        """
-        Start hold-zoom or arm compare click/drag signaling.
-
-        Hold-zoom needs the press position to center a temporary inspection
-        zoom, while compare mode needs the same left-button press to decide
-        later whether the gesture was a pane click or an image drag.
-        """
+        """Temporarily zoom fit-to-window views while left button is held."""
         if (
             self._hold_zoom_enabled
             and event.button() == Qt.MouseButton.LeftButton
@@ -464,27 +449,10 @@ class PhotoViewer(QGraphicsView):
             event.accept()
             return
 
-        if (
-            event.button() == Qt.MouseButton.LeftButton
-            and not self._image_size.isEmpty()
-        ):
-            self._left_press_pos = event.position()
-            self._last_left_drag_pos = event.position()
-            self._left_press_active = True
-            self._left_drag_active = False
-            event.accept()
-            return
-
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt API
-        """
-        Pan hold-zoom or emit compare drag deltas after the drag threshold.
-
-        Hold-zoom moves a temporary viewport without storing manual state;
-        compare mode receives image-space drag deltas so locked panes can pan
-        together while small pointer movement still counts as a click.
-        """
+        """Pan the temporary hold-zoom viewport without storing manual zoom."""
         if self._hold_zoom_active:
             delta = event.position() - self._last_hold_zoom_pos
             self._last_hold_zoom_pos = event.position()
@@ -496,56 +464,15 @@ class PhotoViewer(QGraphicsView):
             event.accept()
             return
 
-        if self._left_press_active:
-            delta_from_press = event.position() - self._left_press_pos
-            if (
-                not self._left_drag_active
-                and delta_from_press.manhattanLength()
-                >= LEFT_DRAG_THRESHOLD_PX
-            ):
-                self._left_drag_active = True
-
-            if self._left_drag_active:
-                delta = event.position() - self._last_left_drag_pos
-                self._last_left_drag_pos = event.position()
-                self.image_dragged.emit(
-                    -delta.x() / max(self._current_scale, 0.001),
-                    -delta.y() / max(self._current_scale, 0.001),
-                )
-                event.accept()
-                return
-
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt API
-        """
-        Finish hold-zoom or emit a normalized compare click.
-
-        Releasing hold-zoom restores fit view immediately. A non-drag
-        left-button release emits the normalized image point so compare mode
-        can select and optionally synchronize the clicked pane.
-        """
+        """Restore fit-to-window view when temporary hold-zoom finishes."""
         if (
             self._hold_zoom_active
             and event.button() == Qt.MouseButton.LeftButton
         ):
             self.set_fit_view()
-            event.accept()
-            return
-
-        if (
-            self._left_press_active
-            and event.button() == Qt.MouseButton.LeftButton
-        ):
-            if not self._left_drag_active:
-                normalized_point = self._normalized_point_from_viewport_pos(
-                    event.position().toPoint()
-                )
-                if normalized_point is not None:
-                    self.normalized_left_clicked.emit(*normalized_point)
-
-            self._left_press_active = False
-            self._left_drag_active = False
             event.accept()
             return
 
@@ -585,20 +512,6 @@ class PhotoViewer(QGraphicsView):
         )
         self._apply_transform_unclamped()
         return True
-
-    def _normalized_point_from_viewport_pos(
-            self, pos: object
-    ) -> tuple[float, float] | None:
-        if self._image_size.isEmpty():
-            return None
-
-        scene_pos = self.mapToScene(pos)
-        width = max(self._image_size.width(), 1)
-        height = max(self._image_size.height(), 1)
-        return (
-            max(0.0, min(1.0, scene_pos.x() / width)),
-            max(0.0, min(1.0, scene_pos.y() / height)),
-        )
 
     def _position_focus_point_marker(self) -> None:
         if self._image_size.isEmpty():
