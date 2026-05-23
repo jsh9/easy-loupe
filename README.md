@@ -190,8 +190,8 @@ build keeps a terminal attached so startup errors include a normal traceback.
 - Groups JPEG and RAW files by shared filename stem.
 - Shows view mode, browse mode, and compare mode: view mode uses the vertical
   thumbnail strip, central photo viewer, optional split view, and scene strip;
-  browse mode shows a full-photo grid; compare mode displays up to eight
-  selected photos side by side.
+  browse mode shows a full-photo grid; compare mode displays up to the
+  configured number of selected photos side by side.
 - Supports scene detection that rebuilds the left strip into scene stacks while
   keeping browse mode as a full per-photo grid.
 - Supports multi-selection plus keyboard-based ratings, color labels,
@@ -231,8 +231,10 @@ build keeps a terminal attached so startup errors include a normal traceback.
   left and a zoom/focus pane on the right.
 - `Browse mode` is the full-photo grid view.
 - `Compare mode` is a side-by-side inspection grid entered from the current
-  selection. It displays up to eight selected photos, tracks one active pane
-  for tagging, and can lock zoom/pan across panes.
+  selection. It displays up to the configured compare limit, tracks one active
+  pane for tagging, and can lock zoom/pan across panes. The default limit is 8
+  photos, configurable from `Compare > Limit` with options 2, 3, 4, 6, 8, 10,
+  12, 16, and 20.
 
 Common transitions:
 
@@ -241,9 +243,9 @@ Common transitions:
   photos are selected.
 - Press `Esc` in compare mode to restore the previous view or browse selection.
 - Press `G` in compare mode to enter browse mode with the original pre-compare
-  selection restored. If more than eight photos were selected, compare still
-  displays only the first eight, but browse restores the full original
-  selection.
+  selection restored. If more photos were selected than the configured compare
+  limit, compare displays only the capped set, but browse restores the full
+  original selection.
 - Press `Space` in browse mode to return to single-pane fit view for the
   current photo.
 - Press `Space` in compare mode to toggle focus zoom for the compared panes.

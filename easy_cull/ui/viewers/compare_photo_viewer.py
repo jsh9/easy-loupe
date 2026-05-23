@@ -24,12 +24,25 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 DEFAULT_COMPARE_PHOTO_LIMIT = 8
+COMPARE_PHOTO_LIMIT_OPTIONS = (2, 3, 4, 6, 8, 10, 12, 16, 20)
 MIN_COMPARE_PHOTO_COUNT = 2
 COMPARE_ZOOM_EPSILON = 1.001
 COMPARE_PANE_DRAG_THRESHOLD_PX = 4.0
 SMALL_GRID_MAX_PHOTOS = 4
 MEDIUM_GRID_MAX_PHOTOS = 6
 MEDIUM_GRID_COLUMNS = 3
+EIGHT_PHOTO_GRID_MAX_PHOTOS = 8
+EIGHT_PHOTO_GRID_COLUMNS = 4
+TEN_PHOTO_GRID_MAX_PHOTOS = 10
+TEN_PHOTO_GRID_COLUMNS = 5
+TWELVE_PHOTO_GRID_MAX_PHOTOS = 12
+TWELVE_PHOTO_GRID_ROWS = 3
+TWELVE_PHOTO_GRID_COLUMNS = 4
+SIXTEEN_PHOTO_GRID_MAX_PHOTOS = 16
+SIXTEEN_PHOTO_GRID_ROWS = 4
+SIXTEEN_PHOTO_GRID_COLUMNS = 4
+TWENTY_PHOTO_GRID_ROWS = 4
+TWENTY_PHOTO_GRID_COLUMNS = 5
 ACTIVE_COMPARE_BORDER_WIDTH = 4
 SHORT_ROW_MAX_PHOTOS = 3
 VERTICAL_ASPECT_RATIO_MAX = 1.0
@@ -173,7 +186,8 @@ class ComparePhotoViewer(QWidget):
             photo_limit: int = DEFAULT_COMPARE_PHOTO_LIMIT,
     ) -> None:
         super().__init__(parent)
-        self.photo_limit = photo_limit
+        self.photo_limit = DEFAULT_COMPARE_PHOTO_LIMIT
+        self.set_photo_limit(photo_limit)
         self._theme = THEMES['light']
         self._locked_zoom = True
         self._focus_point_marker_enabled = True
@@ -213,13 +227,23 @@ class ComparePhotoViewer(QWidget):
 
         self.set_theme(self._theme)
 
-    def set_photos(self, photos: list[ComparePhoto]) -> None:
+    def set_photos(
+            self,
+            photos: list[ComparePhoto],
+            *,
+            active_photo_id: str | None = None,
+    ) -> None:
         """Load the provided photos into the compare grid."""
         self.clear()
         self._photos = list(photos[: self.photo_limit])
         self._active_index = 0
         for index, photo in enumerate(self._photos):
             self._append_photo_pane(index, photo)
+
+        if active_photo_id is not None:
+            self._active_index = self._active_index_for_photo_id(
+                active_photo_id
+            )
 
         rows, columns = self._grid_shape(
             len(self._photos), self._vertical_photo_count()
@@ -231,6 +255,24 @@ class ComparePhotoViewer(QWidget):
         self._finish_photo_layout(rows, columns)
         self._sync_active_frame_styles()
         self._emit_active_photo_changed()
+
+    def set_photo_limit(self, limit: object) -> int:
+        """Set the maximum compare count and return the normalized value."""
+        self.photo_limit = self.normalized_photo_limit(limit)
+        return self.photo_limit
+
+    @staticmethod
+    def normalized_photo_limit(limit: object) -> int:
+        """Return a supported compare photo limit."""
+        try:
+            candidate = int(limit)
+        except (TypeError, ValueError):
+            return DEFAULT_COMPARE_PHOTO_LIMIT
+
+        if candidate in COMPARE_PHOTO_LIMIT_OPTIONS:
+            return candidate
+
+        return DEFAULT_COMPARE_PHOTO_LIMIT
 
     def _append_photo_pane(
             self,
@@ -335,10 +377,14 @@ class ComparePhotoViewer(QWidget):
 
     def set_active_photo_id(self, photo_id: str) -> None:
         """Set the active compare photo by id."""
+        self._set_active_index(self._active_index_for_photo_id(photo_id))
+
+    def _active_index_for_photo_id(self, photo_id: str) -> int:
         for index, photo in enumerate(self._photos):
             if photo.photo_id == photo_id:
-                self._set_active_index(index)
-                return
+                return index
+
+        return self._active_index
 
     def update_metadata_texts(
             self, metadata_by_photo_id: dict[str, str]
@@ -586,4 +632,16 @@ class ComparePhotoViewer(QWidget):
         if count <= MEDIUM_GRID_MAX_PHOTOS:
             return (MIN_COMPARE_PHOTO_COUNT, MEDIUM_GRID_COLUMNS)
 
-        return (MIN_COMPARE_PHOTO_COUNT, SMALL_GRID_MAX_PHOTOS)
+        if count <= EIGHT_PHOTO_GRID_MAX_PHOTOS:
+            return (MIN_COMPARE_PHOTO_COUNT, EIGHT_PHOTO_GRID_COLUMNS)
+
+        if count <= TEN_PHOTO_GRID_MAX_PHOTOS:
+            return (MIN_COMPARE_PHOTO_COUNT, TEN_PHOTO_GRID_COLUMNS)
+
+        if count <= TWELVE_PHOTO_GRID_MAX_PHOTOS:
+            return (TWELVE_PHOTO_GRID_ROWS, TWELVE_PHOTO_GRID_COLUMNS)
+
+        if count <= SIXTEEN_PHOTO_GRID_MAX_PHOTOS:
+            return (SIXTEEN_PHOTO_GRID_ROWS, SIXTEEN_PHOTO_GRID_COLUMNS)
+
+        return (TWENTY_PHOTO_GRID_ROWS, TWENTY_PHOTO_GRID_COLUMNS)

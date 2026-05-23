@@ -39,15 +39,15 @@ def _select_rows(list_widget: object, rows: range | list[int]) -> None:
     list_widget.setFocus(Qt.OtherFocusReason)
 
 
-def test_compare_mode_opens_first_eight_selected_photos_and_esc_restores_view(
+def test_compare_mode_opens_default_limit_and_esc_restores_view(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """
-    Verify that compare mode limits selection and returns to normal view.
+    Verify that compare mode uses the default limit and restores view mode.
 
     This guards the main compare entry/exit contract: users can over-select,
-    compare only the first configured batch, then leave compare without losing
-    the surrounding view-mode chrome.
+    compare only the default configured batch, then leave compare without
+    losing the surrounding view-mode chrome.
     """
     _, app, window = create_main_window_with_library(
         tmp_path,
@@ -77,6 +77,250 @@ def test_compare_mode_opens_first_eight_selected_photos_and_esc_restores_view(
     assert window.viewer_stack.currentWidget() is window.viewer
     assert window.content_splitter.isVisible() is True
     assert window.thumbnail_list.isVisible() is True
+
+    window.close()
+
+
+def test_compare_mode_opens_configured_limit_from_overselection(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify compare mode honors the configured limit above the old cap.
+
+    The user preference can raise the compare cap beyond eight photos, so entry
+    must slice the selected set by the current setting rather than a constant.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            (f'IMG_990{index:02d}', 'dimgray') for index in range(20)
+        ],
+    )
+
+    window.compare_limit_actions[12].trigger()
+    _select_rows(window.thumbnail_list, range(20))
+    app.processEvents()
+
+    window.compare_mode_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._compare_mode is True
+    assert window.compare_viewer.photo_ids() == [
+        f'IMG_990{index:02d}' for index in range(12)
+    ]
+    assert (window.compare_viewer._rows, window.compare_viewer._columns) == (
+        3,
+        4,
+    )
+
+    window.close()
+
+
+def test_compare_mode_uses_selection_count_for_grid_below_configured_limit(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify sparse selections do not use the configured maximum grid shape.
+
+    A high compare limit should cap only the maximum number of panes; selecting
+    three photos should still render the normal 1x3 grid.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[(f'IMG_995{index:02d}', 'dimgray') for index in range(5)],
+    )
+
+    window.compare_limit_actions[20].trigger()
+    _select_rows(window.thumbnail_list, [0, 1, 2])
+    app.processEvents()
+
+    window.compare_mode_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._compare_mode is True
+    assert window.compare_viewer.photo_ids() == [
+        f'IMG_995{index:02d}' for index in range(3)
+    ]
+    assert (window.compare_viewer._rows, window.compare_viewer._columns) == (
+        1,
+        3,
+    )
+
+    window.close()
+
+
+def test_compare_mode_live_limit_increase_updates_grid_and_g_restores_selection(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify changing the compare limit expands the active compare grid.
+
+    Users should see the newly configured limit immediately in compare mode,
+    while ``G`` still restores the original full pre-compare selection.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            (f'IMG_991{index:02d}', 'dimgray') for index in range(13)
+        ],
+    )
+
+    _select_rows(window.thumbnail_list, range(13))
+    app.processEvents()
+    window.compare_mode_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.compare_viewer.photo_ids() == [
+        f'IMG_991{index:02d}' for index in range(8)
+    ]
+
+    window.compare_limit_actions[12].trigger()
+
+    assert window.progress_overlay.isVisible() is True
+    assert window.overlay_message_label.text() == (
+        'Re-rendering comparison grid...'
+    )
+    assert window.overlay_progress_bar.isVisible() is False
+    assert window.compare_viewer.photo_ids() == [
+        f'IMG_991{index:02d}' for index in range(8)
+    ]
+
+    app.processEvents()
+
+    assert window.progress_overlay.isHidden() is True
+    assert window._compare_mode is True
+    assert window.compare_viewer.photo_ids() == [
+        f'IMG_991{index:02d}' for index in range(12)
+    ]
+    assert (window.compare_viewer._rows, window.compare_viewer._columns) == (
+        3,
+        4,
+    )
+
+    window.browse_mode_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._browse_mode is True
+    assert [
+        item.data(Qt.UserRole) for item in window.browse_list.selectedItems()
+    ] == [f'IMG_991{index:02d}' for index in range(13)]
+
+    window.close()
+
+
+def test_compare_mode_current_limit_does_not_show_overlay_or_rebuild(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify reselecting the active compare limit is a no-op.
+
+    The re-render overlay should appear only when the visible compare set
+    actually changes, and the grid should not rebuild for an unchanged limit.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[(f'IMG_994{index:02d}', 'dimgray') for index in range(8)],
+    )
+    _select_rows(window.thumbnail_list, range(8))
+    app.processEvents()
+    window.compare_mode_shortcut.activated.emit()
+    app.processEvents()
+
+    def fail_set_photos(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError('compare grid should not rebuild')
+
+    monkeypatch.setattr(window.compare_viewer, 'set_photos', fail_set_photos)
+
+    window.compare_limit_actions[8].trigger()
+    app.processEvents()
+
+    assert window.progress_overlay.isHidden() is True
+    assert window.overlay_message_label.text() == ''
+
+    window.close()
+
+
+def test_compare_mode_live_limit_decrease_preserves_visible_active_pane(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify lowering the compare limit keeps a still-visible active pane.
+
+    Rebuilding the compare grid should not reset the active pane when that
+    photo remains inside the newly visible capped set.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            (f'IMG_992{index:02d}', 'dimgray') for index in range(12)
+        ],
+    )
+
+    window.compare_limit_actions[12].trigger()
+    _select_rows(window.thumbnail_list, range(12))
+    app.processEvents()
+    window.compare_mode_shortcut.activated.emit()
+    app.processEvents()
+    window.compare_viewer.set_active_photo_id('IMG_99205')
+
+    window.compare_limit_actions[8].trigger()
+    app.processEvents()
+
+    assert window.compare_viewer.photo_ids() == [
+        f'IMG_992{index:02d}' for index in range(8)
+    ]
+    assert window.compare_viewer.active_photo_id() == 'IMG_99205'
+    assert window.current_photo_id == 'IMG_99205'
+
+    window.close()
+
+
+def test_compare_mode_live_limit_decrease_clamps_active_and_esc_restores_selection(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify lowering the compare limit clamps an active pane that falls out.
+
+    The visible active pane should move to the last remaining photo, but
+    ``Esc`` must still restore the full original selection.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            (f'IMG_993{index:02d}', 'dimgray') for index in range(12)
+        ],
+    )
+
+    window.compare_limit_actions[12].trigger()
+    _select_rows(window.thumbnail_list, range(12))
+    app.processEvents()
+    window.compare_mode_shortcut.activated.emit()
+    app.processEvents()
+    window.compare_viewer.set_active_photo_id('IMG_99310')
+
+    window.compare_limit_actions[8].trigger()
+    app.processEvents()
+
+    assert window.compare_viewer.photo_ids() == [
+        f'IMG_993{index:02d}' for index in range(8)
+    ]
+    assert window.compare_viewer.active_photo_id() == 'IMG_99307'
+    assert window.current_photo_id == 'IMG_99307'
+
+    window.exit_compare_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._compare_mode is False
+    assert [
+        item.data(Qt.UserRole)
+        for item in window.thumbnail_list.selectedItems()
+    ] == [f'IMG_993{index:02d}' for index in range(12)]
 
     window.close()
 
@@ -388,7 +632,7 @@ def test_compare_mode_g_from_overselected_browse_restores_original_selection(
 
     window.compare_mode_shortcut.activated.emit()
     app.processEvents()
-    QTest.keyClick(window, Qt.Key_Right)
+    window._compare_nav_shortcuts[1].activated.emit()
     app.processEvents()
 
     assert window.compare_viewer.photo_ids() == [

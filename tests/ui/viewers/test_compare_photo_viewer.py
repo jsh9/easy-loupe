@@ -10,7 +10,9 @@ from PySide6.QtWidgets import QApplication
 from easy_cull.ui.theme import THEMES
 from easy_cull.ui.viewers.compare_photo_viewer import (
     ACTIVE_COMPARE_BORDER_WIDTH,
+    COMPARE_PHOTO_LIMIT_OPTIONS,
     COMPARE_HELP_TEXT,
+    DEFAULT_COMPARE_PHOTO_LIMIT,
     ComparePhoto,
     ComparePhotoViewer,
 )
@@ -49,6 +51,14 @@ def _assert_single_row_frames_fill_height(viewer: ComparePhotoViewer) -> None:
         )
 
 
+def _smallest_limit_for_count(photo_count: int) -> int:
+    for limit in COMPARE_PHOTO_LIMIT_OPTIONS:
+        if limit >= photo_count:
+            return limit
+
+    return max(COMPARE_PHOTO_LIMIT_OPTIONS)
+
+
 @pytest.mark.parametrize(
     ('photo_count', 'vertical_count', 'expected_shape'),
     [
@@ -62,6 +72,18 @@ def _assert_single_row_frames_fill_height(viewer: ComparePhotoViewer) -> None:
         (6, 0, (2, 3)),
         (7, 7, (2, 4)),
         (8, 0, (2, 4)),
+        (9, 0, (2, 5)),
+        (10, 0, (2, 5)),
+        (11, 0, (3, 4)),
+        (12, 0, (3, 4)),
+        (13, 0, (4, 4)),
+        (14, 0, (4, 4)),
+        (15, 0, (4, 4)),
+        (16, 0, (4, 4)),
+        (17, 0, (4, 5)),
+        (18, 0, (4, 5)),
+        (19, 0, (4, 5)),
+        (20, 0, (4, 5)),
     ],
 )
 def test_compare_photo_viewer_grid_shape_is_count_based(
@@ -78,6 +100,64 @@ def test_compare_photo_viewer_grid_shape_is_count_based(
         ComparePhotoViewer._grid_shape(photo_count, vertical_count)
         == expected_shape
     )
+
+
+def test_compare_photo_viewer_normalizes_photo_limit() -> None:
+    """
+    Verify compare limits are restricted to the supported discrete options.
+
+    The View menu persists this value, so invalid stored or programmatic values
+    must return to the default instead of creating an unsupported grid size.
+    """
+    app = QApplication.instance() or QApplication([])
+    viewer = ComparePhotoViewer(photo_limit=12)
+
+    assert viewer.photo_limit == 12
+    assert viewer.set_photo_limit(20) == 20
+    assert viewer.photo_limit == 20
+    assert viewer.set_photo_limit('6') == 6
+    assert viewer.photo_limit == 6
+    assert viewer.set_photo_limit(9) == DEFAULT_COMPARE_PHOTO_LIMIT
+    assert viewer.photo_limit == DEFAULT_COMPARE_PHOTO_LIMIT
+    assert set(COMPARE_PHOTO_LIMIT_OPTIONS) == {2, 3, 4, 6, 8, 10, 12, 16, 20}
+
+    _close_viewer(viewer, app)
+
+
+def test_compare_photo_viewer_caps_photos_at_configured_limit(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify the viewer displays no more than its configured compare limit.
+
+    This covers the largest supported limit so regressions do not silently keep
+    the previous eight-photo cap.
+    """
+    photo_count = 22
+    for index in range(photo_count):
+        create_jpeg(tmp_path / f'IMG_907{index:02d}.JPG', 'dimgray')
+
+    app = QApplication.instance() or QApplication([])
+    viewer = ComparePhotoViewer(photo_limit=20)
+    viewer.resize(1400, 900)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_photos([
+        ComparePhoto(
+            f'IMG_907{index:02d}',
+            tmp_path / f'IMG_907{index:02d}.JPG',
+            (0.5, 0.5),
+        )
+        for index in range(photo_count)
+    ])
+    app.processEvents()
+
+    assert len(viewer.photo_ids()) == 20
+    assert viewer.photo_ids() == [f'IMG_907{index:02d}' for index in range(20)]
+    assert (viewer._rows, viewer._columns) == (4, 5)
+
+    _close_viewer(viewer, app)
 
 
 def test_compare_photo_viewer_locked_and_unlocked_zoom_targets(
@@ -569,17 +649,25 @@ def test_compare_photo_viewer_square_photos_count_as_non_vertical_for_four(
         (6, (2, 3)),
         (7, (2, 4)),
         (8, (2, 4)),
+        (9, (2, 5)),
+        (10, (2, 5)),
+        (11, (3, 4)),
+        (12, (3, 4)),
+        (13, (4, 4)),
+        (16, (4, 4)),
+        (17, (4, 5)),
+        (20, (4, 5)),
     ],
 )
 def test_compare_photo_viewer_large_counts_use_fixed_grid(
         tmp_path: Path, photo_count: int, expected_shape: tuple[int, int]
 ) -> None:
     """
-    Verify 5-8 photo compares use fixed multi-row grids.
+    Verify 5-20 photo compares use fixed multi-row grids.
 
     Larger compare sets should prioritize a predictable full-area grid over
-    orientation-specific layouts. This test documents the stable 2x3 and 2x4
-    arrangements.
+    orientation-specific layouts. This test documents the stable arrangements
+    that appear once compare is beyond the single-row small-count layouts.
     """
     for index in range(photo_count):
         create_jpeg(
@@ -589,7 +677,9 @@ def test_compare_photo_viewer_large_counts_use_fixed_grid(
         )
 
     app = QApplication.instance() or QApplication([])
-    viewer = ComparePhotoViewer()
+    viewer = ComparePhotoViewer(
+        photo_limit=_smallest_limit_for_count(photo_count)
+    )
     viewer.resize(1200, 680)
     viewer.show()
     app.processEvents()

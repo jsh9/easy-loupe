@@ -223,6 +223,26 @@ def test_main_window_progress_overlay_disables_and_restores_interaction(
     )
     assert window.organize_action.isEnabled() is True
 
+    window._show_progress('Re-rendering comparison grid...', 0, show_bar=False)
+
+    assert window._busy is True
+    assert window.progress_overlay.isVisible() is True
+    assert window.overlay_message_label.text() == (
+        'Re-rendering comparison grid...'
+    )
+    assert window.overlay_progress_bar.isVisible() is False
+
+    window._hide_progress()
+
+    assert window._busy is False
+    assert window.progress_overlay.isHidden() is True
+
+    window._show_progress('Loading again', 50)
+
+    assert window.overlay_progress_bar.isVisible() is True
+
+    window._hide_progress()
+
     window.close()
     del app
 

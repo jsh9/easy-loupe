@@ -45,6 +45,28 @@ class MainWindowCompareMixin:
         if self._browse_mode:
             self._set_browse_mode(active=False)
 
+        self._compare_mode = True
+        self.compare_viewer.set_photos(
+            self._compare_photos_for_photo_ids(photo_ids)
+        )
+        self.compare_viewer.lock_zoom_button.setChecked(True)
+        active_photo_id = self.compare_viewer.active_photo_id()
+        if active_photo_id is not None:
+            self.current_photo_id = active_photo_id
+
+        self.content_splitter.setVisible(True)
+        self.thumbnail_list.setVisible(False)
+        self.browse_list.setVisible(False)
+        self.scene_list.setVisible(False)
+        self.viewer_stack.setCurrentWidget(self.compare_viewer)
+        self._refresh_visible_region_overlay(force_full=True)
+        self._update_mode_shortcuts()
+        self.compare_viewer.setFocus(Qt.OtherFocusReason)
+
+    def _compare_photos_for_photo_ids(
+            self: MainWindow,
+            photo_ids: list[str],
+    ) -> list[ComparePhoto]:
         compare_photos: list[ComparePhoto] = []
         for photo_id in photo_ids:
             photo = self.library.get_photo(photo_id)
@@ -59,21 +81,63 @@ class MainWindowCompareMixin:
                 )
             )
 
-        self._compare_mode = True
-        self.compare_viewer.set_photos(compare_photos)
-        self.compare_viewer.lock_zoom_button.setChecked(True)
-        active_photo_id = self.compare_viewer.active_photo_id()
-        if active_photo_id is not None:
-            self.current_photo_id = active_photo_id
+        return compare_photos
 
-        self.content_splitter.setVisible(True)
-        self.thumbnail_list.setVisible(False)
-        self.browse_list.setVisible(False)
-        self.scene_list.setVisible(False)
-        self.viewer_stack.setCurrentWidget(self.compare_viewer)
+    def _refresh_compare_photos_for_limit(self: MainWindow) -> None:
+        if not self._compare_mode:
+            return
+
+        refresh_plan = self._compare_limit_refresh_plan()
+        if refresh_plan is None:
+            return
+
+        photo_ids, next_active_photo_id = refresh_plan
+        self.compare_viewer.set_photos(
+            self._compare_photos_for_photo_ids(photo_ids),
+            active_photo_id=next_active_photo_id,
+        )
+        refreshed_active_photo_id = self.compare_viewer.active_photo_id()
+        if refreshed_active_photo_id is not None:
+            self.current_photo_id = refreshed_active_photo_id
+
+        self._refresh_selection_labels()
         self._refresh_visible_region_overlay(force_full=True)
-        self._update_mode_shortcuts()
         self.compare_viewer.setFocus(Qt.OtherFocusReason)
+
+    def _compare_limit_refresh_needed(self: MainWindow) -> bool:
+        return self._compare_limit_refresh_plan() is not None
+
+    def _compare_limit_refresh_plan(
+            self: MainWindow,
+    ) -> tuple[list[str], str] | None:
+        if not self._compare_mode:
+            return None
+
+        restore_photo_ids = (
+            list(self._compare_restore_selection_photo_ids)
+            or self.compare_viewer.photo_ids()
+        )
+        photo_ids = restore_photo_ids[: self.compare_viewer.photo_limit]
+        if len(photo_ids) < MIN_COMPARE_PHOTO_COUNT:
+            return None
+
+        active_photo_id = self.compare_viewer.active_photo_id()
+        next_active_photo_id = (
+            active_photo_id if active_photo_id in photo_ids else photo_ids[-1]
+        )
+        if (
+            self.compare_viewer.photo_ids() == photo_ids
+            and active_photo_id == next_active_photo_id
+        ):
+            return None
+
+        return photo_ids, next_active_photo_id
+
+    def _finish_compare_limit_refresh(self: MainWindow) -> None:
+        try:
+            self._refresh_compare_photos_for_limit()
+        finally:
+            self._hide_progress()
 
     def _exit_compare_mode(
             self: MainWindow, *, restore_previous: bool = True

@@ -351,7 +351,8 @@ Mode-transition summary:
   - disables split/viewer/scene-navigation shortcuts
   - preserves the current photo selection
 - Entering compare mode:
-  - displays up to eight photos from the resolved current selection
+  - displays up to the configured compare photo limit from the resolved current
+    selection
   - stores the full pre-compare selection for later restoration
   - hides the thumbnail, browse, and scene lists
   - makes the first compared photo current
@@ -365,8 +366,8 @@ Mode-transition summary:
 - Pressing `Esc` while in compare mode restores the previous view/browse state
   and the stored pre-compare selection.
 - Pressing `G` while in compare mode enters browse mode and restores the stored
-  pre-compare selection. If the user selected more than eight photos before
-  compare, compare shows only the capped first eight but browse restores the
+  pre-compare selection. If the user selected more photos than the configured
+  compare limit, compare shows only the capped set but browse restores the
   whole original selection.
 - Exiting browse mode:
   - restores the normal content splitter
@@ -539,8 +540,10 @@ Keep these expectations intact unless intentionally redesigning the UI:
   and either a single-pane viewer or split view with fit-left and zoom-right
   panes.
 - Compare mode is the side-by-side selected-photo grid entered with `C`; it
-  caps display at eight photos but preserves the full original selection when
-  returning to browse or the previous mode.
+  caps display at the configured compare limit but preserves the full original
+  selection when returning to browse or the previous mode. The default compare
+  limit is 8, configurable from `Compare > Limit` with options 2, 3, 4, 6, 8,
+  10, 12, 16, and 20.
 - When `Show AF point` is checked, the main viewer shows the fixed-size red AF
   point marker in fit view, manual/focus zoom, and both split-view panes.
 - First-time manual/focus zoom starts at the extracted AF point. Remembered

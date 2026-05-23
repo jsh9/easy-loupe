@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtGui import QAction, QKeySequence, QShortcut
+from PySide6.QtCore import QEvent, QSettings, Qt, QTimer
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -26,7 +26,11 @@ from PySide6.QtWidgets import (
 
 from easy_cull.ui.identity import APP_NAME, APP_VERSION
 from easy_cull.ui.theme import NO_METADATA_TEXT
-from easy_cull.ui.viewers.compare_photo_viewer import ComparePhotoViewer
+from easy_cull.ui.viewers.compare_photo_viewer import (
+    COMPARE_PHOTO_LIMIT_OPTIONS,
+    DEFAULT_COMPARE_PHOTO_LIMIT,
+    ComparePhotoViewer,
+)
 from easy_cull.ui.viewers.main_photo_viewer import MainPhotoViewer
 from easy_cull.ui.widgets import SceneListWidget
 
@@ -39,6 +43,7 @@ if TYPE_CHECKING:
     from easy_cull.ui.main_window.window import MainWindow
 
 VIEWER_KEYBOARD_PAN_STEP = 120
+COMPARE_PHOTO_LIMIT_SETTINGS_KEY = 'compare/photo_limit'
 
 
 class MainWindowBuildMixin:
@@ -239,7 +244,9 @@ class MainWindowBuildMixin:
         overlay_layout.addStretch(1)
 
     def _build_menu(self: MainWindow) -> None:
-        file_menu = self.menuBar().addMenu('&File')
+        menu_bar = self.menuBar()
+
+        file_menu = menu_bar.addMenu('&File')
         self.open_action = QAction('Open Folder', self)
         self.open_action.setShortcut(QKeySequence('Ctrl+O'))
         self.open_action.setShortcutContext(Qt.WindowShortcut)
@@ -263,7 +270,7 @@ class MainWindowBuildMixin:
         self.addAction(self.organize_action)
         file_menu.addAction(self.organize_action)
 
-        self.edit_menu = self.menuBar().addMenu('&Edit')
+        self.history_menu = menu_bar.addMenu('&History')
         self.undo_metadata_action = QAction('Undo', self)
         self.undo_metadata_action.setShortcut(QKeySequence('Ctrl+Z'))
         self.undo_metadata_action.setShortcutContext(Qt.WindowShortcut)
@@ -272,7 +279,7 @@ class MainWindowBuildMixin:
             lambda *_: None if self._busy else self._undo_metadata_edit()
         )
         self.addAction(self.undo_metadata_action)
-        self.edit_menu.addAction(self.undo_metadata_action)
+        self.history_menu.addAction(self.undo_metadata_action)
 
         self.redo_metadata_action = QAction('Redo', self)
         self.redo_metadata_action.setShortcut(QKeySequence('Ctrl+Y'))
@@ -282,9 +289,12 @@ class MainWindowBuildMixin:
             lambda *_: None if self._busy else self._redo_metadata_edit()
         )
         self.addAction(self.redo_metadata_action)
-        self.edit_menu.addAction(self.redo_metadata_action)
+        self.history_menu.addAction(self.redo_metadata_action)
 
-        self.assign_photo_menu = self.menuBar().addMenu('Assign to &Photo')
+        self.compare_menu = menu_bar.addMenu('&Compare')
+        self._build_compare_menu()
+
+        self.assign_photo_menu = menu_bar.addMenu('Assign to &Photo')
 
         self.rating_menu = self.assign_photo_menu.addMenu('&Rating')
         self.rating_actions = {
@@ -368,11 +378,66 @@ class MainWindowBuildMixin:
             ),
         }
 
-        self.help_menu = self.menuBar().addMenu('&Help')
+        self.help_menu = menu_bar.addMenu('&Help')
         self.about_action = QAction(f'About {APP_NAME}', self)
         self.about_action.setMenuRole(QAction.AboutRole)
         self.about_action.triggered.connect(self._show_about_dialog)
         self.help_menu.addAction(self.about_action)
+
+    def _build_compare_menu(self: MainWindow) -> None:
+        self.compare_limit_menu = self.compare_menu.addMenu('&Limit')
+        self.compare_limit_action_group = QActionGroup(self)
+        self.compare_limit_action_group.setExclusive(True)
+        self.compare_limit_actions: dict[int, QAction] = {}
+        for limit in COMPARE_PHOTO_LIMIT_OPTIONS:
+            action = QAction(f'{limit} Photos', self)
+            action.setCheckable(True)
+            action.triggered.connect(
+                lambda *_args, selected_limit=limit: (
+                    self._set_compare_photo_limit(selected_limit, persist=True)
+                )
+            )
+            self.compare_limit_action_group.addAction(action)
+            self.compare_limit_menu.addAction(action)
+            self.compare_limit_actions[limit] = action
+
+        self._set_compare_photo_limit(
+            self._load_compare_photo_limit(), persist=False
+        )
+
+    def _settings(self: MainWindow) -> QSettings:
+        return QSettings(APP_NAME, APP_NAME)
+
+    def _load_compare_photo_limit(self: MainWindow) -> int:
+        value = self._settings().value(
+            COMPARE_PHOTO_LIMIT_SETTINGS_KEY,
+            DEFAULT_COMPARE_PHOTO_LIMIT,
+        )
+        return self.compare_viewer.normalized_photo_limit(value)
+
+    def _set_compare_photo_limit(
+            self: MainWindow,
+            limit: object,
+            *,
+            persist: bool,
+    ) -> None:
+        normalized_limit = self.compare_viewer.set_photo_limit(limit)
+        action = self.compare_limit_actions.get(normalized_limit)
+        if action is not None and not action.isChecked():
+            action.setChecked(True)
+
+        if persist:
+            self._settings().setValue(
+                COMPARE_PHOTO_LIMIT_SETTINGS_KEY, normalized_limit
+            )
+
+        if self._compare_limit_refresh_needed():
+            self._show_progress(
+                'Re-rendering comparison grid...',
+                0,
+                show_bar=False,
+            )
+            QTimer.singleShot(0, self._finish_compare_limit_refresh)
 
     def _show_about_dialog(self: MainWindow) -> None:
         QMessageBox.about(

@@ -446,7 +446,13 @@ class MainWindowWorkflowMixin:
         if self._browse_mode:
             self._select_browse_item_for_current_photo()
 
-    def _show_progress(self: MainWindow, message: str, progress: int) -> None:
+    def _show_progress(
+            self: MainWindow,
+            message: str,
+            progress: int,
+            *,
+            show_bar: bool = True,
+    ) -> None:
         # Loading workflows use a two-phase progress scale:
         # 0..100 covers the primary library operation, and 101..200 covers
         # follow-up preview generation while the same progress UI remains open.
@@ -460,6 +466,7 @@ class MainWindowWorkflowMixin:
         self.progress_overlay.show()
         self.progress_overlay.raise_()
         self.overlay_message_label.setText(message)
+        self.overlay_progress_bar.setVisible(show_bar)
         self.overlay_progress_bar.setRange(0, max_value)
         self.overlay_progress_bar.setValue(max(0, min(max_value, progress)))
         self._update_progress_overlay_geometry()
@@ -467,6 +474,7 @@ class MainWindowWorkflowMixin:
 
     def _hide_progress(self: MainWindow) -> None:
         self.progress_overlay.hide()
+        self.overlay_progress_bar.setVisible(True)
         self.overlay_progress_bar.setRange(0, 100)
         self.overlay_progress_bar.setValue(0)
         self.overlay_message_label.setText('')
