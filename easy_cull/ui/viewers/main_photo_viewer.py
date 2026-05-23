@@ -37,7 +37,7 @@ class MainPhotoViewer(QWidget):
         self.splitter = QSplitter(Qt.Horizontal, self)
         self.splitter.setObjectName('splitModeSplitter')
         self.splitter.setChildrenCollapsible(False)
-        self.splitter.setHandleWidth(3)
+        self.splitter.setHandleWidth(6)
 
         self.split_fit_viewer = PhotoViewer(
             self.splitter, hold_zoom_enabled=True

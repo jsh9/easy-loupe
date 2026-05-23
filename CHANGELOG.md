@@ -1,5 +1,14 @@
 # Change Log
 
+## [Unreleased]
+
+- Added
+  - Left-mouse drag-to-pan support in manual zoom mode, allowing users to pan
+    photos by holding the left button and dragging (affects split-view right
+    panel and single-pane manual zoom mode)
+- Changed
+  - Increased split-view separation line thickness from 3 to 6 pixels
+
 ## [0.1.4] - 2026-05-23
 
 - Added
