@@ -106,6 +106,8 @@ class PhotoViewer(QGraphicsView):
         self._hold_zoom_enabled = hold_zoom_enabled
         self._hold_zoom_active = False
         self._last_hold_zoom_pos = QPointF()
+        self._pan_drag_active = False
+        self._last_pan_drag_pos = QPointF()
         self.set_theme(THEMES['light'])
 
     def set_photo(
@@ -430,7 +432,10 @@ class PhotoViewer(QGraphicsView):
             self._store_manual_view()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt API
-        """Temporarily zoom fit-to-window views while left button is held."""
+        """Temporarily zoom fit-to-window views or arm manual zoom pan."""
+        # Condition 1: Left-click in 'fit' mode with hold-zoom enabled.
+        # This triggers a temporary zoom-in inspection on the clicked point
+        # while the button is held.
         if (
             self._hold_zoom_enabled
             and event.button() == Qt.MouseButton.LeftButton
@@ -449,10 +454,23 @@ class PhotoViewer(QGraphicsView):
             event.accept()
             return
 
+        # Condition 2: Left-click in 'manual' zoom mode.
+        # This arms drag-to-pan so moving the mouse with the left button held
+        # will pan the image.
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and self._mode == 'manual'
+            and not self._image_size.isEmpty()
+        ):
+            self._pan_drag_active = True
+            self._last_pan_drag_pos = event.position()
+            event.accept()
+            return
+
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt API
-        """Pan the temporary hold-zoom viewport without storing manual zoom."""
+        """Pan the temporary hold-zoom viewport or manual zoom view."""
         if self._hold_zoom_active:
             delta = event.position() - self._last_hold_zoom_pos
             self._last_hold_zoom_pos = event.position()
@@ -464,15 +482,37 @@ class PhotoViewer(QGraphicsView):
             event.accept()
             return
 
+        if self._pan_drag_active:
+            delta = event.position() - self._last_pan_drag_pos
+            self._last_pan_drag_pos = event.position()
+            self._center_point -= QPointF(
+                delta.x() / max(self._current_scale, 0.001),
+                delta.y() / max(self._current_scale, 0.001),
+            )
+            self._apply_transform()
+            self._store_manual_view()
+            event.accept()
+            return
+
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt API
-        """Restore fit-to-window view when temporary hold-zoom finishes."""
+        """
+        Restore fit-to-window view when hold-zoom finishes or end drag pan.
+        """
         if (
             self._hold_zoom_active
             and event.button() == Qt.MouseButton.LeftButton
         ):
             self.set_fit_view()
+            event.accept()
+            return
+
+        if (
+            self._pan_drag_active
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            self._pan_drag_active = False
             event.accept()
             return
 

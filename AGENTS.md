@@ -78,6 +78,10 @@ Use the existing pytest suite as the first-line verification step.
 - Run tests: `uv run pytest`
 - Alternate full-suite checks: `tox -e py312`, `tox -e py313`, `tox -e ty`,
   `tox -e muff-lint`, `tox -e muff-format`, `tox -e pre-commit`
+- For every change, in addition to running tests, other non-pytest environments
+  in `tox` must also be run (e.g., `tox -e ty`, `tox -e muff-lint`,
+  `tox -e muff-format`, `tox -e pre-commit`), and any errors must be fixed. If
+  `tox -e pre-commit` produces errors, run `pre-commit run -a` to auto-format.
 
 Notes:
 
@@ -690,6 +694,9 @@ Additional assignment-menu behavior:
 
 ## 10. Editing Guidance
 
+- Limit line length to 79 characters for Python code, docstrings, and inline
+  comments (except for unbreakable lines and inline suppression of
+  linters/formatters).
 - Prefer small, surgical changes. This repo still has a lot of behavior packed
   into `ui/main_window/` and the core loading/preview pipeline, so broad
   refactors can create regressions quickly.

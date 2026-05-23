@@ -373,3 +373,65 @@ def test_photo_viewer_does_not_expose_compare_gesture_api(
     assert not hasattr(viewer, '_left_drag_active')
 
     viewer.close()
+
+
+def test_photo_viewer_manual_drag_pans_and_stores_view(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify that in manual/zoomed view, holding the left mouse button and
+    dragging pans the viewport, updates the normalized center, and saves the
+    updated view immediately in manual_views.
+    """
+    create_jpeg(tmp_path / 'IMG_7011.JPG', 'white')
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(320, 240)
+    viewer.show()
+    app.processEvents()
+
+    image_path = tmp_path / 'IMG_7011.JPG'
+    viewer.set_photo(image_path, (0.5, 0.5))
+
+    # Zoom in to enter manual mode
+    viewer.toggle_focus_zoom()
+    assert viewer._mode == 'manual'
+    assert viewer._pan_drag_active is False
+
+    center_before = viewer.normalized_viewport_center()
+    assert center_before is not None
+
+    # Simulate mouse press and drag
+    QTest.mousePress(
+        viewer.viewport(),
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(160, 120),
+    )
+    assert viewer._pan_drag_active is True
+
+    # Drag to the top-left (meaning the viewport shifts down-right)
+    QTest.mouseMove(viewer.viewport(), QPoint(100, 80))
+    app.processEvents()
+
+    center_after = viewer.normalized_viewport_center()
+    assert center_after is not None
+    assert center_after[0] > center_before[0]
+    assert center_after[1] > center_before[1]
+
+    # Verify that the manual view was saved automatically
+    saved_view = viewer._manual_views.get(str(image_path))
+    assert saved_view is not None
+    assert saved_view[1] == pytest.approx(center_after)
+
+    QTest.mouseRelease(
+        viewer.viewport(),
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(100, 80),
+    )
+    assert viewer._pan_drag_active is False
+    assert viewer._mode == 'manual'
+
+    viewer.close()
