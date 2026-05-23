@@ -22,6 +22,7 @@ from easy_cull.operations.common import (
 )
 from easy_cull.operations.export import organize_photos
 from easy_cull.operations.xmp import write_xmp_sidecars
+from easy_cull.ui.main_window.build import TRANSIENT_MESSAGE_TIMEOUT_MS
 from easy_cull.ui.main_window.dialogs import (
     OrganizerDialog,
     OrganizerDialogResult,
@@ -256,6 +257,13 @@ class MainWindowWorkflowMixin:
             self.viewer.set_fit_view()
 
         self._refresh_ui()
+        if self._compare_mode:
+            self._show_transient_message(
+                'Scene detection completed; you can view scenes outside'
+                ' the Compare mode.',
+                timeout_ms=TRANSIENT_MESSAGE_TIMEOUT_MS * 2,
+            )
+
         self._restore_thumbnail_strip_focus(defer=True)
 
     def _handle_scene_failed(self: MainWindow, error: str) -> None:

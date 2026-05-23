@@ -7,6 +7,10 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QSize
 from PySide6.QtWidgets import QListWidget, QListWidgetItem
 
+from easy_cull.ui.main_window.build import (
+    TRANSIENT_MESSAGE_FONT_SIZE_PX,
+    TRANSIENT_MESSAGE_FONT_WEIGHT,
+)
 from easy_cull.ui.theme import (
     FLAG_ROLE,
     NO_METADATA_TEXT,
@@ -434,6 +438,31 @@ class MainWindowPresentationMixin:
         self.progress_panel.setStyleSheet(
             f"""
             QFrame#progressPanel {{
+                background-color: {self.current_theme.viewer_background};
+                border: 1px solid {self.current_theme.button_border};
+                border-radius: 12px;
+            }}
+            """
+        )
+        self.transient_message_overlay.setStyleSheet(
+            """
+            QWidget#transientMessageOverlay {
+                background-color: rgba(20, 24, 29, 90);
+            }
+            """
+        )
+        self.transient_message_label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: {ttc};
+                font-size: {TRANSIENT_MESSAGE_FONT_SIZE_PX}px;
+                font-weight: {TRANSIENT_MESSAGE_FONT_WEIGHT};
+            }}
+            """
+        )
+        self.transient_message_panel.setStyleSheet(
+            f"""
+            QFrame#transientMessagePanel {{
                 background-color: {self.current_theme.viewer_background};
                 border: 1px solid {self.current_theme.button_border};
                 border-radius: 12px;

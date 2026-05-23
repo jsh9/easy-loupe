@@ -44,6 +44,9 @@ if TYPE_CHECKING:
 
 VIEWER_KEYBOARD_PAN_STEP = 120
 COMPARE_PHOTO_LIMIT_SETTINGS_KEY = 'compare/photo_limit'
+TRANSIENT_MESSAGE_FONT_SIZE_PX = 28
+TRANSIENT_MESSAGE_FONT_WEIGHT = 600
+TRANSIENT_MESSAGE_TIMEOUT_MS = 1600
 
 
 class MainWindowBuildMixin:
@@ -64,7 +67,9 @@ class MainWindowBuildMixin:
         self._build_top_bar(top_bar)
         self._build_view_mode_ui(root)
         self._build_progress_overlay()
+        self._build_transient_message_overlay()
         self._update_progress_overlay_geometry()
+        self._update_transient_message_overlay_geometry()
         self._apply_theme()
 
     def _build_top_bar(self: MainWindow, top_bar: QHBoxLayout) -> None:
@@ -242,6 +247,39 @@ class MainWindowBuildMixin:
         overlay_center.addStretch(1)
         overlay_layout.addLayout(overlay_center)
         overlay_layout.addStretch(1)
+
+    def _build_transient_message_overlay(self: MainWindow) -> None:
+        self.transient_message_overlay = QWidget(self.central_widget)
+        self.transient_message_overlay.setObjectName('transientMessageOverlay')
+        self.transient_message_overlay.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents
+        )
+        self.transient_message_overlay.setFocusPolicy(Qt.NoFocus)
+        self.transient_message_overlay.hide()
+        overlay_layout = QVBoxLayout(self.transient_message_overlay)
+        overlay_layout.setContentsMargins(0, 0, 0, 0)
+        overlay_layout.addStretch(1)
+        overlay_center = QHBoxLayout()
+        overlay_center.addStretch(1)
+        self.transient_message_panel = QFrame(self.transient_message_overlay)
+        self.transient_message_panel.setObjectName('transientMessagePanel')
+        self.transient_message_panel.setFocusPolicy(Qt.NoFocus)
+        panel_layout = QVBoxLayout(self.transient_message_panel)
+        panel_layout.setContentsMargins(22, 16, 22, 16)
+        self.transient_message_label = QLabel('', self.transient_message_panel)
+        self.transient_message_label.setAlignment(Qt.AlignCenter)
+        self.transient_message_label.setWordWrap(True)
+        self.transient_message_label.setFocusPolicy(Qt.NoFocus)
+        panel_layout.addWidget(self.transient_message_label)
+        overlay_center.addWidget(self.transient_message_panel)
+        overlay_center.addStretch(1)
+        overlay_layout.addLayout(overlay_center)
+        overlay_layout.addStretch(1)
+        self.transient_message_timer = QTimer(self)
+        self.transient_message_timer.setSingleShot(True)
+        self.transient_message_timer.timeout.connect(
+            self.transient_message_overlay.hide
+        )
 
     def _build_menu(self: MainWindow) -> None:
         menu_bar = self.menuBar()
@@ -467,7 +505,7 @@ class MainWindowBuildMixin:
             'C', self._enter_compare_mode
         )
         self.exit_compare_shortcut = self._make_shortcut(
-            Qt.Key_Escape, self._exit_compare_mode
+            Qt.Key_Escape, self._handle_escape_shortcut
         )
         self._assignment_shortcuts = [
             self._make_shortcut(
@@ -524,7 +562,9 @@ class MainWindowBuildMixin:
             not self._browse_mode and not self._compare_mode
         )
         viewer_shortcuts_enabled = not self._browse_mode or self._compare_mode
-        self.split_mode_shortcut.setEnabled(normal_view_shortcuts_enabled)
+        self.split_mode_shortcut.setEnabled(
+            normal_view_shortcuts_enabled or self._compare_mode
+        )
         self.browse_mode_shortcut.setEnabled(bool(self.library.photos))
         self.compare_mode_shortcut.setEnabled(
             not self._compare_mode and bool(self.library.photos)
@@ -551,10 +591,24 @@ class MainWindowBuildMixin:
         self.viewer.toggle_focus_zoom()
 
     def _handle_split_shortcut(self: MainWindow) -> None:
-        if self._browse_mode or self._compare_mode:
+        if self._compare_mode:
+            self._show_transient_message(
+                'Split view is not available\nin the Compare mode',
+            )
+            return
+
+        if self._browse_mode:
             return
 
         self.viewer.toggle_split_view()
+
+    def _handle_escape_shortcut(self: MainWindow) -> None:
+        if self.transient_message_overlay.isVisible():
+            self.transient_message_timer.stop()
+            self.transient_message_overlay.hide()
+            return
+
+        self._exit_compare_mode()
 
     def _move_compare_selection(
             self: MainWindow, row_delta: int, column_delta: int
@@ -622,11 +676,30 @@ class MainWindowBuildMixin:
         """Match the progress overlay to the current central widget bounds."""
         self.progress_overlay.setGeometry(self.central_widget.rect())
 
+    def _update_transient_message_overlay_geometry(self: MainWindow) -> None:
+        """Match the transient message overlay to the central widget bounds."""
+        self.transient_message_overlay.setGeometry(self.central_widget.rect())
+
+    def _show_transient_message(
+            self: MainWindow,
+            message: str,
+            *,
+            timeout_ms: int = TRANSIENT_MESSAGE_TIMEOUT_MS,
+    ) -> None:
+        self.transient_message_label.setText(message)
+        self._update_transient_message_overlay_geometry()
+        self.transient_message_overlay.show()
+        self.transient_message_overlay.raise_()
+        self.transient_message_timer.start(timeout_ms)
+
     def resizeEvent(self: MainWindow, event: QResizeEvent) -> None:  # noqa: N802 - Qt API
         """Keep overlay geometry and browse layout in sync with window size."""
         super().resizeEvent(event)
         if hasattr(self, 'progress_overlay'):
             self._update_progress_overlay_geometry()
+
+        if hasattr(self, 'transient_message_overlay'):
+            self._update_transient_message_overlay_geometry()
 
         if (
             getattr(self, '_browse_mode', False)

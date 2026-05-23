@@ -19,6 +19,7 @@ from easy_cull.core.records import METADATA_FILENAME
 from easy_cull.ui.main_window.build import VIEWER_KEYBOARD_PAN_STEP
 from tests.ui._helpers import (
     create_main_window_with_library,
+    set_scene_detection_result,
     trigger_scene_shortcut,
 )
 
@@ -147,6 +148,98 @@ def test_compare_mode_uses_selection_count_for_grid_below_configured_limit(
         1,
         3,
     )
+
+    window.close()
+
+
+def test_compare_mode_split_shortcut_shows_no_effect_message(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify split-view shortcut gives feedback instead of silently doing
+    nothing.
+
+    Compare mode does not support split view, but the shortcut remains enabled
+    so users get an explanatory transient message.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_99600', 'dimgray'), ('IMG_99601', 'blue')],
+    )
+
+    _select_rows(window.thumbnail_list, [0, 1])
+    app.processEvents()
+    window.compare_mode_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._compare_mode is True
+    assert window.split_mode_shortcut.isEnabled() is True
+
+    window.split_mode_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.viewer.is_split_view() is False
+    assert window.transient_message_overlay.isVisible() is True
+    assert window.transient_message_label.text() == (
+        'Split view is not available\nin the Compare mode'
+    )
+    assert window.transient_message_timer.interval() == 1600
+
+    window.exit_compare_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._compare_mode is True
+    assert window.transient_message_overlay.isHidden() is True
+
+    window.exit_compare_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._compare_mode is False
+
+    window.close()
+
+
+def test_compare_mode_scene_detection_finish_shows_scene_notice(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify scene-detection completion explains where scenes are visible.
+
+    Scene detection can complete while compare mode remains active, so users
+    need a transient hint that scene navigation appears outside compare mode.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_99700', 'dimgray'),
+            ('IMG_99701', 'blue'),
+            ('IMG_99702', 'green'),
+        ],
+    )
+
+    _select_rows(window.thumbnail_list, [0, 1])
+    app.processEvents()
+    window.compare_mode_shortcut.activated.emit()
+    app.processEvents()
+
+    set_scene_detection_result(
+        window,
+        [['IMG_99700', 'IMG_99701'], ['IMG_99702']],
+    )
+
+    window._handle_scene_finished()
+    app.processEvents()
+
+    assert window._compare_mode is True
+    assert window.viewer_stack.currentWidget() is window.compare_viewer
+    assert window.transient_message_overlay.isVisible() is True
+    assert window.transient_message_label.text() == (
+        'Scene detection completed; you can view scenes'
+        ' outside the Compare mode.'
+    )
+    assert window.transient_message_timer.interval() == 3200
 
     window.close()
 
