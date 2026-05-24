@@ -8,6 +8,10 @@
     panel and single-pane manual zoom mode)
 - Changed
   - Increased split-view separation line thickness from 3 to 6 pixels
+- Fixed
+  - Tagging a photo in the horizontal scene strip no longer causes sticky
+    selection; navigating away after tagging now shows only the navigated-to
+    photo as selected and subsequent tags apply to only that photo
 
 ## [0.1.4] - 2026-05-23
 

@@ -242,7 +242,7 @@ class MainWindowNavigationMixin:
         self._sync_left_list_for_photo(
             self.current_photo_id,
             suppress_signals=True,
-            preserve_selection=True,
+            preserve_selection=self._selection_extending_modifier_active(),
         )
         self._refresh_selection_labels()
         self._refresh_selection_styles(

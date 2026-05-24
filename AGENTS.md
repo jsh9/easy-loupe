@@ -497,8 +497,15 @@ Mode-transition summary:
   the active compare pane, not every compared photo or the hidden restore
   selection.
 - Metadata changes write immediately through `library.save_metadata()`.
-- Metadata-only refreshes keep the current selection and preserve the current
-  scroll position in the left thumbnail strip and browse grid.
+- Metadata-only refreshes preserve the current scroll position in the left
+  thumbnail strip and browse grid. Explicit multi-selection (more than one
+  selected item) is restored after repopulation; single-item selection is left
+  to `setCurrentRow` in the populate methods so it integrates cleanly with Qt's
+  selection model and does not create sticky selection state.
+- Navigating within the scene strip without Shift/Ctrl gives the left thumbnail
+  strip a clean single-item selection (the scene cover). Only Shift/Ctrl
+  navigation preserves accumulated thumbnail selection across scene-strip
+  moves.
 - Clearing all assigned metadata for a photo removes that photo's persisted
   entry from `easy-cull.json`.
 - When scene stacks are shown in the left strip:
@@ -667,8 +674,14 @@ Additional assignment-menu behavior:
     remains higher priority
   - verify scene-detection completion preserves split view in normal view mode
     but still exits browse mode back to fit view
-  - verify metadata refreshes preserve selection and scroll position when the
-    user tags photos in the thumbnail strip or browse grid
+  - verify metadata refreshes preserve scroll position when the user tags
+    photos in the thumbnail strip or browse grid
+  - verify that tagging a single photo in the scene strip does not cause
+    sticky selection: navigating away after tagging should show only the
+    navigated-to photo as selected, and subsequent tagging should apply to
+    only that photo
+  - verify that multi-selection tagging (Shift/Ctrl) still applies to all
+    selected photos and preserves the extended selection after the refresh
 - If you change organizer, XMP, or undo behavior:
   - test the dialog defaults and typed option mapping when UI-facing behavior
     changes
@@ -704,6 +717,9 @@ Additional assignment-menu behavior:
   coordinate through shared mutable state such as `current_photo_id`, `_busy`,
   `_scene_thread`, and `scene_detection_done`.
 - Keep README and tests aligned with any user-visible behavior change.
+- After any UI, UX, feature, or bug-fix change, update `AGENTS.md` to reflect
+  the new behavior (sections 8 and 9 in particular) and add an entry to
+  `CHANGELOG.md` under `[Unreleased]`.
 - When adding inline comments, explain both what the line or block is doing and
   why that line or block is necessary. Prefer this for non-obvious control
   flow, state preservation, timing, or framework behavior; avoid comments that
