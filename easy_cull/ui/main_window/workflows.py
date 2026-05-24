@@ -636,7 +636,8 @@ class MainWindowWorkflowMixin:
         self._populate_browse_list(scroll_current_item_into_view=False)
         self._populate_scene_list()
         for list_widget, selected_ids in selection_states.items():
-            self._restore_selected_item_ids(list_widget, selected_ids)
+            if len(selected_ids) > 1:
+                self._restore_selected_item_ids(list_widget, selected_ids)
 
         for list_widget, scroll_state in scroll_states.items():
             self._restore_scroll_state(list_widget, scroll_state)
