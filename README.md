@@ -256,7 +256,9 @@ Common transitions:
   size, then press `Space` again to toggle that photo between fit and 100%.
 - Press `Z` in the compare grid to toggle focus zoom for all compared panes, or
   while a single compare photo is open to toggle that photo between fit and
-  100%.
+  100%. If a small photo already displays at 100% in fit-to-window mode, that
+  selected-photo toggle changes the internal fit/inspection state without a
+  visible scale change.
 - Press `Space` in single-pane fit view to enter manual/focus zoom.
 - Press `Space` in single-pane manual view to return to fit view.
 - Press `Z` in normal view mode as an alternate shortcut for the same

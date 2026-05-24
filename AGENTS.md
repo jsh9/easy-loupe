@@ -371,11 +371,13 @@ Mode-transition summary:
 - Pressing `Space` while in the compare grid opens the active compared photo
   alone in fit-to-window size.
 - Pressing `Space` while that selected compare photo is open toggles that photo
-  between fit view and 100% zoom, including photos that already fit at 100%.
+  between fit view and 100% zoom. For a small photo that already fits at 100%,
+  this changes internal fit/inspection state without a visible scale change.
 - Pressing `Z` while in the compare grid toggles every compared pane between
   fit view and AF-centered 100% zoom.
 - Pressing `Z` while a selected compare photo is open toggles that photo
-  between fit view and 100% zoom, including photos that already fit at 100%.
+  between fit view and 100% zoom. For a small photo that already fits at 100%,
+  this changes internal fit/inspection state without a visible scale change.
 - Pressing `Esc` while a selected compare photo is open returns to the
   comparison grid.
 - Pressing `Esc` while in compare mode restores the previous view/browse state
