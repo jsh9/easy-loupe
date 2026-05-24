@@ -364,10 +364,10 @@ class PhotoViewer(QGraphicsView):
             max(0.0, min(1.0, center[0])),
             max(0.0, min(1.0, center[1])),
         )
-        self._current_scale = min(
-            self._max_scale(),
-            max(1.0, self._minimum_scale_for_center(normalized_center)),
-        )
+        # What: set actual-size zoom to one image pixel per screen pixel.
+        # Why: viewport-fitting minimums can exceed 1.0 on oversized/offscreen
+        # test viewports, which would make "100%" larger than actual size.
+        self._current_scale = min(self._max_scale(), 1.0)
         self._center_point = QPointF(
             normalized_center[0] * self._image_size.width(),
             normalized_center[1] * self._image_size.height(),
