@@ -493,6 +493,9 @@ class MainWindowBuildMixin:
         self.space_shortcut = self._make_shortcut(
             Qt.Key_Space, self._handle_space_shortcut
         )
+        self.zoom_toggle_shortcut = self._make_shortcut(
+            'Z', self._handle_zoom_toggle_shortcut
+        )
         self.browse_mode_shortcut = self._make_shortcut(
             'G', self._enter_browse_mode
         )
@@ -582,11 +585,21 @@ class MainWindowBuildMixin:
 
     def _handle_space_shortcut(self: MainWindow) -> None:
         if self._compare_mode:
-            self.compare_viewer.toggle_focus_zoom()
+            self.compare_viewer.handle_space_shortcut()
             return
 
         if self._browse_mode:
             self._exit_browse_mode(force_fit_photo=True)
+            return
+
+        self.viewer.toggle_focus_zoom()
+
+    def _handle_zoom_toggle_shortcut(self: MainWindow) -> None:
+        if self._compare_mode:
+            self.compare_viewer.toggle_grid_focus_zoom()
+            return
+
+        if self._browse_mode:
             return
 
         self.viewer.toggle_focus_zoom()
@@ -607,6 +620,9 @@ class MainWindowBuildMixin:
         if self.transient_message_overlay.isVisible():
             self.transient_message_timer.stop()
             self.transient_message_overlay.hide()
+            return
+
+        if self._compare_mode and self.compare_viewer.return_to_grid():
             return
 
         self._exit_compare_mode()

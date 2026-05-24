@@ -232,25 +232,33 @@ build keeps a terminal attached so startup errors include a normal traceback.
 - `Browse mode` is the full-photo grid view.
 - `Compare mode` is a side-by-side inspection grid entered from the current
   selection. It displays up to the configured compare limit, tracks one active
-  pane for tagging, and can lock zoom/pan across panes. The default limit is 8
-  photos, configurable from `Compare > Limit` with options 2, 3, 4, 6, 8, 10,
-  12, 16, and 20.
+  pane for tagging, can open that active photo alone for fit/100% inspection,
+  and can lock zoom/pan across panes. The default limit is 8 photos,
+  configurable from `Compare > Limit` with options 2, 3, 4, 6, 8, 10, 12, 16,
+  and 20.
 
 Common transitions:
 
 - Press `G` to enter browse mode from normal view mode.
 - Press `C` to enter compare mode for the current selection when at least two
   photos are selected.
-- Press `Esc` in compare mode to restore the previous view or browse selection.
+- Press `Esc` in the compare grid to restore the previous view or browse
+  selection.
+- Press `Esc` while a single compare photo is open to return to the comparison
+  grid.
 - Press `G` in compare mode to enter browse mode with the original pre-compare
   selection restored. If more photos were selected than the configured compare
   limit, compare displays only the capped set, but browse restores the full
   original selection.
 - Press `Space` in browse mode to return to single-pane fit view for the
   current photo.
-- Press `Space` in compare mode to toggle focus zoom for the compared panes.
+- Press `Space` in the compare grid to open the active photo in fit-to-window
+  size, then press `Space` again to toggle that photo between fit and 100%.
+- Press `Z` in the compare grid to toggle focus zoom for all compared panes.
 - Press `Space` in single-pane fit view to enter manual/focus zoom.
 - Press `Space` in single-pane manual view to return to fit view.
+- Press `Z` in normal view mode as an alternate shortcut for the same
+  fit/manual zoom toggle as `Space`.
 - Press `\` in normal view mode to toggle split view on or off.
 - Press `Space` in split view to promote the right zoomed pane into single-pane
   manual view.
@@ -274,10 +282,12 @@ Common transitions:
   `Ctrl+Y` redoes it
 - Organizer: `Ctrl+Shift+E` opens the organizer/XMP dialog
 - Browse, view, and compare mode: `G` enters browse mode, `C` enters compare
-  mode, `Esc` exits compare mode, `Space` exits browse mode into fit-to-window
-  view mode, promotes split view into full zoom, toggles focus zoom in
-  single-pane view mode, or toggles compare focus zoom, and double-clicking a
-  browse thumbnail opens that photo in fit-to-window view mode
+  mode, `Esc` exits compare mode or returns from selected-photo compare view to
+  the grid, `Space` exits browse mode into fit-to-window view mode, promotes
+  split view into full zoom, toggles focus zoom in single-pane view mode, or
+  opens/toggles the active compare photo, `Z` mirrors `Space` in view mode and
+  toggles all compare-grid panes, and double-clicking a browse thumbnail opens
+  that photo in fit-to-window view mode
 - Selection: use normal extended-selection gestures in the thumbnail and browse
   lists; after scene detection, `Shift+Left` / `Shift+Right` extends the
   horizontal scene-strip selection and `Shift+Up` / `Shift+Down` extends across

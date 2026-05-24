@@ -333,6 +333,48 @@ class PhotoViewer(QGraphicsView):
             self._focus_point.y(),
         ))
 
+    def toggle_actual_size_zoom(self) -> None:
+        """Toggle between fit view and 100% zoom at the focus point."""
+        if self._image_size.isEmpty():
+            return
+
+        self._hold_zoom_active = False
+        if (
+            self._mode == 'fit'
+            or self._current_scale <= self._fit_scale + 0.001
+        ):
+            self.zoom_to_actual_size((
+                self._focus_point.x(),
+                self._focus_point.y(),
+            ))
+            return
+
+        self._store_manual_view()
+        self.set_fit_view()
+
+    def zoom_to_actual_size(self, center: tuple[float, float]) -> None:
+        """Zoom to a center at one image pixel per screen pixel."""
+        if self._image_size.isEmpty():
+            return
+
+        self._hold_zoom_active = False
+        self._fit_scale = self._compute_fit_scale()
+        self._mode = 'manual'
+        normalized_center = (
+            max(0.0, min(1.0, center[0])),
+            max(0.0, min(1.0, center[1])),
+        )
+        self._current_scale = min(
+            self._max_scale(),
+            max(1.0, self._minimum_scale_for_center(normalized_center)),
+        )
+        self._center_point = QPointF(
+            normalized_center[0] * self._image_size.width(),
+            normalized_center[1] * self._image_size.height(),
+        )
+        self._apply_transform()
+        self._store_manual_view()
+
     def zoom_to_normalized_center(
             self,
             center: tuple[float, float],

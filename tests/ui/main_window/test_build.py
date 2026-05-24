@@ -58,6 +58,14 @@ def test_mode_shortcuts_trigger_correct_state_transitions(
     assert window.content_splitter.isVisible() is True
     assert window.viewer._mode == 'single-fit'
 
+    window.zoom_toggle_shortcut.activated.emit()
+    app.processEvents()
+    assert window.viewer._mode == 'single-manual'
+
+    window.zoom_toggle_shortcut.activated.emit()
+    app.processEvents()
+    assert window.viewer._mode == 'single-fit'
+
     window.split_mode_shortcut.activated.emit()
     app.processEvents()
     assert window.viewer.is_split_view() is True

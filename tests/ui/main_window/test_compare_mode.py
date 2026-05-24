@@ -475,6 +475,99 @@ def test_compare_mode_keyboard_pan_step_scales_with_zoom(
     window.close()
 
 
+def test_compare_mode_space_inspects_active_photo_and_esc_returns_to_grid(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify Space opens one compare pane and Esc returns before exiting compare.
+
+    ``Esc`` has two compare-mode meanings now: leave the selected-photo view
+    first, then exit Compare from the grid. This keeps one-photo inspection
+    from disrupting the surrounding comparison set.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_9650', 'dimgray'), ('IMG_9651', 'blue')],
+    )
+
+    _select_rows(window.thumbnail_list, [0, 1])
+    app.processEvents()
+    window.compare_mode_shortcut.activated.emit()
+    app.processEvents()
+    window.compare_viewer.set_active_photo_id('IMG_9651')
+
+    window.space_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._compare_mode is True
+    assert window.compare_viewer.is_selected_photo_view() is True
+    assert window.compare_viewer.selected_viewer._mode == 'fit'
+    assert window.compare_viewer.active_photo_id() == 'IMG_9651'
+
+    window.space_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.compare_viewer.selected_viewer._mode == 'manual'
+    assert (
+        window.compare_viewer.selected_viewer._current_scale
+        == pytest.approx(1.0)
+    )
+
+    window.exit_compare_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._compare_mode is True
+    assert window.compare_viewer.is_selected_photo_view() is False
+
+    window.exit_compare_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._compare_mode is False
+
+    window.close()
+
+
+def test_compare_mode_z_toggles_all_grid_panes(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify Z carries the old all-pane compare zoom behavior.
+
+    Space now opens the active photo, so the all-photo focus zoom needs its own
+    shortcut to preserve synchronized comparison.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_9660', 'dimgray'), ('IMG_9661', 'blue')],
+    )
+
+    _select_rows(window.thumbnail_list, [0, 1])
+    app.processEvents()
+    window.compare_mode_shortcut.activated.emit()
+    app.processEvents()
+
+    window.zoom_toggle_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.compare_viewer.is_selected_photo_view() is False
+    assert all(
+        viewer.should_preserve_zoom()
+        for viewer in window.compare_viewer._viewers
+    )
+
+    window.zoom_toggle_shortcut.activated.emit()
+    app.processEvents()
+
+    assert all(
+        not viewer.should_preserve_zoom()
+        for viewer in window.compare_viewer._viewers
+    )
+
+    window.close()
+
+
 def test_compare_mode_uses_exact_scene_selection_instead_of_expanding_stack(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

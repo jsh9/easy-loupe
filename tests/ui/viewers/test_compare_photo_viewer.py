@@ -10,8 +10,10 @@ from PySide6.QtWidgets import QApplication
 from easy_cull.ui.theme import THEMES
 from easy_cull.ui.viewers.compare_photo_viewer import (
     ACTIVE_COMPARE_BORDER_WIDTH,
+    COMPARE_GRID_HELP_TEXT,
     COMPARE_HELP_TEXT,
     COMPARE_PHOTO_LIMIT_OPTIONS,
+    COMPARE_SELECTED_HELP_TEXT,
     DEFAULT_COMPARE_PHOTO_LIMIT,
     ComparePhoto,
     ComparePhotoViewer,
@@ -267,6 +269,7 @@ def test_compare_photo_viewer_shows_helper_metadata_and_active_border(
     app.processEvents()
 
     assert viewer.help_label.text() == COMPARE_HELP_TEXT
+    assert viewer.help_label.text() == COMPARE_GRID_HELP_TEXT
     assert viewer._metadata_labels[0].text() == '★★★★★'
     assert viewer._metadata_labels[1].text() == '✅'
     assert f'border: {ACTIVE_COMPARE_BORDER_WIDTH}px' in (
@@ -292,6 +295,68 @@ def test_compare_photo_viewer_shows_helper_metadata_and_active_border(
     )
     assert viewer._theme.button_border in viewer._frames[0].styleSheet()
     assert viewer._theme.selected_background in viewer._frames[1].styleSheet()
+
+    _close_viewer(viewer, app)
+
+
+def test_compare_photo_viewer_space_opens_active_photo_and_toggles_actual_size(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify Space moves from the grid into active-photo fit/100% inspection.
+
+    Compare mode now has two nested states: the multi-photo grid and a
+    selected-photo view. This protects the shortcut contract and the helper
+    text that tells users how to get back to the grid.
+    """
+    create_jpeg(tmp_path / 'IMG_9006.JPG', 'dimgray')
+    create_jpeg(tmp_path / 'IMG_9007.JPG', 'blue')
+
+    app = QApplication.instance() or QApplication([])
+    viewer = ComparePhotoViewer()
+    viewer.resize(640, 480)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_photos([
+        ComparePhoto('IMG_9006', tmp_path / 'IMG_9006.JPG', (0.25, 0.75)),
+        ComparePhoto('IMG_9007', tmp_path / 'IMG_9007.JPG', (0.5, 0.5)),
+    ])
+    viewer.set_active_photo_id('IMG_9007')
+    app.processEvents()
+
+    viewer.handle_space_shortcut()
+    app.processEvents()
+
+    assert viewer.is_selected_photo_view() is True
+    assert viewer.grid_widget.isHidden() is True
+    assert viewer.selected_widget.isVisible() is True
+    assert viewer.help_label.text() == COMPARE_SELECTED_HELP_TEXT
+    assert viewer.lock_zoom_button.isHidden() is True
+    assert viewer.selected_viewer._mode == 'fit'
+
+    viewer.handle_space_shortcut()
+    app.processEvents()
+
+    assert viewer.selected_viewer._mode == 'manual'
+    assert viewer.selected_viewer.current_zoom_factor() > 1.0
+    assert viewer.selected_viewer._current_scale == pytest.approx(1.0)
+    assert (
+        viewer.selected_viewer.normalized_viewport_center()
+        == pytest.approx((0.5, 0.5))
+    )
+
+    viewer.handle_space_shortcut()
+    app.processEvents()
+
+    assert viewer.selected_viewer._mode == 'fit'
+
+    assert viewer.return_to_grid() is True
+    assert viewer.is_selected_photo_view() is False
+    assert viewer.grid_widget.isVisible() is True
+    assert viewer.selected_widget.isHidden() is True
+    assert viewer.help_label.text() == COMPARE_GRID_HELP_TEXT
+    assert viewer.lock_zoom_button.isVisible() is True
 
     _close_viewer(viewer, app)
 
