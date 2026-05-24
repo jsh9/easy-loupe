@@ -3,12 +3,20 @@
 ## [Unreleased]
 
 - Added
+  - Compare mode can open the active photo alone with `Space`, toggle that
+    photo between fit and 100%, return to the grid with `Esc`, and use `Z` for
+    the previous all-photo compare zoom or selected-photo fit/100% zoom
   - Left-mouse drag-to-pan support in manual zoom mode, allowing users to pan
     photos by holding the left button and dragging (affects split-view right
     panel and single-pane manual zoom mode)
 - Changed
   - Increased split-view separation line thickness from 3 to 6 pixels
 - Fixed
+  - Selected-photo compare view now keeps the correct internal zoom state for
+    small photos that already display at 100% in fit-to-window mode: pressing
+    `Space` or `Z` advances the state as
+    `fit 100% -> 100% inspection -> fit 100%`, even though users will not see a
+    visual scale change in that case
   - Tagging a photo in the horizontal scene strip no longer causes sticky
     selection; navigating away after tagging now shows only the navigated-to
     photo as selected and subsequent tags apply to only that photo

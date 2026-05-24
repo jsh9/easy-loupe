@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtTest import QTest
 
 from easy_cull.core.records import METADATA_FILENAME
 from easy_cull.ui.main_window.build import VIEWER_KEYBOARD_PAN_STEP
@@ -475,6 +474,164 @@ def test_compare_mode_keyboard_pan_step_scales_with_zoom(
     window.close()
 
 
+def test_compare_mode_space_inspects_active_photo_and_esc_returns_to_grid(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify Space opens one compare pane and Esc returns before exiting compare.
+
+    ``Esc`` has two compare-mode meanings now: leave the selected-photo view
+    first, then exit Compare from the grid. This keeps one-photo inspection
+    from disrupting the surrounding comparison set.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_9650', 'dimgray'), ('IMG_9651', 'slategray')],
+    )
+
+    _select_rows(window.thumbnail_list, [0, 1])
+    app.processEvents()
+    window.compare_mode_shortcut.activated.emit()
+    app.processEvents()
+    window.compare_viewer.set_active_photo_id('IMG_9651')
+
+    window.space_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._compare_mode is True
+    assert window.compare_viewer.is_selected_photo_view() is True
+    assert window.compare_viewer.selected_viewer._mode == 'fit'
+    assert window.compare_viewer.active_photo_id() == 'IMG_9651'
+
+    window.space_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.compare_viewer.selected_viewer._mode == 'manual'
+    assert (
+        window.compare_viewer.selected_viewer._current_scale
+        == pytest.approx(1.0)
+    )
+
+    window.exit_compare_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._compare_mode is True
+    assert window.compare_viewer.is_selected_photo_view() is False
+
+    window.exit_compare_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._compare_mode is False
+
+    window.close()
+
+
+def test_compare_mode_z_toggles_all_grid_panes(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify Z carries the old all-pane compare zoom behavior.
+
+    Space now opens the active photo, so the all-photo focus zoom needs its own
+    shortcut to preserve synchronized comparison.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_9660', 'dimgray'), ('IMG_9661', 'slategray')],
+    )
+
+    _select_rows(window.thumbnail_list, [0, 1])
+    app.processEvents()
+    window.compare_mode_shortcut.activated.emit()
+    app.processEvents()
+
+    window.zoom_toggle_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.compare_viewer.is_selected_photo_view() is False
+    assert all(
+        viewer.should_preserve_zoom()
+        for viewer in window.compare_viewer._viewers
+    )
+
+    window.zoom_toggle_shortcut.activated.emit()
+    app.processEvents()
+
+    assert all(
+        not viewer.should_preserve_zoom()
+        for viewer in window.compare_viewer._viewers
+    )
+
+    window.close()
+
+
+def test_compare_mode_z_toggles_selected_photo_without_changing_grid(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify Z zooms the visible selected photo in selected-photo compare view.
+
+    The compare grid is hidden in this sub-mode, so the shortcut should affect
+    the visible selected photo instead of silently changing hidden grid panes.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_9670', 'dimgray'), ('IMG_9671', 'slategray')],
+    )
+
+    _select_rows(window.thumbnail_list, [0, 1])
+    app.processEvents()
+    window.compare_mode_shortcut.activated.emit()
+    app.processEvents()
+    window.compare_viewer.set_active_photo_id('IMG_9671')
+
+    window.space_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.compare_viewer.is_selected_photo_view() is True
+    assert window.compare_viewer.selected_viewer._mode == 'fit'
+    assert all(
+        not viewer.should_preserve_zoom()
+        for viewer in window.compare_viewer._viewers
+    )
+
+    window.zoom_toggle_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.compare_viewer.selected_viewer._mode == 'manual'
+    assert (
+        window.compare_viewer.selected_viewer._current_scale
+        == pytest.approx(1.0)
+    )
+    assert all(
+        not viewer.should_preserve_zoom()
+        for viewer in window.compare_viewer._viewers
+    )
+
+    window.zoom_toggle_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.compare_viewer.selected_viewer._mode == 'fit'
+    assert all(
+        not viewer.should_preserve_zoom()
+        for viewer in window.compare_viewer._viewers
+    )
+
+    window.exit_compare_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.compare_viewer.is_selected_photo_view() is False
+    assert all(
+        not viewer.should_preserve_zoom()
+        for viewer in window.compare_viewer._viewers
+    )
+
+    window.close()
+
+
 def test_compare_mode_uses_exact_scene_selection_instead_of_expanding_stack(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -583,7 +740,7 @@ def test_compare_mode_arrow_selection_tags_only_active_photo(
     app.processEvents()
     assert window.compare_viewer.active_photo_id() == 'IMG_9400'
 
-    QTest.keyClick(window, Qt.Key_Right)
+    window._compare_nav_shortcuts[1].activated.emit()
     app.processEvents()
 
     assert window.compare_viewer.active_photo_id() == 'IMG_9401'
@@ -631,7 +788,7 @@ def test_compare_mode_g_enters_browse_with_compared_photos_selected(
     window.compare_mode_shortcut.activated.emit()
     app.processEvents()
 
-    QTest.keyClick(window, Qt.Key_Right)
+    window._compare_nav_shortcuts[1].activated.emit()
     app.processEvents()
     window.browse_mode_shortcut.activated.emit()
     app.processEvents()
@@ -686,7 +843,7 @@ def test_compare_mode_from_browse_restores_original_selection(
 
     window.compare_mode_shortcut.activated.emit()
     app.processEvents()
-    QTest.keyClick(window, Qt.Key_Right)
+    window._compare_nav_shortcuts[1].activated.emit()
     app.processEvents()
 
     getattr(window, exit_shortcut_attr).activated.emit()
@@ -804,7 +961,7 @@ def test_compare_mode_from_scene_restores_exact_mixed_selection(
 
     window.compare_mode_shortcut.activated.emit()
     app.processEvents()
-    QTest.keyClick(window, Qt.Key_Right)
+    window._compare_nav_shortcuts[1].activated.emit()
     app.processEvents()
     getattr(window, exit_shortcut_attr).activated.emit()
     app.processEvents()

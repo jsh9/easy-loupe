@@ -48,10 +48,15 @@ ACTIVE_COMPARE_BORDER_WIDTH = 4
 SHORT_ROW_MAX_PHOTOS = 3
 VERTICAL_ASPECT_RATIO_MAX = 1.0
 VERTICAL_FOUR_PHOTO_ROW_THRESHOLD = 3
-COMPARE_HELP_TEXT = (
-    'Use ←→↑↓ to navigate. Tag as usual. Use W/A/S/D or mouse to pan. '
-    'Esc to exit. G to enter the Browse mode'
+COMPARE_GRID_HELP_TEXT = (
+    'Use ←→↑↓ to navigate. Space opens the active photo. '
+    'Z zooms all photos. Esc exits Compare. G enters Browse.'
 )
+COMPARE_SELECTED_HELP_TEXT = (
+    'Selected photo view: Space toggles fit and 100%. '
+    'Esc returns to the comparison grid.'
+)
+COMPARE_HELP_TEXT = COMPARE_GRID_HELP_TEXT
 
 
 @dataclass(frozen=True)
@@ -199,6 +204,7 @@ class ComparePhotoViewer(QWidget):
         self._viewers: list[PhotoViewer] = []
         self._frames: list[QFrame] = []
         self._metadata_labels: list[QLabel] = []
+        self._selected_photo_view_active = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -225,6 +231,23 @@ class ComparePhotoViewer(QWidget):
         self.grid_layout.setContentsMargins(0, 0, 0, 0)
         self.grid_layout.setSpacing(6)
         root.addWidget(self.grid_widget, 1)
+
+        self.selected_widget = QWidget(self)
+        selected_layout = QVBoxLayout(self.selected_widget)
+        selected_layout.setContentsMargins(0, 0, 0, 0)
+        selected_layout.setSpacing(4)
+        self.selected_viewer = PhotoViewer(self.selected_widget)
+        self.selected_metadata_label = QLabel(self.selected_widget)
+        self.selected_metadata_label.setObjectName('compareMetadataLabel')
+        self.selected_metadata_label.setAlignment(Qt.AlignCenter)
+        self.selected_metadata_label.setTextFormat(Qt.RichText)
+        self.selected_metadata_label.setFixedHeight(
+            self.selected_metadata_label.fontMetrics().height() + 4
+        )
+        selected_layout.addWidget(self.selected_viewer, 1)
+        selected_layout.addWidget(self.selected_metadata_label)
+        self.selected_widget.hide()
+        root.addWidget(self.selected_widget, 1)
 
         self.set_theme(self._theme)
 
@@ -348,6 +371,8 @@ class ComparePhotoViewer(QWidget):
 
     def clear(self) -> None:
         """Remove all compare panes."""
+        self._set_selected_photo_view_active(active=False)
+        self.selected_viewer.clear_photo()
         self._reset_grid_stretches()
         while self.grid_layout.count():
             item = self.grid_layout.takeAt(0)
@@ -414,16 +439,28 @@ class ComparePhotoViewer(QWidget):
             label.setText(self._metadata_label_text(metadata_text))
 
         self._photos = updated_photos
+        if self._selected_photo_view_active:
+            active_photo = self._active_photo()
+            if active_photo is not None:
+                self.selected_metadata_label.setText(
+                    self._metadata_label_text(active_photo.metadata_text)
+                )
 
     def is_locked_zoom(self) -> bool:
         """Return whether zoom and pan are synchronized."""
         return self._locked_zoom
+
+    def is_selected_photo_view(self) -> bool:
+        """Return whether compare is showing one active photo full-size."""
+        return self._selected_photo_view_active
 
     def set_focus_point_marker_visible(self, *, enabled: bool) -> None:
         """Set whether compared panes show autofocus point markers."""
         self._focus_point_marker_enabled = enabled
         for viewer in self._viewers:
             viewer.set_focus_point_marker_visible(enabled=enabled)
+
+        self.selected_viewer.set_focus_point_marker_visible(enabled=enabled)
 
     def set_theme(self, theme: ThemePalette) -> None:
         """Apply the current app theme."""
@@ -456,6 +493,10 @@ class ComparePhotoViewer(QWidget):
         for viewer in self._viewers:
             viewer.set_theme(theme)
 
+        self.selected_metadata_label.setStyleSheet(
+            self._metadata_label_style()
+        )
+        self.selected_viewer.set_theme(theme)
         self._sync_active_frame_styles()
 
     def _metadata_label_style(self) -> str:
@@ -472,7 +513,10 @@ class ComparePhotoViewer(QWidget):
         for viewer in self._viewers:
             viewer.set_fit_view()
 
-    def toggle_focus_zoom(self) -> None:
+        if self._selected_photo_view_active:
+            self.selected_viewer.set_fit_view()
+
+    def toggle_grid_focus_zoom(self) -> None:
         """Toggle every compared photo between fit and AF-centered zoom."""
         if not self._viewers:
             return
@@ -485,24 +529,83 @@ class ComparePhotoViewer(QWidget):
 
         self.set_fit_view()
 
+    def toggle_focus_zoom(self) -> None:
+        """Compatibility wrapper for the grid-wide focus zoom toggle."""
+        self.toggle_grid_focus_zoom()
+
+    def handle_space_shortcut(self) -> None:
+        """Handle Space for compare grid and selected-photo view states."""
+        if self._selected_photo_view_active:
+            self.selected_viewer.toggle_actual_size_zoom()
+            return
+
+        self.show_active_photo()
+
+    def handle_zoom_toggle_shortcut(self) -> None:
+        """Handle Z for the active compare sub-mode."""
+        if self._selected_photo_view_active:
+            self.selected_viewer.toggle_actual_size_zoom()
+            return
+
+        self.toggle_grid_focus_zoom()
+
+    def show_active_photo(self) -> None:
+        """Show the active compare photo alone in fit-to-window view."""
+        photo = self._active_photo()
+        if photo is None:
+            return
+
+        self._load_selected_photo_view(photo)
+        self._set_selected_photo_view_active(active=True)
+
+    def _load_selected_photo_view(self, photo: ComparePhoto) -> None:
+        """Load one compare photo into the selected-photo viewer."""
+        self.selected_viewer.set_focus_point_marker_visible(
+            enabled=self._focus_point_marker_enabled
+        )
+        self.selected_viewer.set_photo(photo.image_path, photo.focus_point)
+        self.selected_metadata_label.setText(
+            self._metadata_label_text(photo.metadata_text)
+        )
+
+    def return_to_grid(self) -> bool:
+        """Return from selected-photo view to the comparison grid."""
+        if not self._selected_photo_view_active:
+            return False
+
+        self._set_selected_photo_view_active(active=False)
+        return True
+
     def zoom_step(self, multiplier: float) -> None:
         """Zoom all panes when locked, otherwise the active pane."""
+        if self._selected_photo_view_active:
+            self.selected_viewer.zoom_step(multiplier)
+            return
+
         for viewer in self._target_viewers():
             viewer.zoom_step(multiplier)
 
     def pan_by(self, dx: float, dy: float) -> None:
         """Pan all panes when locked, or only the active pane when unlocked."""
+        if self._selected_photo_view_active:
+            self.selected_viewer.pan_by(dx, dy)
+            return
+
         for viewer in self._target_viewers():
             viewer.pan_by(dx, dy)
 
     def keyboard_pan_by(self, base_dx: float, base_dy: float) -> None:
         """Pan target panes by zoom-relative keyboard deltas."""
+        if self._selected_photo_view_active:
+            self.selected_viewer.keyboard_pan_by(base_dx, base_dy)
+            return
+
         for viewer in self._target_viewers():
             viewer.keyboard_pan_by(base_dx, base_dy)
 
     def move_active_selection(self, row_delta: int, column_delta: int) -> None:
         """Move active selection through the visible compare grid."""
-        if not self._photos:
+        if self._selected_photo_view_active or not self._photos:
             return
 
         columns = max(self._columns, 1)
@@ -564,6 +667,12 @@ class ComparePhotoViewer(QWidget):
 
         return [self._viewers[self._active_index]]
 
+    def _active_photo(self) -> ComparePhoto | None:
+        if not self._photos:
+            return None
+
+        return self._photos[self._active_index]
+
     def _vertical_photo_count(self) -> int:
         return sum(1 for viewer in self._viewers if self._is_vertical(viewer))
 
@@ -611,12 +720,28 @@ class ComparePhotoViewer(QWidget):
 
         self._active_index = next_index
         self._sync_active_frame_styles()
+        if self._selected_photo_view_active:
+            # Programmatic active-photo changes still affect tagging, so the
+            # visible selected-photo pane must follow the same active index.
+            active_photo = self._active_photo()
+            if active_photo is not None:
+                self._load_selected_photo_view(active_photo)
+
         self._emit_active_photo_changed()
 
     def _emit_active_photo_changed(self) -> None:
         active_photo_id = self.active_photo_id()
         if active_photo_id is not None:
             self.active_photo_changed.emit(active_photo_id)
+
+    def _set_selected_photo_view_active(self, *, active: bool) -> None:
+        self._selected_photo_view_active = active
+        self.grid_widget.setVisible(not active)
+        self.selected_widget.setVisible(active)
+        self.help_label.setText(
+            COMPARE_SELECTED_HELP_TEXT if active else COMPARE_GRID_HELP_TEXT
+        )
+        self.lock_zoom_button.setVisible(not active)
 
     @staticmethod
     def _grid_shape(count: int, vertical_count: int = 0) -> tuple[int, int]:

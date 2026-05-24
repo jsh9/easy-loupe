@@ -191,6 +191,133 @@ def test_photo_viewer_focus_zoom_starts_from_af_point(
     viewer.close()
 
 
+def test_photo_viewer_actual_size_toggle_returns_to_fit_at_fit_scale_one(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify actual-size zoom toggles back to fit when fit scale is already 1.0.
+
+    For example, a 500x400 photo inside a 1000x800 viewer already fits at 100%,
+    so fit view and actual-size view both use scale 1.0 and users will not see
+    a visual scale change. The selected-photo compare shortcut still needs to
+    advance internal state as fit -> actual-size -> fit.
+    """
+    create_jpeg(tmp_path / 'IMG_7012.JPG', 'white', size=(100, 80))
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(320, 240)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_photo(tmp_path / 'IMG_7012.JPG', (0.5, 0.5))
+
+    assert viewer._mode == 'fit'
+    assert viewer._fit_scale == pytest.approx(1.0)
+
+    viewer.toggle_actual_size_zoom()
+
+    assert viewer._mode == 'manual'
+    assert viewer._current_scale == pytest.approx(1.0)
+
+    viewer.toggle_actual_size_zoom()
+
+    assert viewer._mode == 'fit'
+    assert viewer._current_scale == pytest.approx(1.0)
+
+    viewer.close()
+
+
+def test_photo_viewer_actual_size_zoom_survives_resize(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify 100% inspection remains absolute after the viewport changes.
+
+    Actual-size compare inspection should stay at one image pixel per screen
+    pixel instead of being restored as a fit-relative manual zoom factor.
+
+    Manual check: open a large detailed photo in Compare, press Space twice to
+    inspect at 100%, then resize the window much smaller and larger. Image
+    detail should stay the same screen size while the visible area changes.
+    """
+    create_jpeg(tmp_path / 'IMG_7013.JPG', 'white', size=(1000, 800))
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(500, 400)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_photo(tmp_path / 'IMG_7013.JPG', (0.25, 0.75))
+    viewer.toggle_actual_size_zoom()
+
+    assert viewer._mode == 'manual'
+    assert viewer._current_scale == pytest.approx(1.0)
+    assert viewer.normalized_viewport_center() == pytest.approx((0.25, 0.75))
+
+    viewer.resize(250, 200)
+    app.processEvents()
+
+    assert viewer._mode == 'manual'
+    assert viewer._current_scale == pytest.approx(1.0)
+    assert viewer.normalized_viewport_center() == pytest.approx((0.25, 0.75))
+
+    viewer.resize(1200, 1000)
+    app.processEvents()
+
+    assert viewer._mode == 'manual'
+    assert viewer._current_scale == pytest.approx(1.0)
+    assert viewer.normalized_viewport_center() == pytest.approx((0.5, 0.5))
+
+    viewer.close()
+
+
+def test_photo_viewer_actual_size_zoom_does_not_replace_manual_view(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify actual-size inspection does not overwrite normal manual zoom memory.
+
+    Selected-photo compare uses actual-size zoom as a temporary inspection
+    state, while normal Space/focus zoom should still restore the user's last
+    manual zoom and pan for that photo.
+    """
+    create_jpeg(tmp_path / 'IMG_7014.JPG', 'white')
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(320, 240)
+    viewer.show()
+    app.processEvents()
+
+    image_path = tmp_path / 'IMG_7014.JPG'
+    viewer.set_photo(image_path, (0.8, 0.2))
+    viewer.toggle_focus_zoom()
+    viewer.zoom_step(1.25)
+    viewer.pan_by(-40, 30)
+    remembered_manual_view = viewer.current_manual_view()
+    stored_manual_views = dict(viewer._manual_views)
+
+    viewer.set_fit_view()
+    viewer.toggle_actual_size_zoom()
+
+    assert viewer.current_manual_view() is None
+    assert viewer._manual_views == stored_manual_views
+
+    viewer.set_fit_view()
+    viewer.toggle_focus_zoom()
+
+    restored_manual_view = viewer.current_manual_view()
+
+    assert restored_manual_view is not None
+    assert remembered_manual_view is not None
+    assert restored_manual_view[0] == pytest.approx(remembered_manual_view[0])
+    assert restored_manual_view[1] == pytest.approx(remembered_manual_view[1])
+
+    viewer.close()
+
+
 def test_photo_viewer_remembered_manual_zoom_precedes_af_point_zoom(
         tmp_path: Path,
 ) -> None:

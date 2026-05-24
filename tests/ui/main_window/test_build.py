@@ -2,14 +2,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
 from PySide6.QtCore import QEvent, Qt
 
 from tests.ui._helpers import create_main_window_with_library
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import pytest
 
 
 def test_mode_shortcuts_trigger_correct_state_transitions(
@@ -58,6 +57,14 @@ def test_mode_shortcuts_trigger_correct_state_transitions(
     assert window.content_splitter.isVisible() is True
     assert window.viewer._mode == 'single-fit'
 
+    window.zoom_toggle_shortcut.activated.emit()
+    app.processEvents()
+    assert window.viewer._mode == 'single-manual'
+
+    window.zoom_toggle_shortcut.activated.emit()
+    app.processEvents()
+    assert window.viewer._mode == 'single-fit'
+
     window.split_mode_shortcut.activated.emit()
     app.processEvents()
     assert window.viewer.is_split_view() is True
@@ -85,6 +92,8 @@ def test_change_event_restores_navigation_focus_when_window_reactivates(
     window.activateWindow()
     window.raise_()
     app.processEvents()
+    if not window.isActiveWindow():
+        pytest.skip('Window activation is not available in this Qt session')
 
     window.open_button.setFocus(Qt.OtherFocusReason)
     app.processEvents()

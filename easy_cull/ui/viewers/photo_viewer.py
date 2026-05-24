@@ -105,6 +105,7 @@ class PhotoViewer(QGraphicsView):
         self._focus_point_marker_enabled = False
         self._hold_zoom_enabled = hold_zoom_enabled
         self._hold_zoom_active = False
+        self._actual_size_zoom_active = False
         self._last_hold_zoom_pos = QPointF()
         self._pan_drag_active = False
         self._last_pan_drag_pos = QPointF()
@@ -122,6 +123,7 @@ class PhotoViewer(QGraphicsView):
         zoom_factor = self.current_zoom_factor()
         pixmap = QPixmap(str(image_path))
         self._hold_zoom_active = False
+        self._actual_size_zoom_active = False
         self._current_image_key = str(image_path)
         self._pixmap_item.setPixmap(pixmap)
         self._scene.setSceneRect(pixmap.rect())
@@ -162,6 +164,7 @@ class PhotoViewer(QGraphicsView):
         self._current_image_key = None
         self._mode = 'fit'
         self._hold_zoom_active = False
+        self._actual_size_zoom_active = False
         self.resetTransform()
         self._update_focus_point_marker()
         self.visible_region_changed.emit()
@@ -242,6 +245,7 @@ class PhotoViewer(QGraphicsView):
             return
 
         self._hold_zoom_active = False
+        self._actual_size_zoom_active = False
         self._mode = 'fit'
         self._current_scale = self._compute_fit_scale()
         self._center_point = QPointF(
@@ -255,6 +259,7 @@ class PhotoViewer(QGraphicsView):
             return
 
         self._hold_zoom_active = False
+        self._actual_size_zoom_active = False
         if (
             self._mode == 'fit'
             or self._current_scale <= self._fit_scale + 0.001
@@ -271,6 +276,7 @@ class PhotoViewer(QGraphicsView):
             return
 
         self._hold_zoom_active = False
+        self._actual_size_zoom_active = False
         next_scale = max(
             self._fit_scale,
             min(self._max_scale(), self._current_scale * multiplier),
@@ -294,6 +300,7 @@ class PhotoViewer(QGraphicsView):
             return
 
         self._hold_zoom_active = False
+        self._actual_size_zoom_active = False
         self._mode = 'manual'
         self._center_point += QPointF(dx, dy)
         self._apply_transform()
@@ -310,6 +317,7 @@ class PhotoViewer(QGraphicsView):
             return
 
         self._hold_zoom_active = False
+        self._actual_size_zoom_active = False
         if self._restore_manual_view():
             return
 
@@ -333,6 +341,55 @@ class PhotoViewer(QGraphicsView):
             self._focus_point.y(),
         ))
 
+    def toggle_actual_size_zoom(self) -> None:
+        """Toggle between fit view and 100% zoom at the focus point."""
+        if self._image_size.isEmpty():
+            return
+
+        self._hold_zoom_active = False
+        if self._actual_size_zoom_active:
+            self.set_fit_view()
+            return
+
+        # Keep the internal zoom state correct for small photos that already
+        # display at 100% in fit-to-window mode: the state should advance as
+        # "fit 100% -> 100% inspection -> fit 100%", even though users will not
+        # see a visual scale change in that case.
+        if self._mode == 'fit':
+            self.zoom_to_actual_size((
+                self._focus_point.x(),
+                self._focus_point.y(),
+            ))
+            return
+
+        self._store_manual_view()
+        self.set_fit_view()
+
+    def zoom_to_actual_size(self, center: tuple[float, float]) -> None:
+        """Zoom to a center at one image pixel per screen pixel."""
+        if self._image_size.isEmpty():
+            return
+
+        self._hold_zoom_active = False
+        self._fit_scale = self._compute_fit_scale()
+        self._mode = 'manual'
+        # Actual-size inspection is absolute pixel scale, not a remembered
+        # manual zoom factor relative to the current fit-to-window scale.
+        self._actual_size_zoom_active = True
+        normalized_center = (
+            max(0.0, min(1.0, center[0])),
+            max(0.0, min(1.0, center[1])),
+        )
+        # What: set actual-size zoom to one image pixel per screen pixel.
+        # Why: viewport-fitting minimums can exceed 1.0 on oversized/offscreen
+        # test viewports, which would make "100%" larger than actual size.
+        self._current_scale = min(self._max_scale(), 1.0)
+        self._center_point = QPointF(
+            normalized_center[0] * self._image_size.width(),
+            normalized_center[1] * self._image_size.height(),
+        )
+        self._apply_transform()
+
     def zoom_to_normalized_center(
             self,
             center: tuple[float, float],
@@ -344,6 +401,7 @@ class PhotoViewer(QGraphicsView):
             return
 
         self._hold_zoom_active = False
+        self._actual_size_zoom_active = False
         self._fit_scale = self._compute_fit_scale()
         self._mode = 'manual'
         normalized_center = (
@@ -374,6 +432,7 @@ class PhotoViewer(QGraphicsView):
             return
 
         self._hold_zoom_active = False
+        self._actual_size_zoom_active = False
         self._fit_scale = self._compute_fit_scale()
         self._mode = 'manual'
         self._current_scale = min(
@@ -389,7 +448,11 @@ class PhotoViewer(QGraphicsView):
 
     def current_manual_view(self) -> tuple[float, tuple[float, float]] | None:
         """Return the current manual zoom factor and normalized center."""
-        if self._hold_zoom_active or not self.should_preserve_zoom():
+        if (
+            self._hold_zoom_active
+            or self._actual_size_zoom_active
+            or not self.should_preserve_zoom()
+        ):
             return None
 
         center = self.normalized_viewport_center()
@@ -425,6 +488,18 @@ class PhotoViewer(QGraphicsView):
                 self._max_scale(), max(1.0, self._fit_scale)
             )
             self._apply_transform()
+        elif self._actual_size_zoom_active:
+            # Preserve true 100% inspection across resizes; restoring a stored
+            # manual view here would reinterpret 100% as relative-to-fit zoom.
+            center = self.normalized_viewport_center()
+            self._current_scale = min(self._max_scale(), 1.0)
+            if center is not None:
+                self._center_point = QPointF(
+                    center[0] * self._image_size.width(),
+                    center[1] * self._image_size.height(),
+                )
+
+            self._apply_transform()
         elif self._mode == 'fit':
             self.set_fit_view()
         elif not self._restore_manual_view():
@@ -446,6 +521,7 @@ class PhotoViewer(QGraphicsView):
             self._hold_zoom_active = True
             self._last_hold_zoom_pos = event.position()
             self._mode = 'fit'
+            self._actual_size_zoom_active = False
             self._current_scale = min(
                 self._max_scale(), max(1.0, self._fit_scale)
             )
@@ -463,6 +539,7 @@ class PhotoViewer(QGraphicsView):
             and not self._image_size.isEmpty()
         ):
             self._pan_drag_active = True
+            self._actual_size_zoom_active = False
             self._last_pan_drag_pos = event.position()
             event.accept()
             return
@@ -519,7 +596,11 @@ class PhotoViewer(QGraphicsView):
         super().mouseReleaseEvent(event)
 
     def _store_manual_view(self) -> None:
-        if self._current_image_key is None or self._image_size.isEmpty():
+        if (
+            self._actual_size_zoom_active
+            or self._current_image_key is None
+            or self._image_size.isEmpty()
+        ):
             return
 
         center = self.normalized_viewport_center()

@@ -301,6 +301,9 @@ Mode summary:
 - `Browse mode` is the full-photo grid entered with `G`. It replaces the normal
   content splitter, hides the horizontal scene strip, and is exited with
   `Space` or by double-clicking a photo.
+- `Selected-photo compare view` is entered from the compare grid with `Space`.
+  It shows the active compared photo alone in fit-to-window size and supports
+  toggling that photo between fit and 100%.
 
 Mode-transition summary:
 
@@ -365,8 +368,18 @@ Mode-transition summary:
   is currently using scene stacks in the left strip.
 - Pressing `Space` while in browse mode exits browse mode and forces the main
   viewer back to fit view for the current photo.
-- Pressing `Space` while in compare mode toggles every compared pane between
-  fit view and AF-centered zoom.
+- Pressing `Space` while in the compare grid opens the active compared photo
+  alone in fit-to-window size.
+- Pressing `Space` while that selected compare photo is open toggles that photo
+  between fit view and 100% zoom. For a small photo that already fits at 100%,
+  this changes internal fit/inspection state without a visible scale change.
+- Pressing `Z` while in the compare grid toggles every compared pane between
+  fit view and AF-centered 100% zoom.
+- Pressing `Z` while a selected compare photo is open toggles that photo
+  between fit view and 100% zoom. For a small photo that already fits at 100%,
+  this changes internal fit/inspection state without a visible scale change.
+- Pressing `Esc` while a selected compare photo is open returns to the
+  comparison grid.
 - Pressing `Esc` while in compare mode restores the previous view/browse state
   and the stored pre-compare selection.
 - Pressing `G` while in compare mode enters browse mode and restores the stored
@@ -552,9 +565,11 @@ Keep these expectations intact unless intentionally redesigning the UI:
   panes.
 - Compare mode is the side-by-side selected-photo grid entered with `C`; it
   caps display at the configured compare limit but preserves the full original
-  selection when returning to browse or the previous mode. The default compare
-  limit is 8, configurable from `Compare > Limit` with options 2, 3, 4, 6, 8,
-  10, 12, 16, and 20.
+  selection when returning to browse or the previous mode. `Space` opens the
+  active compared photo alone for fit/100% inspection, while `Z` performs the
+  all-pane compare zoom in the grid and toggles fit/100% in selected-photo
+  compare view. The default compare limit is 8, configurable from
+  `Compare > Limit` with options 2, 3, 4, 6, 8, 10, 12, 16, and 20.
 - When `Show AF point` is checked, the main viewer shows the fixed-size red AF
   point marker in fit view, manual/focus zoom, and both split-view panes.
 - First-time manual/focus zoom starts at the extracted AF point. Remembered
@@ -597,7 +612,10 @@ Current shortcut coverage in code includes:
 - `F`: toggle the `Show AF point` overlay
 - `Space`: exit browse mode into fit-to-window view mode, promote split view
   into full zoom, toggle focus zoom while already in single-pane view mode, or
-  toggle focus zoom in compare mode
+  open/toggle the active photo in compare mode
+- `Z`: mirror `Space` in view mode, toggle all compare-grid panes between fit
+  view and AF-centered 100% zoom, or toggle the selected compare photo between
+  fit view and 100% zoom
 - `\`: toggle split view while in view mode
 - `-`, `=`, `+`: zoom
 - `W`, `A`, `S`, `D`: pan the active zoomed view
@@ -676,10 +694,9 @@ Additional assignment-menu behavior:
     but still exits browse mode back to fit view
   - verify metadata refreshes preserve scroll position when the user tags
     photos in the thumbnail strip or browse grid
-  - verify that tagging a single photo in the scene strip does not cause
-    sticky selection: navigating away after tagging should show only the
-    navigated-to photo as selected, and subsequent tagging should apply to
-    only that photo
+  - verify that tagging a single photo in the scene strip does not cause sticky
+    selection: navigating away after tagging should show only the navigated-to
+    photo as selected, and subsequent tagging should apply to only that photo
   - verify that multi-selection tagging (Shift/Ctrl) still applies to all
     selected photos and preserves the extended selection after the refresh
 - If you change organizer, XMP, or undo behavior:

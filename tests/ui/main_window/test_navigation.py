@@ -535,6 +535,8 @@ def test_restore_active_navigation_focus_targets_active_list(
     window.activateWindow()
     window.raise_()
     app.processEvents()
+    if not window.isActiveWindow():
+        pytest.skip('Window activation is not available in this Qt session')
 
     if enter_browse_mode:
         window._enter_browse_mode()
