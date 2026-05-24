@@ -488,7 +488,7 @@ def test_compare_mode_space_inspects_active_photo_and_esc_returns_to_grid(
     _, app, window = create_main_window_with_library(
         tmp_path,
         monkeypatch,
-        photo_specs=[('IMG_9650', 'dimgray'), ('IMG_9651', 'blue')],
+        photo_specs=[('IMG_9650', 'dimgray'), ('IMG_9651', 'slategray')],
     )
 
     _select_rows(window.thumbnail_list, [0, 1])
@@ -540,7 +540,7 @@ def test_compare_mode_z_toggles_all_grid_panes(
     _, app, window = create_main_window_with_library(
         tmp_path,
         monkeypatch,
-        photo_specs=[('IMG_9660', 'dimgray'), ('IMG_9661', 'blue')],
+        photo_specs=[('IMG_9660', 'dimgray'), ('IMG_9661', 'slategray')],
     )
 
     _select_rows(window.thumbnail_list, [0, 1])

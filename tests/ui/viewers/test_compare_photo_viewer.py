@@ -310,7 +310,7 @@ def test_compare_photo_viewer_space_opens_active_photo_and_toggles_actual_size(
     text that tells users how to get back to the grid.
     """
     create_jpeg(tmp_path / 'IMG_9006.JPG', 'dimgray')
-    create_jpeg(tmp_path / 'IMG_9007.JPG', 'blue')
+    create_jpeg(tmp_path / 'IMG_9007.JPG', 'slategray')
 
     app = QApplication.instance() or QApplication([])
     viewer = ComparePhotoViewer()
