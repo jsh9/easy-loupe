@@ -12,6 +12,8 @@
 - Changed
   - Increased split-view separation line thickness from 3 to 6 pixels
 - Fixed
+  - Selected-photo compare actual-size zoom now toggles back to fit even when
+    the photo already fits at 100%
   - Tagging a photo in the horizontal scene strip no longer causes sticky
     selection; navigating away after tagging now shows only the navigated-to
     photo as selected and subsequent tags apply to only that photo

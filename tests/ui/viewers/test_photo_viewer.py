@@ -191,6 +191,43 @@ def test_photo_viewer_focus_zoom_starts_from_af_point(
     viewer.close()
 
 
+def test_photo_viewer_actual_size_toggle_returns_to_fit_at_fit_scale_one(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify actual-size zoom toggles back to fit when fit scale is already 1.0.
+
+    For example, a 500x400 photo inside a 1000x800 viewer already fits at 100%,
+    so fit view and actual-size view both use scale 1.0. The selected- photo
+    compare shortcut still needs a second press to return to fit instead of
+    re-entering actual-size zoom.
+    """
+    create_jpeg(tmp_path / 'IMG_7012.JPG', 'white', size=(100, 80))
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(320, 240)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_photo(tmp_path / 'IMG_7012.JPG', (0.5, 0.5))
+
+    assert viewer._mode == 'fit'
+    assert viewer._fit_scale == pytest.approx(1.0)
+
+    viewer.toggle_actual_size_zoom()
+
+    assert viewer._mode == 'manual'
+    assert viewer._current_scale == pytest.approx(1.0)
+
+    viewer.toggle_actual_size_zoom()
+
+    assert viewer._mode == 'fit'
+    assert viewer._current_scale == pytest.approx(1.0)
+
+    viewer.close()
+
+
 def test_photo_viewer_remembered_manual_zoom_precedes_af_point_zoom(
         tmp_path: Path,
 ) -> None:

@@ -339,10 +339,10 @@ class PhotoViewer(QGraphicsView):
             return
 
         self._hold_zoom_active = False
-        if (
-            self._mode == 'fit'
-            or self._current_scale <= self._fit_scale + 0.001
-        ):
+        # A small 500x400 photo inside a 1000x800 viewer already fits at
+        # 100%, so fit view and actual-size view both use scale 1.0. Use the
+        # explicit mode instead of scale to keep the toggle reversible.
+        if self._mode == 'fit':
             self.zoom_to_actual_size((
                 self._focus_point.x(),
                 self._focus_point.y(),
