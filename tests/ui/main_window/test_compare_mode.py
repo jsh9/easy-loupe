@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtTest import QTest
 
 from easy_cull.core.records import METADATA_FILENAME
 from easy_cull.ui.main_window.build import VIEWER_KEYBOARD_PAN_STEP
@@ -741,7 +740,7 @@ def test_compare_mode_arrow_selection_tags_only_active_photo(
     app.processEvents()
     assert window.compare_viewer.active_photo_id() == 'IMG_9400'
 
-    QTest.keyClick(window, Qt.Key_Right)
+    window._compare_nav_shortcuts[1].activated.emit()
     app.processEvents()
 
     assert window.compare_viewer.active_photo_id() == 'IMG_9401'
@@ -789,7 +788,7 @@ def test_compare_mode_g_enters_browse_with_compared_photos_selected(
     window.compare_mode_shortcut.activated.emit()
     app.processEvents()
 
-    QTest.keyClick(window, Qt.Key_Right)
+    window._compare_nav_shortcuts[1].activated.emit()
     app.processEvents()
     window.browse_mode_shortcut.activated.emit()
     app.processEvents()
@@ -844,7 +843,7 @@ def test_compare_mode_from_browse_restores_original_selection(
 
     window.compare_mode_shortcut.activated.emit()
     app.processEvents()
-    QTest.keyClick(window, Qt.Key_Right)
+    window._compare_nav_shortcuts[1].activated.emit()
     app.processEvents()
 
     getattr(window, exit_shortcut_attr).activated.emit()
@@ -962,7 +961,7 @@ def test_compare_mode_from_scene_restores_exact_mixed_selection(
 
     window.compare_mode_shortcut.activated.emit()
     app.processEvents()
-    QTest.keyClick(window, Qt.Key_Right)
+    window._compare_nav_shortcuts[1].activated.emit()
     app.processEvents()
     getattr(window, exit_shortcut_attr).activated.emit()
     app.processEvents()

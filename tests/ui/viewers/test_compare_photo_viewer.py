@@ -392,6 +392,62 @@ def test_compare_photo_viewer_space_opens_active_photo_and_toggles_actual_size(
     _close_viewer(viewer, app)
 
 
+def test_compare_photo_viewer_selected_photo_tracks_active_photo_and_metadata(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify selected-photo view stays aligned with the active compare target.
+
+    Compare metadata shortcuts target the active pane, so programmatic active
+    changes must also refresh the visible single-photo inspection pane and its
+    metadata label.
+
+    To check this by hand, open one compared photo with Space, apply a rating
+    or flag, then return to the grid with Esc. The single-photo metadata label
+    and the matching grid pane should update, and the other compared photo
+    should not.
+    """
+    create_jpeg(tmp_path / 'IMG_9010.JPG', 'dimgray')
+    create_jpeg(tmp_path / 'IMG_9011.JPG', 'slategray')
+
+    app = QApplication.instance() or QApplication([])
+    viewer = ComparePhotoViewer()
+    viewer.resize(640, 480)
+    viewer.show()
+    app.processEvents()
+
+    first_path = tmp_path / 'IMG_9010.JPG'
+    second_path = tmp_path / 'IMG_9011.JPG'
+    viewer.set_photos([
+        ComparePhoto(
+            'IMG_9010', first_path, (0.25, 0.75), metadata_text='old first'
+        ),
+        ComparePhoto(
+            'IMG_9011', second_path, (0.5, 0.5), metadata_text='old second'
+        ),
+    ])
+    viewer.handle_space_shortcut()
+    app.processEvents()
+
+    assert viewer.is_selected_photo_view() is True
+    assert viewer.selected_viewer._current_image_key == str(first_path)
+    assert viewer.selected_metadata_label.text() == 'old first'
+
+    viewer.set_active_photo_id('IMG_9011')
+    app.processEvents()
+
+    assert viewer.selected_viewer._current_image_key == str(second_path)
+    assert viewer.selected_metadata_label.text() == 'old second'
+
+    viewer.update_metadata_texts({'IMG_9011': 'new second'})
+    app.processEvents()
+
+    assert viewer.selected_metadata_label.text() == 'new second'
+    assert viewer._metadata_labels[1].text() == 'new second'
+
+    _close_viewer(viewer, app)
+
+
 def test_compare_photo_viewer_styles_metadata_labels_created_after_theme_change(
         tmp_path: Path,
 ) -> None:

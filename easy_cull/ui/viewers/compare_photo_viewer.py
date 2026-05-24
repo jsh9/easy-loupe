@@ -555,6 +555,11 @@ class ComparePhotoViewer(QWidget):
         if photo is None:
             return
 
+        self._load_selected_photo_view(photo)
+        self._set_selected_photo_view_active(active=True)
+
+    def _load_selected_photo_view(self, photo: ComparePhoto) -> None:
+        """Load one compare photo into the selected-photo viewer."""
         self.selected_viewer.set_focus_point_marker_visible(
             enabled=self._focus_point_marker_enabled
         )
@@ -562,7 +567,6 @@ class ComparePhotoViewer(QWidget):
         self.selected_metadata_label.setText(
             self._metadata_label_text(photo.metadata_text)
         )
-        self._set_selected_photo_view_active(active=True)
 
     def return_to_grid(self) -> bool:
         """Return from selected-photo view to the comparison grid."""
@@ -716,6 +720,13 @@ class ComparePhotoViewer(QWidget):
 
         self._active_index = next_index
         self._sync_active_frame_styles()
+        if self._selected_photo_view_active:
+            # Programmatic active-photo changes still affect tagging, so the
+            # visible selected-photo pane must follow the same active index.
+            active_photo = self._active_photo()
+            if active_photo is not None:
+                self._load_selected_photo_view(active_photo)
+
         self._emit_active_photo_changed()
 
     def _emit_active_photo_changed(self) -> None:
