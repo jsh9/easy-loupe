@@ -5,7 +5,7 @@
 - Added
   - Compare mode can open the active photo alone with `Space`, toggle that
     photo between fit and 100%, return to the grid with `Esc`, and use `Z` for
-    the previous all-photo compare zoom
+    the previous all-photo compare zoom or selected-photo fit/100% zoom
   - Left-mouse drag-to-pan support in manual zoom mode, allowing users to pan
     photos by holding the left button and dragging (affects split-view right
     panel and single-pane manual zoom mode)

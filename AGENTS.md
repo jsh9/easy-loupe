@@ -374,6 +374,8 @@ Mode-transition summary:
   between fit view and 100% zoom.
 - Pressing `Z` while in the compare grid toggles every compared pane between
   fit view and AF-centered 100% zoom.
+- Pressing `Z` while a selected compare photo is open toggles that photo
+  between fit view and 100% zoom.
 - Pressing `Esc` while a selected compare photo is open returns to the
   comparison grid.
 - Pressing `Esc` while in compare mode restores the previous view/browse state
@@ -563,7 +565,8 @@ Keep these expectations intact unless intentionally redesigning the UI:
   caps display at the configured compare limit but preserves the full original
   selection when returning to browse or the previous mode. `Space` opens the
   active compared photo alone for fit/100% inspection, while `Z` performs the
-  all-pane compare zoom. The default compare limit is 8, configurable from
+  all-pane compare zoom in the grid and toggles fit/100% in selected-photo
+  compare view. The default compare limit is 8, configurable from
   `Compare > Limit` with options 2, 3, 4, 6, 8, 10, 12, 16, and 20.
 - When `Show AF point` is checked, the main viewer shows the fixed-size red AF
   point marker in fit view, manual/focus zoom, and both split-view panes.
@@ -608,8 +611,9 @@ Current shortcut coverage in code includes:
 - `Space`: exit browse mode into fit-to-window view mode, promote split view
   into full zoom, toggle focus zoom while already in single-pane view mode, or
   open/toggle the active photo in compare mode
-- `Z`: mirror `Space` in view mode, or toggle all compare-grid panes between
-  fit view and AF-centered 100% zoom
+- `Z`: mirror `Space` in view mode, toggle all compare-grid panes between fit
+  view and AF-centered 100% zoom, or toggle the selected compare photo between
+  fit view and 100% zoom
 - `\`: toggle split view while in view mode
 - `-`, `=`, `+`: zoom
 - `W`, `A`, `S`, `D`: pan the active zoomed view

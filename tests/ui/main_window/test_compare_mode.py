@@ -568,6 +568,71 @@ def test_compare_mode_z_toggles_all_grid_panes(
     window.close()
 
 
+def test_compare_mode_z_toggles_selected_photo_without_changing_grid(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify Z zooms the visible selected photo in selected-photo compare view.
+
+    The compare grid is hidden in this sub-mode, so the shortcut should affect
+    the visible selected photo instead of silently changing hidden grid panes.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_9670', 'dimgray'), ('IMG_9671', 'slategray')],
+    )
+
+    _select_rows(window.thumbnail_list, [0, 1])
+    app.processEvents()
+    window.compare_mode_shortcut.activated.emit()
+    app.processEvents()
+    window.compare_viewer.set_active_photo_id('IMG_9671')
+
+    window.space_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.compare_viewer.is_selected_photo_view() is True
+    assert window.compare_viewer.selected_viewer._mode == 'fit'
+    assert all(
+        not viewer.should_preserve_zoom()
+        for viewer in window.compare_viewer._viewers
+    )
+
+    window.zoom_toggle_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.compare_viewer.selected_viewer._mode == 'manual'
+    assert (
+        window.compare_viewer.selected_viewer._current_scale
+        == pytest.approx(1.0)
+    )
+    assert all(
+        not viewer.should_preserve_zoom()
+        for viewer in window.compare_viewer._viewers
+    )
+
+    window.zoom_toggle_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.compare_viewer.selected_viewer._mode == 'fit'
+    assert all(
+        not viewer.should_preserve_zoom()
+        for viewer in window.compare_viewer._viewers
+    )
+
+    window.exit_compare_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.compare_viewer.is_selected_photo_view() is False
+    assert all(
+        not viewer.should_preserve_zoom()
+        for viewer in window.compare_viewer._viewers
+    )
+
+    window.close()
+
+
 def test_compare_mode_uses_exact_scene_selection_instead_of_expanding_stack(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

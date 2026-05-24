@@ -325,6 +325,21 @@ def test_compare_photo_viewer_space_opens_active_photo_and_toggles_actual_size(
     viewer.set_active_photo_id('IMG_9007')
     app.processEvents()
 
+    viewer.handle_zoom_toggle_shortcut()
+    app.processEvents()
+
+    assert all(
+        grid_viewer.should_preserve_zoom() for grid_viewer in viewer._viewers
+    )
+
+    viewer.handle_zoom_toggle_shortcut()
+    app.processEvents()
+
+    assert all(
+        not grid_viewer.should_preserve_zoom()
+        for grid_viewer in viewer._viewers
+    )
+
     viewer.handle_space_shortcut()
     app.processEvents()
 
@@ -333,6 +348,22 @@ def test_compare_photo_viewer_space_opens_active_photo_and_toggles_actual_size(
     assert viewer.selected_widget.isVisible() is True
     assert viewer.help_label.text() == COMPARE_SELECTED_HELP_TEXT
     assert viewer.lock_zoom_button.isHidden() is True
+    assert viewer.selected_viewer._mode == 'fit'
+
+    viewer.handle_zoom_toggle_shortcut()
+    app.processEvents()
+
+    assert viewer.selected_viewer._mode == 'manual'
+    assert viewer.selected_viewer.current_zoom_factor() > 1.0
+    assert viewer.selected_viewer._current_scale == pytest.approx(1.0)
+    assert all(
+        not grid_viewer.should_preserve_zoom()
+        for grid_viewer in viewer._viewers
+    )
+
+    viewer.handle_zoom_toggle_shortcut()
+    app.processEvents()
+
     assert viewer.selected_viewer._mode == 'fit'
 
     viewer.handle_space_shortcut()

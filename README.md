@@ -254,7 +254,9 @@ Common transitions:
   current photo.
 - Press `Space` in the compare grid to open the active photo in fit-to-window
   size, then press `Space` again to toggle that photo between fit and 100%.
-- Press `Z` in the compare grid to toggle focus zoom for all compared panes.
+- Press `Z` in the compare grid to toggle focus zoom for all compared panes, or
+  while a single compare photo is open to toggle that photo between fit and
+  100%.
 - Press `Space` in single-pane fit view to enter manual/focus zoom.
 - Press `Space` in single-pane manual view to return to fit view.
 - Press `Z` in normal view mode as an alternate shortcut for the same
@@ -286,8 +288,8 @@ Common transitions:
   the grid, `Space` exits browse mode into fit-to-window view mode, promotes
   split view into full zoom, toggles focus zoom in single-pane view mode, or
   opens/toggles the active compare photo, `Z` mirrors `Space` in view mode and
-  toggles all compare-grid panes, and double-clicking a browse thumbnail opens
-  that photo in fit-to-window view mode
+  toggles the active compare zoom target, and double-clicking a browse
+  thumbnail opens that photo in fit-to-window view mode
 - Selection: use normal extended-selection gestures in the thumbnail and browse
   lists; after scene detection, `Shift+Left` / `Shift+Right` extends the
   horizontal scene-strip selection and `Shift+Up` / `Shift+Down` extends across

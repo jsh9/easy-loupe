@@ -596,7 +596,7 @@ class MainWindowBuildMixin:
 
     def _handle_zoom_toggle_shortcut(self: MainWindow) -> None:
         if self._compare_mode:
-            self.compare_viewer.toggle_grid_focus_zoom()
+            self.compare_viewer.handle_zoom_toggle_shortcut()
             return
 
         if self._browse_mode:

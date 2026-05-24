@@ -541,6 +541,14 @@ class ComparePhotoViewer(QWidget):
 
         self.show_active_photo()
 
+    def handle_zoom_toggle_shortcut(self) -> None:
+        """Handle Z for the active compare sub-mode."""
+        if self._selected_photo_view_active:
+            self.selected_viewer.toggle_actual_size_zoom()
+            return
+
+        self.toggle_grid_focus_zoom()
+
     def show_active_photo(self) -> None:
         """Show the active compare photo alone in fit-to-window view."""
         photo = self._active_photo()
