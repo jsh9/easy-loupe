@@ -100,6 +100,7 @@ def normalize_scene_groups(
     valid_photo_ids = set(photo_ids)
     seen: set[str] = set()
     groups: list[list[str]] = []
+    had_valid_saved_photo_id = False
     for raw_group in raw_groups:
         if not isinstance(raw_group, list):
             continue
@@ -114,7 +115,11 @@ def normalize_scene_groups(
             seen.add(photo_id)
 
         if group_photo_ids:
+            had_valid_saved_photo_id = True
             groups.append(group_photo_ids)
+
+    if not had_valid_saved_photo_id:
+        return None, []
 
     groups.extend([photo_id] for photo_id in photo_ids if photo_id not in seen)
 

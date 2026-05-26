@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QPoint, Qt, QThread
+from PySide6.QtCore import QPoint, QThread
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -285,6 +285,7 @@ class MainWindowWorkflowMixin:
         was_browse_mode = self._browse_mode
         was_split_view = self.viewer.is_split_view()
         self._show_progress('Scene detection finished', 100)
+        self._clear_scene_history()
         self._populate_thumbnail_list()
         self._populate_browse_list()
         self._populate_scene_list()
@@ -660,6 +661,26 @@ class MainWindowWorkflowMixin:
         self._metadata_redo_stack.clear()
         self._refresh_metadata_history_actions()
 
+    def _clear_scene_history(self: MainWindow) -> None:
+        """
+        Remove scene merge/break undo records after scene detection reruns.
+
+        Those records contain full old scene layouts. Once detection replaces
+        the scene list, applying an older scene edit would overwrite the new
+        detected groups.
+        """
+        self._metadata_undo_stack = [
+            edit
+            for edit in self._metadata_undo_stack
+            if not isinstance(edit, SceneEdit)
+        ]
+        self._metadata_redo_stack = [
+            edit
+            for edit in self._metadata_redo_stack
+            if not isinstance(edit, SceneEdit)
+        ]
+        self._refresh_metadata_history_actions()
+
     def _show_thumbnail_context_menu(
             self: MainWindow, position: QPoint
     ) -> None:
@@ -983,6 +1004,13 @@ class MainWindowWorkflowMixin:
             selected_photo_ids: list[str] | None = None,
             thumbnail_anchor: ThumbnailScrollAnchor | None = None,
     ) -> None:
+        """
+        Rebuild the thumbnail, browse, and scene lists after scene edits.
+
+        Scene merge, break, undo, and redo can change which rows exist in each
+        list. After rebuilding, keep the intended current photo selected and
+        return keyboard focus to the visible navigation list.
+        """
         self._preserved_scene_selection_photo_ids.clear()
         if selected_photo_ids:
             self.current_photo_id = selected_photo_ids[0]
@@ -993,10 +1021,11 @@ class MainWindowWorkflowMixin:
         if thumbnail_anchor is not None:
             self._restore_thumbnail_scroll_anchor(thumbnail_anchor)
 
-        self._scene_merge_selection_source = 'thumbnail'
-        self.thumbnail_list.setFocus(Qt.OtherFocusReason)
-        self.thumbnail_list.viewport().setFocus(Qt.OtherFocusReason)
+        self._scene_merge_selection_source = (
+            'browse' if self._browse_mode else 'thumbnail'
+        )
         self._refresh_ui()
+        self._restore_active_navigation_focus(defer=True)
 
     def _set_interaction_enabled(self: MainWindow, *, enabled: bool) -> None:
         photo_actions_enabled = (

@@ -1,8 +1,16 @@
 # Change Log
 
-## [Unreleased]
+## [0.2.0] - 2026-05-25
 
 - Added
+  - Manual scene merging
+    - Manual scene editing with `Scenes > Merge Selected Photos into Scene`
+      (`Ctrl+Shift+M`) and context-menu actions to break a multi-photo scene
+      into individual photos
+    - Undo/redo support for manual scene merge and break actions through the
+      existing metadata history shortcuts
+    - Scene groups are saved in `easy-cull.json` and restored when the folder
+      is loaded again
   - Compare mode can open the active photo alone with `Space`, toggle that
     photo between fit and 100%, return to the grid with `Esc`, and use `Z` for
     the previous all-photo compare zoom or selected-photo fit/100% zoom
@@ -10,8 +18,21 @@
     photos by holding the left button and dragging (affects split-view right
     panel and single-pane manual zoom mode)
 - Changed
+  - Scene groups
+    - Folder metadata now uses a top-level `photos` object for per-photo
+      ratings, labels, and flags, plus an optional top-level `scenes` object
+      for saved scene groups
+    - Running scene detection when scenes already exist now prompts before
+      replacing the saved groups
   - Increased split-view separation line thickness from 3 to 6 pixels
 - Fixed
+  - Scene groups
+    - Scene detection now clears stale manual scene-edit undo/redo entries so
+      `Ctrl+Z` cannot restore an older scene layout over newly detected scenes
+    - Invalid saved scene groups that contain no current photo IDs no longer
+      make a folder appear to have scene detection completed
+    - Browse-mode scene edits now restore keyboard focus to the browse grid
+      after merge, break, undo, or redo rebuilds the scene lists
   - Selected-photo compare view now keeps the correct internal zoom state for
     small photos that already display at 100% in fit-to-window mode: pressing
     `Space` or `Z` advances the state as

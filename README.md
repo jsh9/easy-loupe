@@ -305,7 +305,8 @@ Common transitions:
 ## 6. Metadata File
 
 The app stores per-photo metadata in `easy-cull.json` inside the selected
-folder. Keys use the visible photo stem, not the filename with extension.
+folder under a top-level `photos` object. Photo keys use the visible photo
+stem, not the filename with extension.
 
 You can also export the current rating, color label, and pick/reject state to
 shared uppercase `PHOTO_ID.XMP` sidecars through `Organize Photos`.
@@ -314,10 +315,19 @@ Example:
 
 ```json
 {
-  "IMG_2000": {
-    "rating": 4,
-    "color_label": "red",
-    "flag": "picked"
+  "photos": {
+    "IMG_2000": {
+      "rating": 4,
+      "color_label": "red",
+      "flag": "picked"
+    }
+  },
+  "scenes": {
+    "source": "manual",
+    "groups": [
+      ["IMG_2000", "IMG_2001"],
+      ["IMG_2002"]
+    ]
   }
 }
 ```
@@ -328,3 +338,6 @@ Rules:
 - `color_label` is one of `red`, `yellow`, `green`, `blue`, `purple`, or
   omitted
 - `flag` is `picked`, `rejected`, or omitted
+- `scenes` is omitted until scenes are detected or manually edited; when
+  present, `source` records whether the saved groups came from `detected` or
+  `manual` scene grouping, and `groups` stores ordered photo-id lists

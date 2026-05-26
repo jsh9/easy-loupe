@@ -153,6 +153,28 @@ def test_scene_group_normalization_repairs_folder_changes() -> None:
     ]
 
 
+def test_scene_group_normalization_rejects_only_missing_photo_ids() -> None:
+    """
+    Ignore saved scene groups when none of their photo IDs exist now.
+
+    Without this guard, loading an unrelated folder with stale scene data would
+    mark scene detection as done and create singleton scene groups for every
+    current photo.
+    """
+    source, scenes = normalize_scene_groups(
+        {
+            'scenes': {
+                'source': 'manual',
+                'groups': [['MISSING_1000'], ['MISSING_1001']],
+            }
+        },
+        ['IMG_1000', 'IMG_1001'],
+    )
+
+    assert source is None
+    assert scenes == []
+
+
 def test_folder_metadata_serializes_photos_and_scenes() -> None:
     photos = [
         make_photo_record(

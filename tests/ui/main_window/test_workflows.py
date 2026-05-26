@@ -338,9 +338,72 @@ def test_main_window_detect_scenes_replace_starts_worker(
     del app
 
 
+def test_scene_detection_clears_stale_manual_scene_undo_history(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Do not let Ctrl+Z restore manual scene groups after detection reruns.
+
+    The test creates a manual scene edit, simulates a new detection result, and
+    then triggers undo. The detected groups should remain in place because the
+    old scene edit history was cleared.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7432', 'dimgray'),
+            ('IMG_7433', 'blue'),
+            ('IMG_7434', 'green'),
+            ('IMG_7435', 'white'),
+        ],
+    )
+    window._enter_browse_mode()
+    _select_list_rows(window.browse_list, [0, 1])
+    app.processEvents()
+
+    window.merge_scene_action.trigger()
+    app.processEvents()
+
+    assert any(
+        isinstance(edit, workflows_module.SceneEdit)
+        for edit in window._metadata_undo_stack
+    )
+
+    detected_groups = [
+        ['IMG_7432'],
+        ['IMG_7433', 'IMG_7434'],
+        ['IMG_7435'],
+    ]
+    set_scene_detection_result(window, detected_groups)
+    window._handle_scene_finished()
+    app.processEvents()
+
+    assert [
+        edit
+        for edit in window._metadata_undo_stack
+        if isinstance(edit, workflows_module.SceneEdit)
+    ] == []
+    window.undo_metadata_action.trigger()
+    app.processEvents()
+
+    assert [scene.photo_ids for scene in window.library.scenes] == (
+        detected_groups
+    )
+
+    window.close()
+    del app
+
+
 def test_merge_selected_photos_from_browse_saves_and_undoes(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """
+    Keep browse-mode focus on the browse grid after scene edits.
+
+    Merging or undoing scenes rebuilds the lists. In browse mode, the thumbnail
+    strip is hidden, so keyboard focus must return to the visible browse grid.
+    """
     _, app, window = create_main_window_with_library(
         tmp_path,
         monkeypatch,
@@ -360,6 +423,8 @@ def test_merge_selected_photos_from_browse_saves_and_undoes(
     app.processEvents()
 
     assert window.library.scene_source == 'manual'
+    assert window._scene_merge_selection_source == 'browse'
+    assert _list_widget_has_focus(app, window.browse_list)
     assert [scene.photo_ids for scene in window.library.scenes] == [
         ['IMG_7440', 'IMG_7441'],
         ['IMG_7442'],
@@ -377,6 +442,8 @@ def test_merge_selected_photos_from_browse_saves_and_undoes(
 
     assert window.library.scene_detection_done is False
     assert window.library.scenes == []
+    assert window._scene_merge_selection_source == 'browse'
+    assert _list_widget_has_focus(app, window.browse_list)
     data = json.loads(
         (tmp_path / METADATA_FILENAME).read_text(encoding='utf-8')
     )
