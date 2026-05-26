@@ -25,6 +25,8 @@ if TYPE_CHECKING:
     from easy_cull.core.photo_library import PhotoRecord, SceneGroup
     from easy_cull.ui.main_window.window import MainWindow
 
+MULTI_PHOTO_SELECTION_COUNT = 2
+
 
 class MainWindowPresentationMixin:
     """List population, presentation refresh, and theming helpers."""
@@ -94,6 +96,11 @@ class MainWindowPresentationMixin:
         if hasattr(self, 'organize_action'):
             self.organize_action.setEnabled(photo_actions_enabled)
 
+        if hasattr(self, 'merge_scene_action'):
+            self.merge_scene_action.setEnabled(
+                photo_actions_enabled and not self._compare_mode
+            )
+
         if hasattr(self, 'undo_metadata_action'):
             self._refresh_metadata_history_actions()
 
@@ -112,7 +119,7 @@ class MainWindowPresentationMixin:
                 f' ({index}/{len(self.library.photos)})'
             )
             self.metadata_label.setText('')
-        elif selected_count > 1:
+        elif selected_count >= MULTI_PHOTO_SELECTION_COUNT:
             self.selection_label.setText(
                 f'Selection: {selected_count} photos'
                 f' ({index}/{len(self.library.photos)})'

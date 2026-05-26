@@ -7,11 +7,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QThread
+from PySide6.QtCore import QPoint, QThread
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QFileDialog,
     QListWidget,
+    QMenu,
     QMessageBox,
 )
 
@@ -22,7 +24,10 @@ from easy_cull.operations.common import (
 )
 from easy_cull.operations.export import organize_photos
 from easy_cull.operations.xmp import write_xmp_sidecars
-from easy_cull.ui.main_window.build import TRANSIENT_MESSAGE_TIMEOUT_MS
+from easy_cull.ui.main_window.build import (
+    MIN_SCENE_MERGE_PHOTO_COUNT,
+    TRANSIENT_MESSAGE_TIMEOUT_MS,
+)
 from easy_cull.ui.main_window.dialogs import (
     OrganizerDialog,
     OrganizerDialogResult,
@@ -35,6 +40,7 @@ from easy_cull.ui.theme import (
 from easy_cull.ui.workers import OperationWorker, SceneDetectionWorker
 
 if TYPE_CHECKING:
+    from easy_cull.core.records import SceneGroup
     from easy_cull.ui.main_window.window import MainWindow
 
 ProgressCallback = Callable[[str, int], None]
@@ -47,6 +53,24 @@ class MetadataEdit:
     field: str
     before: dict[str, Any]
     after: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class SceneEdit:
+    """In-memory undo record for a scene grouping edit."""
+
+    before_groups: list[list[str]]
+    before_source: str | None
+    after_groups: list[list[str]]
+    after_source: str | None
+
+
+@dataclass(frozen=True)
+class ThumbnailScrollAnchor:
+    """Viewport anchor for preserving a thumbnail row across a rebuild."""
+
+    photo_id: str
+    visible_top: int | None
 
 
 class MainWindowWorkflowMixin:
@@ -92,6 +116,23 @@ class MainWindowWorkflowMixin:
             or self._background_task_active()
         ):
             return
+
+        if self.library.scene_detection_done and self.library.scenes:
+            dialog = QMessageBox(self)
+            dialog.setWindowTitle('Replace Scenes?')
+            dialog.setText('Replace existing scene groups?')
+            dialog.setInformativeText(
+                'Running scene detection will replace the saved scene groups'
+                ' for this folder.'
+            )
+            replace_button = dialog.addButton(
+                'Replace', QMessageBox.ButtonRole.AcceptRole
+            )
+            dialog.addButton(QMessageBox.StandardButton.Cancel)
+            dialog.setDefaultButton(QMessageBox.StandardButton.Cancel)
+            dialog.exec()
+            if dialog.clickedButton() is not replace_button:
+                return
 
         self._show_progress('Preparing scene detection...', 0)
 
@@ -244,6 +285,7 @@ class MainWindowWorkflowMixin:
         was_browse_mode = self._browse_mode
         was_split_view = self.viewer.is_split_view()
         self._show_progress('Scene detection finished', 100)
+        self._clear_scene_history()
         self._populate_thumbnail_list()
         self._populate_browse_list()
         self._populate_scene_list()
@@ -571,6 +613,14 @@ class MainWindowWorkflowMixin:
             return
 
         edit = self._metadata_undo_stack.pop()
+        if isinstance(edit, SceneEdit):
+            self._apply_scene_state(edit.before_groups, edit.before_source)
+            self._metadata_redo_stack.append(edit)
+            self.library.save_metadata()
+            self._after_scene_change()
+            self._refresh_metadata_history_actions()
+            return
+
         self._apply_metadata_values(edit.field, edit.before)
         self._metadata_redo_stack.append(edit)
         self.library.save_metadata()
@@ -582,6 +632,14 @@ class MainWindowWorkflowMixin:
             return
 
         edit = self._metadata_redo_stack.pop()
+        if isinstance(edit, SceneEdit):
+            self._apply_scene_state(edit.after_groups, edit.after_source)
+            self._metadata_undo_stack.append(edit)
+            self.library.save_metadata()
+            self._after_scene_change()
+            self._refresh_metadata_history_actions()
+            return
+
         self._apply_metadata_values(edit.field, edit.after)
         self._metadata_undo_stack.append(edit)
         self.library.save_metadata()
@@ -603,6 +661,295 @@ class MainWindowWorkflowMixin:
         self._metadata_redo_stack.clear()
         self._refresh_metadata_history_actions()
 
+    def _clear_scene_history(self: MainWindow) -> None:
+        """
+        Remove scene merge/break undo records after scene detection reruns.
+
+        Those records contain full old scene layouts. Once detection replaces
+        the scene list, applying an older scene edit would overwrite the new
+        detected groups.
+        """
+        self._metadata_undo_stack = [
+            edit
+            for edit in self._metadata_undo_stack
+            if not isinstance(edit, SceneEdit)
+        ]
+        self._metadata_redo_stack = [
+            edit
+            for edit in self._metadata_redo_stack
+            if not isinstance(edit, SceneEdit)
+        ]
+        self._refresh_metadata_history_actions()
+
+    def _show_thumbnail_context_menu(
+            self: MainWindow, position: QPoint
+    ) -> None:
+        scene = self._context_scene_from_thumbnail_position(position)
+        if scene is None:
+            return
+
+        menu = QMenu(self)
+        action = menu.addAction('Break Scene into Single Photos')
+        action.triggered.connect(
+            lambda *_: self._break_scene_into_singletons(scene.scene_id)
+        )
+        menu.exec(self.thumbnail_list.viewport().mapToGlobal(position))
+
+    def _show_scene_context_menu(self: MainWindow, position: QPoint) -> None:
+        scene = self._context_scene_from_scene_strip()
+        if scene is None:
+            return
+
+        menu = QMenu(self)
+        action = menu.addAction('Break Scene into Single Photos')
+        action.triggered.connect(
+            lambda *_: self._break_scene_into_singletons(scene.scene_id)
+        )
+        menu.exec(self.scene_list.viewport().mapToGlobal(position))
+
+    def _context_scene_from_thumbnail_position(
+            self: MainWindow, position: QPoint
+    ) -> SceneGroup | None:
+        if (
+            self._busy
+            or self._compare_mode
+            or self._browse_mode
+            or not self.library.scene_detection_done
+        ):
+            return None
+
+        item = self.thumbnail_list.itemAt(position)
+        if item is None:
+            return None
+
+        photo_id = item.data(PHOTO_ID_ROLE)
+        if photo_id is None:
+            return None
+
+        scene = self._scene_for_photo_id(str(photo_id))
+        if scene is None or len(scene.photo_ids) < MIN_SCENE_MERGE_PHOTO_COUNT:
+            return None
+
+        return scene
+
+    def _context_scene_from_scene_strip(self: MainWindow) -> SceneGroup | None:
+        if (
+            self._busy
+            or self._compare_mode
+            or self._browse_mode
+            or not self.library.scene_detection_done
+            or not self.scene_list.isVisible()
+        ):
+            return None
+
+        scene = self._current_scene()
+        if scene is None or len(scene.photo_ids) < MIN_SCENE_MERGE_PHOTO_COUNT:
+            return None
+
+        return scene
+
+    def _break_scene_into_singletons(self: MainWindow, scene_id: str) -> None:
+        if self._busy or self._compare_mode:
+            return
+
+        scene = self._scene_by_id.get(scene_id)
+        if scene is None or len(scene.photo_ids) < MIN_SCENE_MERGE_PHOTO_COUNT:
+            return
+
+        if not self._confirm_break_scene():
+            return
+
+        before_groups = self.library.scene_group_photo_ids()
+        before_source = self.library.scene_source
+        after_groups: list[list[str]] = []
+        for existing_scene in self.library.scenes:
+            if existing_scene.scene_id == scene_id:
+                after_groups.extend(
+                    [photo_id] for photo_id in existing_scene.photo_ids
+                )
+            else:
+                after_groups.append(list(existing_scene.photo_ids))
+
+        if before_groups == after_groups:
+            return
+
+        self.library.set_scene_group_photo_ids(
+            after_groups,
+            scene_source='manual',
+        )
+        after_source = self.library.scene_source
+        self._metadata_undo_stack.append(
+            SceneEdit(
+                before_groups=before_groups,
+                before_source=before_source,
+                after_groups=after_groups,
+                after_source=after_source,
+            )
+        )
+        self._metadata_redo_stack.clear()
+        self.library.save_metadata()
+        self._after_scene_change(selected_photo_ids=[scene.photo_ids[0]])
+        self._refresh_metadata_history_actions()
+
+    def _confirm_break_scene(self: MainWindow) -> bool:
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle('Break Scene?')
+        dialog.setText('Break this scene into individual photos?')
+        dialog.setInformativeText('You can press Ctrl+Z to undo this action.')
+        break_button = dialog.addButton(
+            'Break Scene', QMessageBox.ButtonRole.AcceptRole
+        )
+        dialog.addButton(QMessageBox.StandardButton.Cancel)
+        dialog.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        dialog.exec()
+        return dialog.clickedButton() is break_button
+
+    def _merge_selected_photos_into_scene(self: MainWindow) -> None:
+        if self._busy or self._compare_mode:
+            return
+
+        photo_ids = self._mergeable_scene_photo_ids()
+        if len(photo_ids) < MIN_SCENE_MERGE_PHOTO_COUNT:
+            return
+
+        if self._is_scene_strip_subset_merge(photo_ids):
+            self._show_transient_message(
+                'Cannot split an existing scene group.\n'
+                'Press Ctrl+Z to undo and group again.',
+                timeout_ms=TRANSIENT_MESSAGE_TIMEOUT_MS,
+            )
+            return
+
+        thumbnail_anchor = self._capture_thumbnail_scroll_anchor(photo_ids[0])
+        before_groups = self.library.scene_group_photo_ids()
+        before_source = self.library.scene_source
+        self.library.merge_photos_into_scene(photo_ids)
+        after_groups = self.library.scene_group_photo_ids()
+        after_source = self.library.scene_source
+        if before_groups == after_groups and before_source == after_source:
+            return
+
+        self._metadata_undo_stack.append(
+            SceneEdit(
+                before_groups=before_groups,
+                before_source=before_source,
+                after_groups=after_groups,
+                after_source=after_source,
+            )
+        )
+        self._metadata_redo_stack.clear()
+        self.library.save_metadata()
+        self._after_scene_change(
+            selected_photo_ids=photo_ids,
+            thumbnail_anchor=thumbnail_anchor,
+        )
+        self._refresh_metadata_history_actions()
+
+    def _mergeable_scene_photo_ids(self: MainWindow) -> list[str]:
+        if self._compare_mode:
+            return []
+
+        if not self.library.scene_detection_done or self._browse_mode:
+            return self._resolved_selection_photo_ids()
+
+        selection_source = self._scene_merge_selection_source
+        if selection_source == 'thumbnail':
+            return self._selected_scene_stack_photo_ids()
+
+        if selection_source == 'scene':
+            return self._photo_ids_in_library_order(
+                self._selected_photo_ids_from_list(self.scene_list)
+            )
+
+        focus_widget = QApplication.focusWidget()
+        if focus_widget in {
+            self.thumbnail_list,
+            self.thumbnail_list.viewport(),
+        }:
+            return self._selected_scene_stack_photo_ids()
+
+        if focus_widget in {
+            self.scene_list,
+            self.scene_list.viewport(),
+        }:
+            return self._photo_ids_in_library_order(
+                self._selected_photo_ids_from_list(self.scene_list)
+            )
+
+        thumbnail_selection_count = len(self.thumbnail_list.selectedItems())
+        scene_selection_count = len(self.scene_list.selectedItems())
+
+        if thumbnail_selection_count >= MIN_SCENE_MERGE_PHOTO_COUNT:
+            return self._selected_scene_stack_photo_ids()
+
+        if scene_selection_count >= MIN_SCENE_MERGE_PHOTO_COUNT:
+            return self._photo_ids_in_library_order(
+                self._selected_photo_ids_from_list(self.scene_list)
+            )
+
+        if thumbnail_selection_count > 0:
+            return self._selected_scene_stack_photo_ids()
+
+        if scene_selection_count > 0:
+            return self._photo_ids_in_library_order(
+                self._selected_photo_ids_from_list(self.scene_list)
+            )
+
+        return []
+
+    def _is_scene_strip_subset_merge(
+            self: MainWindow, photo_ids: list[str]
+    ) -> bool:
+        if (
+            self._browse_mode
+            or not self.library.scene_detection_done
+            or self._scene_merge_selection_source != 'scene'
+        ):
+            return False
+
+        current_scene = self._current_scene()
+        if current_scene is None:
+            return False
+
+        selected = set(photo_ids)
+        scene_photo_ids = set(current_scene.photo_ids)
+        return selected < scene_photo_ids
+
+    def _selected_scene_stack_photo_ids(self: MainWindow) -> list[str]:
+        selected_items = sorted(
+            self.thumbnail_list.selectedItems(),
+            key=self.thumbnail_list.row,
+        )
+        if (
+            not selected_items
+            and self.thumbnail_list.currentItem() is not None
+        ):
+            selected_items = [self.thumbnail_list.currentItem()]
+
+        photo_ids: list[str] = []
+        for item in selected_items:
+            cover_photo_id = item.data(PHOTO_ID_ROLE)
+            if cover_photo_id is None:
+                continue
+
+            scene = self._scene_for_photo_id(str(cover_photo_id))
+            if scene is None:
+                photo_ids.append(str(cover_photo_id))
+                continue
+
+            photo_ids.extend(scene.photo_ids)
+
+        return self._photo_ids_in_library_order(photo_ids)
+
+    def _apply_scene_state(
+            self: MainWindow,
+            groups: list[list[str]],
+            scene_source: str | None,
+    ) -> None:
+        self.library.set_scene_group_photo_ids(
+            groups, scene_source=scene_source
+        )
+
     def _refresh_metadata_history_actions(self: MainWindow) -> None:
         enabled = not self._busy and self.menuBar().isEnabled()
         if hasattr(self, 'undo_metadata_action'):
@@ -613,6 +960,13 @@ class MainWindowWorkflowMixin:
         if hasattr(self, 'redo_metadata_action'):
             self.redo_metadata_action.setEnabled(
                 enabled and bool(self._metadata_redo_stack)
+            )
+
+        if hasattr(self, 'merge_scene_action'):
+            self.merge_scene_action.setEnabled(
+                enabled
+                and bool(self.library.photos)
+                and not self._compare_mode
             )
 
     def _after_metadata_change(self: MainWindow) -> None:
@@ -636,7 +990,7 @@ class MainWindowWorkflowMixin:
         self._populate_browse_list(scroll_current_item_into_view=False)
         self._populate_scene_list()
         for list_widget, selected_ids in selection_states.items():
-            if len(selected_ids) > 1:
+            if len(selected_ids) >= MIN_SCENE_MERGE_PHOTO_COUNT:
                 self._restore_selected_item_ids(list_widget, selected_ids)
 
         for list_widget, scroll_state in scroll_states.items():
@@ -644,6 +998,34 @@ class MainWindowWorkflowMixin:
 
         self._refresh_compare_metadata_labels()
         self._refresh_ui()
+
+    def _after_scene_change(
+            self: MainWindow,
+            selected_photo_ids: list[str] | None = None,
+            thumbnail_anchor: ThumbnailScrollAnchor | None = None,
+    ) -> None:
+        """
+        Rebuild the thumbnail, browse, and scene lists after scene edits.
+
+        Scene merge, break, undo, and redo can change which rows exist in each
+        list. After rebuilding, keep the intended current photo selected and
+        return keyboard focus to the visible navigation list.
+        """
+        self._preserved_scene_selection_photo_ids.clear()
+        if selected_photo_ids:
+            self.current_photo_id = selected_photo_ids[0]
+
+        self._populate_thumbnail_list(scroll_current_item_into_view=False)
+        self._populate_browse_list(scroll_current_item_into_view=False)
+        self._populate_scene_list()
+        if thumbnail_anchor is not None:
+            self._restore_thumbnail_scroll_anchor(thumbnail_anchor)
+
+        self._scene_merge_selection_source = (
+            'browse' if self._browse_mode else 'thumbnail'
+        )
+        self._refresh_ui()
+        self._restore_active_navigation_focus(defer=True)
 
     def _set_interaction_enabled(self: MainWindow, *, enabled: bool) -> None:
         photo_actions_enabled = (
@@ -670,6 +1052,11 @@ class MainWindowWorkflowMixin:
         if hasattr(self, 'organize_action'):
             self.organize_action.setEnabled(photo_actions_enabled)
 
+        if hasattr(self, 'merge_scene_action'):
+            self.merge_scene_action.setEnabled(
+                photo_actions_enabled and not self._compare_mode
+            )
+
         for action in self._assignment_actions:
             action.setEnabled(enabled)
 
@@ -693,6 +1080,56 @@ class MainWindowWorkflowMixin:
         vertical_bar = list_widget.verticalScrollBar()
         horizontal_bar.setValue(min(horizontal, horizontal_bar.maximum()))
         vertical_bar.setValue(min(vertical, vertical_bar.maximum()))
+
+    def _capture_thumbnail_scroll_anchor(
+            self: MainWindow, photo_id: str
+    ) -> ThumbnailScrollAnchor | None:
+        row = self._thumbnail_row_for_photo(photo_id)
+        if row is None:
+            return None
+
+        item = self.thumbnail_list.item(row)
+        if item is None:
+            return None
+
+        rect = self.thumbnail_list.visualItemRect(item)
+        if self.thumbnail_list.viewport().rect().intersects(rect):
+            return ThumbnailScrollAnchor(
+                photo_id=photo_id,
+                visible_top=rect.top(),
+            )
+
+        return ThumbnailScrollAnchor(photo_id=photo_id, visible_top=None)
+
+    def _restore_thumbnail_scroll_anchor(
+            self: MainWindow, anchor: ThumbnailScrollAnchor
+    ) -> None:
+        row = self._thumbnail_row_for_photo(anchor.photo_id)
+        if row is None:
+            return
+
+        item = self.thumbnail_list.item(row)
+        if item is None:
+            return
+
+        if anchor.visible_top is None:
+            self.thumbnail_list.scrollToItem(
+                item,
+                QAbstractItemView.ScrollHint.PositionAtTop,
+            )
+            return
+
+        rect = self.thumbnail_list.visualItemRect(item)
+        vertical_bar = self.thumbnail_list.verticalScrollBar()
+        vertical_bar.setValue(
+            max(
+                0,
+                min(
+                    vertical_bar.value() + rect.top() - anchor.visible_top,
+                    vertical_bar.maximum(),
+                ),
+            )
+        )
 
     @staticmethod
     def _capture_selected_item_ids(list_widget: QListWidget) -> set[str]:

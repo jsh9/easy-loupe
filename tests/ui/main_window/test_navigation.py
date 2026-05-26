@@ -886,6 +886,44 @@ def test_scene_mode_shift_left_right_extends_selection_inside_scene(
     window.close()
 
 
+def test_scene_mode_plain_left_right_clears_prior_shift_range_selection(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    theme_module, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7653', 'dimgray'),
+            ('IMG_7654', 'green'),
+            ('IMG_7655', 'blue'),
+            ('IMG_7656', 'yellow'),
+        ],
+        scene_groups=[['IMG_7653', 'IMG_7654', 'IMG_7655', 'IMG_7656']],
+    )
+
+    trigger_scene_shortcut(window, 'Shift+Right')
+    app.processEvents()
+    trigger_scene_shortcut(window, 'Shift+Right')
+    app.processEvents()
+
+    assert [
+        item.data(theme_module.PHOTO_ID_ROLE)
+        for item in window.scene_list.selectedItems()
+    ] == ['IMG_7653', 'IMG_7654', 'IMG_7655']
+
+    trigger_scene_shortcut(window, 'Right')
+    app.processEvents()
+
+    assert window.current_photo_id == 'IMG_7656'
+    assert [
+        item.data(theme_module.PHOTO_ID_ROLE)
+        for item in window.scene_list.selectedItems()
+    ] == ['IMG_7656']
+    assert window._resolved_selection_photo_ids() == ['IMG_7656']
+
+    window.close()
+
+
 def test_scene_mode_shift_down_from_scene_strip_preserves_mixed_selection(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

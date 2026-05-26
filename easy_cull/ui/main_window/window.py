@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from PySide6.QtCore import QThread
 
     from easy_cull.ui.main_window.dialogs import OrganizerDialogResult
-    from easy_cull.ui.main_window.workflows import MetadataEdit
+    from easy_cull.ui.main_window.workflows import MetadataEdit, SceneEdit
     from easy_cull.ui.workers import (
         OperationWorker,
         SceneDetectionWorker,
@@ -56,6 +56,7 @@ class MainWindow(
         self._compare_restore_selection_photo_ids: list[str] = []
         self._scene_selection_anchor_row: int | None = None
         self._extending_scene_selection = False
+        self._scene_merge_selection_source: str | None = None
 
         # Stores selected non-cover photo IDs from a scene strip that is no
         # longer visible. This is needed because the horizontal scene strip
@@ -85,8 +86,8 @@ class MainWindow(
         self._scene_list_scene_id: str | None = None
         self._thumbnail_overlay_photo_id: str | None = None
         self._scene_overlay_photo_id: str | None = None
-        self._metadata_undo_stack: list[MetadataEdit] = []
-        self._metadata_redo_stack: list[MetadataEdit] = []
+        self._metadata_undo_stack: list[MetadataEdit | SceneEdit] = []
+        self._metadata_redo_stack: list[MetadataEdit | SceneEdit] = []
 
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(easy_cull_icon())

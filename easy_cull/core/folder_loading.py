@@ -34,6 +34,7 @@ class LoadedFolderState:
     photos: list[PhotoRecord]
     photo_map: dict[str, PhotoRecord]
     scenes: list[SceneGroup]
+    scene_source: str | None
     scene_detection_done: bool
 
 
@@ -98,13 +99,21 @@ def load_folder_state(
         )
     )
     photo_map = {photo.photo_id: photo for photo in records}
+    scene_source, scenes = metadata_module.normalize_scene_groups(
+        metadata_entries or {}, [photo.photo_id for photo in records]
+    )
+    for scene in scenes:
+        for photo_id in scene.photo_ids:
+            photo_map[photo_id].scene_id = scene.scene_id
+
     return LoadedFolderState(
         current_folder=folder,
         folder_label=folder_label or folder.name,
         photos=records,
         photo_map=photo_map,
-        scenes=[],
-        scene_detection_done=False,
+        scenes=scenes,
+        scene_source=scene_source,
+        scene_detection_done=bool(scenes),
     )
 
 

@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QListView,
     QListWidget,
+    QMenu,
     QMessageBox,
     QProgressBar,
     QPushButton,
@@ -38,12 +39,12 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from PySide6.QtGui import QResizeEvent, QShowEvent
-    from PySide6.QtWidgets import QMenu
 
     from easy_cull.ui.main_window.window import MainWindow
 
 VIEWER_KEYBOARD_PAN_STEP = 120
 COMPARE_PHOTO_LIMIT_SETTINGS_KEY = 'compare/photo_limit'
+MIN_SCENE_MERGE_PHOTO_COUNT = 2
 TRANSIENT_MESSAGE_FONT_SIZE_PX = 28
 TRANSIENT_MESSAGE_FONT_WEIGHT = 600
 TRANSIENT_MESSAGE_TIMEOUT_MS = 1600
@@ -149,6 +150,10 @@ class MainWindowBuildMixin:
         self.thumbnail_list.itemSelectionChanged.connect(
             self._list_selection_changed
         )
+        self.thumbnail_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.thumbnail_list.customContextMenuRequested.connect(
+            self._show_thumbnail_context_menu
+        )
         content_splitter.addWidget(self.thumbnail_list)
 
         self._build_viewer_stack(content_splitter)
@@ -194,6 +199,10 @@ class MainWindowBuildMixin:
         )
         self.scene_list.itemSelectionChanged.connect(
             self._list_selection_changed
+        )
+        self.scene_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.scene_list.customContextMenuRequested.connect(
+            self._show_scene_context_menu
         )
         self.scene_list.setVisible(False)
         root.addWidget(self.scene_list)
@@ -278,7 +287,7 @@ class MainWindowBuildMixin:
         self.transient_message_timer = QTimer(self)
         self.transient_message_timer.setSingleShot(True)
         self.transient_message_timer.timeout.connect(
-            self.transient_message_overlay.hide
+            self._hide_transient_message
         )
 
     def _build_menu(self: MainWindow) -> None:
@@ -331,6 +340,23 @@ class MainWindowBuildMixin:
 
         self.compare_menu = menu_bar.addMenu('&Compare')
         self._build_compare_menu()
+
+        self.scenes_menu = menu_bar.addMenu('&Scenes')
+        self.merge_scene_action = QAction(
+            'Merge Selected Photos into Scene', self
+        )
+        self.merge_scene_action.setShortcut(QKeySequence('Ctrl+Shift+M'))
+        self.merge_scene_action.setShortcutContext(Qt.WindowShortcut)
+        self.merge_scene_action.setEnabled(False)
+        self.merge_scene_action.triggered.connect(
+            lambda *_: (
+                None
+                if self._busy
+                else self._merge_selected_photos_into_scene()
+            )
+        )
+        self.addAction(self.merge_scene_action)
+        self.scenes_menu.addAction(self.merge_scene_action)
 
         self.assign_photo_menu = menu_bar.addMenu('Assign to &Photo')
 
@@ -573,7 +599,9 @@ class MainWindowBuildMixin:
         self.compare_mode_shortcut.setEnabled(
             not self._compare_mode and bool(self.library.photos)
         )
-        self.exit_compare_shortcut.setEnabled(self._compare_mode)
+        self.exit_compare_shortcut.setEnabled(
+            self._compare_mode or self.transient_message_overlay.isVisible()
+        )
         for shortcut in self._viewer_shortcuts:
             shortcut.setEnabled(viewer_shortcuts_enabled)
 
@@ -618,8 +646,7 @@ class MainWindowBuildMixin:
 
     def _handle_escape_shortcut(self: MainWindow) -> None:
         if self.transient_message_overlay.isVisible():
-            self.transient_message_timer.stop()
-            self.transient_message_overlay.hide()
+            self._hide_transient_message()
             return
 
         if self._compare_mode and self.compare_viewer.return_to_grid():
@@ -708,6 +735,14 @@ class MainWindowBuildMixin:
         self.transient_message_overlay.show()
         self.transient_message_overlay.raise_()
         self.transient_message_timer.start(timeout_ms)
+        if hasattr(self, 'exit_compare_shortcut'):
+            self.exit_compare_shortcut.setEnabled(True)
+
+    def _hide_transient_message(self: MainWindow) -> None:
+        self.transient_message_timer.stop()
+        self.transient_message_overlay.hide()
+        if hasattr(self, 'exit_compare_shortcut'):
+            self._update_mode_shortcuts()
 
     def resizeEvent(self: MainWindow, event: QResizeEvent) -> None:  # noqa: N802 - Qt API
         """Keep overlay geometry and browse layout in sync with window size."""

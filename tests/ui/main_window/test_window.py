@@ -52,6 +52,14 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:
         DEFAULT_COMPARE_PHOTO_LIMIT
     ].isChecked()
     assert window.compare_viewer.photo_limit == DEFAULT_COMPARE_PHOTO_LIMIT
+    assert window.scenes_menu.title() == '&Scenes'
+    assert (
+        window.merge_scene_action.shortcut().toString(
+            QKeySequence.PortableText
+        )
+        == 'Ctrl+Shift+M'
+    )
+    assert window.merge_scene_action.isEnabled() is False
     assert window.assign_photo_menu.title() == 'Assign to &Photo'
     assert window.help_menu.title() == '&Help'
     assert window.about_action.text() == 'About EasyCull'
@@ -254,7 +262,7 @@ def test_about_action_shows_easy_cull_version(
             ),
         )
     ]
-    assert 'Version 0.1.4' in about_calls[0][2]
+    assert f'Version {identity_module.APP_VERSION}' in about_calls[0][2]
 
     window.close()
     del app

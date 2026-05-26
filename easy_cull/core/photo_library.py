@@ -11,13 +11,16 @@ from easy_cull.core.folder_loading import (
     load_folder_state as _load_folder_state,
 )
 from easy_cull.core.metadata import (
+    normalize_scene_groups as _normalize_scene_groups,
+)
+from easy_cull.core.metadata import (
     serialize_metadata_entries as _serialize_metadata_entries,
 )
 from easy_cull.core.metadata import (
     validate_and_apply_metadata as _validate_and_apply_metadata,
 )
 from easy_cull.core.metadata import (
-    write_metadata as _write_metadata,
+    write_folder_metadata as _write_folder_metadata,
 )
 
 if TYPE_CHECKING:
@@ -28,6 +31,8 @@ if TYPE_CHECKING:
         PhotoRecord,
         SceneGroup,
     )
+
+MIN_SCENE_MERGE_PHOTO_COUNT = 2
 
 
 class PhotoLibrary:
@@ -42,6 +47,7 @@ class PhotoLibrary:
         self.photos: list[PhotoRecord] = []
         self._photo_map: dict[str, PhotoRecord] = {}
         self.scenes: list[SceneGroup] = []
+        self.scene_source: str | None = None
         self.scene_detection_done = False
 
     def load_folder(
@@ -65,6 +71,7 @@ class PhotoLibrary:
         self.photos = loaded_state.photos
         self._photo_map = loaded_state.photo_map
         self.scenes = loaded_state.scenes
+        self.scene_source = loaded_state.scene_source
         self.scene_detection_done = loaded_state.scene_detection_done
         if progress_callback:
             progress_callback('Finished loading folder', 100)
@@ -121,7 +128,12 @@ class PhotoLibrary:
         if self.current_folder is None:
             raise RuntimeError('No folder is currently loaded')
 
-        _write_metadata(self.current_folder, self.photos)
+        _write_folder_metadata(
+            self.current_folder,
+            self.photos,
+            self.scenes if self.scene_detection_done else None,
+            self.scene_source,
+        )
 
     def detect_scenes(
             self,
@@ -133,9 +145,92 @@ class PhotoLibrary:
             self.get_preview_path,
             progress_callback,
         )
-        self.scenes = scene_groups
+        self._set_scene_groups(scene_groups, scene_source='detected')
         self.scene_detection_done = True
+        if self.current_folder is not None:
+            self.save_metadata()
+
         return scene_groups
+
+    def scene_group_photo_ids(self) -> list[list[str]]:
+        """Return current scene groups as plain ordered photo-id lists."""
+        return [list(scene.photo_ids) for scene in self.scenes]
+
+    def set_scene_group_photo_ids(
+            self, groups: list[list[str]], *, scene_source: str | None
+    ) -> None:
+        """Replace scene groups from plain photo-id lists."""
+        if not groups:
+            self._set_scene_groups([], scene_source=scene_source)
+            return
+
+        _, scenes = _normalize_scene_groups(
+            {'scenes': {'source': scene_source, 'groups': groups}},
+            [photo.photo_id for photo in self.photos],
+        )
+        self._set_scene_groups(scenes, scene_source=scene_source)
+
+    def merge_photos_into_scene(self, photo_ids: list[str]) -> None:
+        """Merge the selected photo ids into one manually edited scene."""
+        ordered_selected = [
+            photo.photo_id
+            for photo in self.photos
+            if photo.photo_id in photo_ids
+        ]
+        if len(ordered_selected) < MIN_SCENE_MERGE_PHOTO_COUNT:
+            return
+
+        existing_groups = (
+            self.scene_group_photo_ids()
+            if self.scene_detection_done
+            else [[photo.photo_id] for photo in self.photos]
+        )
+        # Exact existing groups are already merged; returning here avoids
+        # relabeling detected scene metadata as a manual edit.
+        if any(ordered_selected == group for group in existing_groups):
+            return
+
+        selected = set(ordered_selected)
+        next_groups: list[list[str]] = []
+        inserted_merged_group = False
+        for group in existing_groups:
+            remaining_segment: list[str] = []
+            for photo_id in group:
+                if photo_id not in selected:
+                    remaining_segment.append(photo_id)
+                    continue
+
+                if remaining_segment:
+                    next_groups.append(remaining_segment)
+                    remaining_segment = []
+
+                if not inserted_merged_group:
+                    next_groups.append(ordered_selected)
+                    inserted_merged_group = True
+
+            if remaining_segment:
+                next_groups.append(remaining_segment)
+
+        if not inserted_merged_group:
+            next_groups.append(ordered_selected)
+
+        self.set_scene_group_photo_ids(next_groups, scene_source='manual')
+
+    def _set_scene_groups(
+            self,
+            scene_groups: list[SceneGroup],
+            *,
+            scene_source: str | None,
+    ) -> None:
+        for photo in self.photos:
+            photo.scene_id = None
+
+        self.scenes = scene_groups
+        self.scene_source = scene_source
+        self.scene_detection_done = bool(scene_groups)
+        for scene in self.scenes:
+            for photo_id in scene.photo_ids:
+                self.get_photo(photo_id).scene_id = scene.scene_id
 
     def get_preview_path(self, photo_id: str, kind: str) -> Path:
         """Render or reuse a cached preview image for the requested photo."""

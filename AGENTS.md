@@ -182,6 +182,8 @@ product contract and the tests/docs are updated accordingly.
 - A `PhotoRecord.photo_id` is the visible stem, not the filename with
   extension.
 - Metadata is stored in `easy-cull.json` inside the selected photo folder.
+- Saved folder metadata uses a top-level `photos` object for per-photo entries
+  and may include a top-level `scenes` object with `source` and `groups`.
 - Saved metadata keys use the visible stem format, for example `IMG_2000`, not
   `IMG_2000.JPG`.
 - When reading metadata, legacy forms are normalized:
@@ -444,6 +446,8 @@ Mode-transition summary:
   scene-stack rows and preserve exact hidden in-scene selections.
 - In browse mode, selecting a grid item updates the current photo and keeps the
   left strip and scene strip synchronized in the background.
+- Scene merges, breaks, and scene-edit undo/redo performed from browse mode
+  keep keyboard focus on the browse grid after the lists are rebuilt.
 - Double-clicking a browse-grid photo exits browse mode and opens that photo in
   normal view mode.
 - Double-clicking from browse mode always returns to single-pane fit view.
@@ -466,6 +470,8 @@ Mode-transition summary:
   - the left strip is rebuilt as scene stacks
   - the browse grid is rebuilt
   - the horizontal scene strip is rebuilt for the current scene
+  - stale manual scene-edit undo/redo entries are cleared while ordinary
+    metadata assignment history is preserved
 - If scene detection finishes while the user is in browse mode:
   - browse mode is exited
   - the current photo remains selected

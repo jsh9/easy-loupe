@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -8,7 +9,7 @@ import pytest
 import easy_cull.analysis.scenes as analysis_scenes_module
 import easy_cull.core.photo_library as library_module
 from easy_cull.core.photo_library import PhotoLibrary
-from easy_cull.core.records import SceneGroup
+from easy_cull.core.records import METADATA_FILENAME, SceneGroup
 from tests.core._helpers import FakeHash, create_jpeg, stub_read_exif
 
 if TYPE_CHECKING:
@@ -58,10 +59,12 @@ def test_load_folder_groups_jpeg_and_raw_files_by_stem(
     library.load_folder(
         tmp_path,
         metadata_entries={
-            'IMG_0001.JPG': {
-                'flag': 'reject',
-                'rating': 4,
-                'color_label': 'green',
+            'photos': {
+                'IMG_0001.JPG': {
+                    'flag': 'reject',
+                    'rating': 4,
+                    'color_label': 'green',
+                }
             }
         },
     )
@@ -283,6 +286,13 @@ def test_photo_library_detect_scenes_delegates_to_analysis_module(
     assert library.scenes is delegated_scenes
     assert library.scene_detection_done is True
     assert progress_updates == [('done', 100)]
+    data = json.loads(
+        (tmp_path / METADATA_FILENAME).read_text(encoding='utf-8')
+    )
+    assert data['scenes'] == {
+        'groups': [['IMG_7305']],
+        'source': 'detected',
+    }
 
 
 def test_detect_scenes_requires_imagehash_when_analysis_runs(
@@ -297,6 +307,126 @@ def test_detect_scenes_requires_imagehash_when_analysis_runs(
 
     with pytest.raises(RuntimeError, match='imagehash is required'):
         library.detect_scenes()
+
+
+def test_load_folder_hydrates_saved_scene_groups(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    create_jpeg(tmp_path / 'IMG_7400.JPG', 'white')
+    create_jpeg(tmp_path / 'IMG_7401.JPG', 'white')
+    (tmp_path / METADATA_FILENAME).write_text(
+        json.dumps({
+            'photos': {},
+            'scenes': {
+                'source': 'manual',
+                'groups': [['IMG_7400', 'IMG_7401']],
+            },
+        }),
+        encoding='utf-8',
+    )
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+
+    assert library.scene_detection_done is True
+    assert library.scene_source == 'manual'
+    assert [scene.photo_ids for scene in library.scenes] == [
+        ['IMG_7400', 'IMG_7401']
+    ]
+    assert library.get_photo('IMG_7400').scene_id == 'scene-0001'
+    assert library.get_photo('IMG_7401').scene_id == 'scene-0001'
+
+
+def test_set_scene_groups_clears_stale_scene_ids(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    create_jpeg(tmp_path / 'IMG_7410.JPG', 'white')
+    create_jpeg(tmp_path / 'IMG_7411.JPG', 'white')
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+    library.set_scene_group_photo_ids(
+        [['IMG_7410', 'IMG_7411']], scene_source='manual'
+    )
+    library.set_scene_group_photo_ids([], scene_source=None)
+
+    assert library.scenes == []
+    assert library.scene_detection_done is False
+    assert library.get_photo('IMG_7410').scene_id is None
+    assert library.get_photo('IMG_7411').scene_id is None
+
+
+def test_merge_photos_preserves_first_selected_photo_position(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for index in range(4):
+        create_jpeg(tmp_path / f'IMG_742{index}.JPG', 'white')
+
+    stub_read_exif(monkeypatch, {})
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+    library.set_scene_group_photo_ids(
+        [['IMG_7420', 'IMG_7421', 'IMG_7422', 'IMG_7423']],
+        scene_source='detected',
+    )
+
+    library.merge_photos_into_scene(['IMG_7421', 'IMG_7422'])
+
+    assert [scene.photo_ids for scene in library.scenes] == [
+        ['IMG_7420'],
+        ['IMG_7421', 'IMG_7422'],
+        ['IMG_7423'],
+    ]
+
+
+def test_merge_photos_keeps_exact_existing_detected_group_unchanged(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Avoid turning detected scene metadata into manual metadata for a no-op.
+
+    Selecting an already grouped scene stack in the UI should not create an
+    undoable edit or change persisted scene provenance behind the scenes.
+    """
+    for index in range(4):
+        create_jpeg(tmp_path / f'IMG_742{index}.JPG', 'white')
+
+    stub_read_exif(monkeypatch, {})
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+    library.set_scene_group_photo_ids(
+        [['IMG_7420', 'IMG_7421'], ['IMG_7422', 'IMG_7423']],
+        scene_source='detected',
+    )
+
+    library.merge_photos_into_scene(['IMG_7420', 'IMG_7421'])
+
+    assert library.scene_source == 'detected'
+    assert [scene.photo_ids for scene in library.scenes] == [
+        ['IMG_7420', 'IMG_7421'],
+        ['IMG_7422', 'IMG_7423'],
+    ]
+
+
+def test_merge_photos_supports_consecutive_manual_groups(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for index in range(4):
+        create_jpeg(tmp_path / f'IMG_743{index}.JPG', 'white')
+
+    stub_read_exif(monkeypatch, {})
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+
+    library.merge_photos_into_scene(['IMG_7430', 'IMG_7431'])
+    library.merge_photos_into_scene(['IMG_7432', 'IMG_7433'])
+
+    assert [scene.photo_ids for scene in library.scenes] == [
+        ['IMG_7430', 'IMG_7431'],
+        ['IMG_7432', 'IMG_7433'],
+    ]
 
 
 def test_get_state_returns_full_library_payload(

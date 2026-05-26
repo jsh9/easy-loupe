@@ -115,9 +115,17 @@ class MainWindowNavigationMixin:
             self.scene_list,
         }
         if sender in list_widgets:
+            if sender is self.thumbnail_list:
+                self._scene_merge_selection_source = 'thumbnail'
+            elif sender is self.scene_list:
+                self._scene_merge_selection_source = 'scene'
+            elif sender is self.browse_list:
+                self._scene_merge_selection_source = 'browse'
+
             self._clear_preserved_scene_selection_if_restarted(sender)
 
         self._refresh_selection_labels()
+        self._refresh_metadata_history_actions()
         if sender not in list_widgets:
             return
 
@@ -143,6 +151,7 @@ class MainWindowNavigationMixin:
         if photo_id is None:
             return
 
+        self._scene_merge_selection_source = 'thumbnail'
         previous_photo_id = (
             previous.data(PHOTO_ID_ROLE) if previous is not None else None
         )
@@ -166,6 +175,7 @@ class MainWindowNavigationMixin:
         )
 
         self._refresh_selection_labels()
+        self._refresh_metadata_history_actions()
         self._refresh_selection_styles(
             previous_photo_id, self.current_photo_id, 'main'
         )
@@ -183,8 +193,11 @@ class MainWindowNavigationMixin:
 
         photo_id = current.data(PHOTO_ID_ROLE)
         if photo_id is None or photo_id == self.current_photo_id:
+            self._scene_merge_selection_source = 'browse'
+            self._refresh_metadata_history_actions()
             return
 
+        self._scene_merge_selection_source = 'browse'
         self._preserved_scene_selection_photo_ids.clear()
         previous_photo_id = self.current_photo_id
         self.current_photo_id = str(photo_id)
@@ -195,6 +208,7 @@ class MainWindowNavigationMixin:
             self.current_photo_id, rebuild_if_scene_changed=True
         )
         self._refresh_selection_labels()
+        self._refresh_metadata_history_actions()
         self._refresh_selection_styles(
             previous_photo_id, self.current_photo_id, 'browse'
         )
@@ -225,8 +239,11 @@ class MainWindowNavigationMixin:
 
         photo_id = current.data(PHOTO_ID_ROLE)
         if photo_id is None or photo_id == self.current_photo_id:
+            self._scene_merge_selection_source = 'scene'
+            self._refresh_metadata_history_actions()
             return
 
+        self._scene_merge_selection_source = 'scene'
         previous_photo_id = (
             previous.data(PHOTO_ID_ROLE) if previous is not None else None
         )
@@ -245,6 +262,7 @@ class MainWindowNavigationMixin:
             preserve_selection=self._selection_extending_modifier_active(),
         )
         self._refresh_selection_labels()
+        self._refresh_metadata_history_actions()
         self._refresh_selection_styles(
             previous_photo_id, self.current_photo_id, 'scene'
         )
@@ -281,7 +299,14 @@ class MainWindowNavigationMixin:
         if next_row < 0 or next_row >= self.scene_list.count():
             return
 
-        self.scene_list.setCurrentRow(next_row)
+        item = self.scene_list.item(next_row)
+        if item is None:
+            return
+
+        self.scene_list.selectionModel().setCurrentIndex(
+            self.scene_list.indexFromItem(item),
+            QItemSelectionModel.SelectionFlag.ClearAndSelect,
+        )
         self.scene_list.setFocus(Qt.OtherFocusReason)
 
     def _extend_scene_selection(self: MainWindow, direction: int) -> None:

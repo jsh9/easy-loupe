@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Never
 
 import pytest
-from PySide6.QtCore import Qt, QThread
+from PySide6.QtCore import QItemSelectionModel, QPoint, Qt, QThread
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
@@ -31,6 +31,85 @@ from tests.ui._helpers import (
 def _list_widget_has_focus(app: QApplication, list_widget: object) -> bool:
     focus_widget = app.focusWidget()
     return focus_widget in {list_widget, list_widget.viewport()}
+
+
+def _select_list_rows(list_widget: object, rows: list[int]) -> None:
+    list_widget.clearSelection()
+    first_item = list_widget.item(rows[0])
+    assert first_item is not None
+    selection_model = list_widget.selectionModel()
+    selection_model.setCurrentIndex(
+        list_widget.indexFromItem(first_item),
+        QItemSelectionModel.SelectionFlag.ClearAndSelect,
+    )
+    for row in rows[1:]:
+        item = list_widget.item(row)
+        assert item is not None
+        item.setSelected(True)
+
+    list_widget.setFocus(Qt.OtherFocusReason)
+
+
+def _set_list_item_viewport_top(
+        list_widget: object, row: int, desired_top: int
+) -> None:
+    item = list_widget.item(row)
+    assert item is not None
+    rect = list_widget.visualItemRect(item)
+    scrollbar = list_widget.verticalScrollBar()
+    scrollbar.setValue(
+        max(
+            0,
+            min(
+                scrollbar.value() + rect.top() - desired_top,
+                scrollbar.maximum(),
+            ),
+        )
+    )
+
+
+def _item_center(list_widget: object, row: int) -> object:
+    item = list_widget.item(row)
+    assert item is not None
+    return list_widget.visualItemRect(item).center()
+
+
+def _confirm_next_break_scene(
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        accept: bool,
+        captured: dict[str, object] | None = None,
+) -> None:
+    def fake_exec(message_box: QMessageBox) -> int:
+        if captured is not None:
+            captured['title'] = message_box.windowTitle()
+            captured['text'] = message_box.text()
+            captured['informative_text'] = message_box.informativeText()
+            default_button = message_box.defaultButton()
+            captured['default_button'] = (
+                default_button.text().replace('&', '')
+                if default_button is not None
+                else None
+            )
+            captured['buttons'] = [
+                button.text().replace('&', '')
+                for button in message_box.buttons()
+            ]
+
+        target_text = 'Break Scene' if accept else 'Cancel'
+        message_box._clicked_button = next(
+            button
+            for button in message_box.buttons()
+            if button.text().replace('&', '') == target_text
+        )
+        return 0
+
+    monkeypatch.setattr(QMessageBox, 'exec', fake_exec)
+    monkeypatch.setattr(
+        QMessageBox,
+        'clickedButton',
+        lambda message_box: getattr(message_box, '_clicked_button', None),
+    )
 
 
 def test_main_window_sets_color_label_and_saves_metadata() -> None:
@@ -174,6 +253,731 @@ def test_main_window_detect_scenes_starts_worker_thread_and_sets_busy_state(
     del app
 
 
+def test_main_window_detect_scenes_prompts_before_replacing_existing_scenes(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_7420', 'dimgray'), ('IMG_7421', 'blue')],
+        scene_groups=[['IMG_7420', 'IMG_7421']],
+    )
+    captured: dict[str, object] = {}
+    started: list[str] = []
+
+    def fake_exec(message_box: QMessageBox) -> int:
+        captured['title'] = message_box.windowTitle()
+        captured['text'] = message_box.text()
+        captured['buttons'] = [
+            button.text().replace('&', '') for button in message_box.buttons()
+        ]
+        message_box._clicked_button = None
+        return 0
+
+    monkeypatch.setattr(QMessageBox, 'exec', fake_exec)
+    monkeypatch.setattr(
+        QMessageBox,
+        'clickedButton',
+        lambda message_box: getattr(message_box, '_clicked_button', None),
+    )
+    monkeypatch.setattr(
+        QThread,
+        'start',
+        lambda self: started.append(self.objectName() or 'started'),
+    )
+
+    window.detect_scenes()
+
+    assert captured['text'] == 'Replace existing scene groups?'
+    assert 'Replace' in captured['buttons']
+    assert started == []
+    assert window._scene_thread is None
+
+    window.close()
+    del app
+
+
+def test_main_window_detect_scenes_replace_starts_worker(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_7430', 'dimgray'), ('IMG_7431', 'blue')],
+        scene_groups=[['IMG_7430', 'IMG_7431']],
+    )
+    started: list[str] = []
+
+    def fake_exec(message_box: QMessageBox) -> int:
+        message_box._clicked_button = next(
+            button
+            for button in message_box.buttons()
+            if button.text().replace('&', '') == 'Replace'
+        )
+        return 0
+
+    monkeypatch.setattr(QMessageBox, 'exec', fake_exec)
+    monkeypatch.setattr(
+        QMessageBox,
+        'clickedButton',
+        lambda message_box: getattr(message_box, '_clicked_button', None),
+    )
+    monkeypatch.setattr(
+        QThread,
+        'start',
+        lambda self: started.append(self.objectName() or 'started'),
+    )
+
+    window.detect_scenes()
+
+    assert started == ['started']
+    assert window._scene_thread is not None
+    assert window._busy is True
+
+    window.close()
+    del app
+
+
+def test_scene_detection_clears_stale_manual_scene_undo_history(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Do not let Ctrl+Z restore manual scene groups after detection reruns.
+
+    The test creates a manual scene edit, simulates a new detection result, and
+    then triggers undo. The detected groups should remain in place because the
+    old scene edit history was cleared.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7432', 'dimgray'),
+            ('IMG_7433', 'blue'),
+            ('IMG_7434', 'green'),
+            ('IMG_7435', 'white'),
+        ],
+    )
+    window._enter_browse_mode()
+    _select_list_rows(window.browse_list, [0, 1])
+    app.processEvents()
+
+    window.merge_scene_action.trigger()
+    app.processEvents()
+
+    assert any(
+        isinstance(edit, workflows_module.SceneEdit)
+        for edit in window._metadata_undo_stack
+    )
+
+    detected_groups = [
+        ['IMG_7432'],
+        ['IMG_7433', 'IMG_7434'],
+        ['IMG_7435'],
+    ]
+    set_scene_detection_result(window, detected_groups)
+    window._handle_scene_finished()
+    app.processEvents()
+
+    assert [
+        edit
+        for edit in window._metadata_undo_stack
+        if isinstance(edit, workflows_module.SceneEdit)
+    ] == []
+    window.undo_metadata_action.trigger()
+    app.processEvents()
+
+    assert [scene.photo_ids for scene in window.library.scenes] == (
+        detected_groups
+    )
+
+    window.close()
+    del app
+
+
+def test_merge_selected_photos_from_browse_saves_and_undoes(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Keep browse-mode focus on the browse grid after scene edits.
+
+    Merging or undoing scenes rebuilds the lists. In browse mode, the thumbnail
+    strip is hidden, so keyboard focus must return to the visible browse grid.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7440', 'dimgray'),
+            ('IMG_7441', 'blue'),
+            ('IMG_7442', 'green'),
+        ],
+    )
+    window._enter_browse_mode()
+    _select_list_rows(window.browse_list, [0, 1])
+    app.processEvents()
+
+    assert window.merge_scene_action.isEnabled() is True
+
+    window.merge_scene_action.trigger()
+    app.processEvents()
+
+    assert window.library.scene_source == 'manual'
+    assert window._scene_merge_selection_source == 'browse'
+    assert _list_widget_has_focus(app, window.browse_list)
+    assert [scene.photo_ids for scene in window.library.scenes] == [
+        ['IMG_7440', 'IMG_7441'],
+        ['IMG_7442'],
+    ]
+    data = json.loads(
+        (tmp_path / METADATA_FILENAME).read_text(encoding='utf-8')
+    )
+    assert data['scenes'] == {
+        'groups': [['IMG_7440', 'IMG_7441'], ['IMG_7442']],
+        'source': 'manual',
+    }
+
+    window.undo_metadata_action.trigger()
+    app.processEvents()
+
+    assert window.library.scene_detection_done is False
+    assert window.library.scenes == []
+    assert window._scene_merge_selection_source == 'browse'
+    assert _list_widget_has_focus(app, window.browse_list)
+    data = json.loads(
+        (tmp_path / METADATA_FILENAME).read_text(encoding='utf-8')
+    )
+    assert 'scenes' not in data
+
+    window.redo_metadata_action.trigger()
+    app.processEvents()
+
+    assert [scene.photo_ids for scene in window.library.scenes] == [
+        ['IMG_7440', 'IMG_7441'],
+        ['IMG_7442'],
+    ]
+
+    window.close()
+    del app
+
+
+def test_merge_selected_scene_strip_subset_shows_notice_without_splitting(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7450', 'dimgray'),
+            ('IMG_7451', 'blue'),
+            ('IMG_7452', 'green'),
+            ('IMG_7453', 'white'),
+        ],
+        scene_groups=[['IMG_7450', 'IMG_7451', 'IMG_7452'], ['IMG_7453']],
+    )
+    _select_list_rows(window.scene_list, [1, 2])
+    app.processEvents()
+
+    save_calls = []
+    original_save_metadata = window.library.save_metadata
+
+    def save_metadata_spy() -> None:
+        save_calls.append(None)
+        original_save_metadata()
+
+    monkeypatch.setattr(window.library, 'save_metadata', save_metadata_spy)
+
+    window.merge_scene_action.trigger()
+    app.processEvents()
+
+    assert [scene.photo_ids for scene in window.library.scenes] == [
+        ['IMG_7450', 'IMG_7451', 'IMG_7452'],
+        ['IMG_7453'],
+    ]
+    assert save_calls == []
+    assert not (tmp_path / METADATA_FILENAME).exists()
+    assert window._metadata_undo_stack == []
+    assert window.transient_message_overlay.isVisible() is True
+    assert window.transient_message_label.text() == (
+        'Cannot split an existing scene group.\n'
+        'Press Ctrl+Z to undo and group again.'
+    )
+    assert (
+        window.transient_message_timer.interval()
+        == workflows_module.TRANSIENT_MESSAGE_TIMEOUT_MS
+    )
+    assert window.exit_compare_shortcut.isEnabled() is True
+
+    window.exit_compare_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._compare_mode is False
+    assert window.transient_message_overlay.isHidden() is True
+    assert window.exit_compare_shortcut.isEnabled() is False
+
+    window.close()
+    del app
+
+
+def test_merge_selected_scene_stacks_uses_whole_stack_selection(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7460', 'dimgray'),
+            ('IMG_7461', 'blue'),
+            ('IMG_7462', 'green'),
+            ('IMG_7463', 'white'),
+        ],
+        scene_groups=[['IMG_7460', 'IMG_7461'], ['IMG_7462', 'IMG_7463']],
+    )
+    _select_list_rows(window.thumbnail_list, [0, 1])
+    app.processEvents()
+
+    window.merge_scene_action.trigger()
+    app.processEvents()
+
+    assert [scene.photo_ids for scene in window.library.scenes] == [
+        ['IMG_7460', 'IMG_7461', 'IMG_7462', 'IMG_7463']
+    ]
+
+    window.close()
+    del app
+
+
+def test_break_scene_from_vertical_context_menu_saves_and_undoes(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7484', 'dimgray'),
+            ('IMG_7485', 'blue'),
+            ('IMG_7486', 'green'),
+            ('IMG_7487', 'white'),
+        ],
+        scene_groups=[
+            ['IMG_7484', 'IMG_7485', 'IMG_7486'],
+            ['IMG_7487'],
+        ],
+    )
+    _confirm_next_break_scene(monkeypatch, accept=True)
+
+    scene = window._context_scene_from_thumbnail_position(
+        _item_center(window.thumbnail_list, 0)
+    )
+    assert scene is not None
+    assert scene.photo_ids == ['IMG_7484', 'IMG_7485', 'IMG_7486']
+
+    window._break_scene_into_singletons(scene.scene_id)
+    app.processEvents()
+
+    assert window.library.scene_source == 'manual'
+    assert [scene.photo_ids for scene in window.library.scenes] == [
+        ['IMG_7484'],
+        ['IMG_7485'],
+        ['IMG_7486'],
+        ['IMG_7487'],
+    ]
+    assert window.thumbnail_list.currentRow() == 0
+    assert json.loads(
+        (tmp_path / METADATA_FILENAME).read_text(encoding='utf-8')
+    )['scenes'] == {
+        'groups': [
+            ['IMG_7484'],
+            ['IMG_7485'],
+            ['IMG_7486'],
+            ['IMG_7487'],
+        ],
+        'source': 'manual',
+    }
+
+    window.undo_metadata_action.trigger()
+    app.processEvents()
+
+    assert [scene.photo_ids for scene in window.library.scenes] == [
+        ['IMG_7484', 'IMG_7485', 'IMG_7486'],
+        ['IMG_7487'],
+    ]
+
+    window.redo_metadata_action.trigger()
+    app.processEvents()
+
+    assert [scene.photo_ids for scene in window.library.scenes] == [
+        ['IMG_7484'],
+        ['IMG_7485'],
+        ['IMG_7486'],
+        ['IMG_7487'],
+    ]
+
+    window.close()
+    del app
+
+
+def test_break_scene_from_horizontal_context_menu_uses_current_scene(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7488', 'dimgray'),
+            ('IMG_7489', 'blue'),
+            ('IMG_7490', 'green'),
+            ('IMG_7491', 'white'),
+        ],
+        scene_groups=[
+            ['IMG_7488'],
+            ['IMG_7489', 'IMG_7490', 'IMG_7491'],
+        ],
+    )
+    window.thumbnail_list.setCurrentRow(1)
+    app.processEvents()
+    _confirm_next_break_scene(monkeypatch, accept=True)
+
+    scene = window._context_scene_from_scene_strip()
+    assert scene is not None
+    assert scene.photo_ids == ['IMG_7489', 'IMG_7490', 'IMG_7491']
+
+    window._break_scene_into_singletons(scene.scene_id)
+    app.processEvents()
+
+    assert [scene.photo_ids for scene in window.library.scenes] == [
+        ['IMG_7488'],
+        ['IMG_7489'],
+        ['IMG_7490'],
+        ['IMG_7491'],
+    ]
+    assert window.current_photo_id == 'IMG_7489'
+
+    window.close()
+    del app
+
+
+def test_break_scene_cancel_leaves_scene_state_unchanged(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7492', 'dimgray'),
+            ('IMG_7493', 'blue'),
+            ('IMG_7494', 'green'),
+        ],
+        scene_groups=[['IMG_7492', 'IMG_7493'], ['IMG_7494']],
+    )
+    captured: dict[str, object] = {}
+    _confirm_next_break_scene(
+        monkeypatch,
+        accept=False,
+        captured=captured,
+    )
+
+    scene = window._context_scene_from_thumbnail_position(
+        _item_center(window.thumbnail_list, 0)
+    )
+    assert scene is not None
+    window._break_scene_into_singletons(scene.scene_id)
+    app.processEvents()
+
+    assert captured['text'] == 'Break this scene into individual photos?'
+    assert (
+        captured['informative_text']
+        == 'You can press Ctrl+Z to undo this action.'
+    )
+    assert captured['default_button'] == 'Cancel'
+    assert captured['buttons'] == ['Break Scene', 'Cancel']
+    assert [scene.photo_ids for scene in window.library.scenes] == [
+        ['IMG_7492', 'IMG_7493'],
+        ['IMG_7494'],
+    ]
+    assert window._metadata_undo_stack == []
+    assert not (tmp_path / METADATA_FILENAME).exists()
+
+    window.close()
+    del app
+
+
+def test_break_scene_context_menu_is_hidden_for_singletons_and_blank_strip(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7495', 'dimgray'),
+            ('IMG_7496', 'blue'),
+        ],
+        scene_groups=[['IMG_7495'], ['IMG_7496']],
+    )
+    assert (
+        window._context_scene_from_thumbnail_position(
+            _item_center(window.thumbnail_list, 0)
+        )
+        is None
+    )
+    assert (
+        window._context_scene_from_thumbnail_position(QPoint(-100, -100))
+        is None
+    )
+    assert window._context_scene_from_scene_strip() is None
+    app.processEvents()
+
+    window.close()
+    del app
+
+
+def test_merge_selected_photos_can_create_multiple_manual_groups(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7470', 'dimgray'),
+            ('IMG_7471', 'blue'),
+            ('IMG_7472', 'green'),
+            ('IMG_7473', 'white'),
+        ],
+    )
+    window._enter_browse_mode()
+    _select_list_rows(window.browse_list, [0, 1])
+    app.processEvents()
+
+    window.merge_scene_action.trigger()
+    app.processEvents()
+
+    _select_list_rows(window.browse_list, [2, 3])
+    app.processEvents()
+
+    assert window.merge_scene_action.isEnabled() is True
+
+    window.merge_scene_action.trigger()
+    app.processEvents()
+
+    assert [scene.photo_ids for scene in window.library.scenes] == [
+        ['IMG_7470', 'IMG_7471'],
+        ['IMG_7472', 'IMG_7473'],
+    ]
+
+    window.close()
+    del app
+
+
+def test_merge_selected_photos_can_create_multiple_vertical_groups(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7474', 'dimgray'),
+            ('IMG_7475', 'blue'),
+            ('IMG_7476', 'green'),
+            ('IMG_7477', 'white'),
+        ],
+    )
+    _select_list_rows(window.thumbnail_list, [0, 1])
+    app.processEvents()
+
+    window.merge_scene_action.trigger()
+    app.processEvents()
+
+    assert [scene.photo_ids for scene in window.library.scenes] == [
+        ['IMG_7474', 'IMG_7475'],
+        ['IMG_7476'],
+        ['IMG_7477'],
+    ]
+    assert window._scene_merge_selection_source == 'thumbnail'
+    assert window.thumbnail_list.currentRow() == 0
+
+    window._restore_photo_selection(['IMG_7476', 'IMG_7477'])
+    window._scene_merge_selection_source = 'thumbnail'
+    app.processEvents()
+
+    assert window._mergeable_scene_photo_ids() == ['IMG_7476', 'IMG_7477']
+    assert window.merge_scene_action.isEnabled() is True
+
+    window.merge_scene_action.trigger()
+    app.processEvents()
+
+    assert [scene.photo_ids for scene in window.library.scenes] == [
+        ['IMG_7474', 'IMG_7475'],
+        ['IMG_7476', 'IMG_7477'],
+    ]
+
+    window.close()
+    del app
+
+
+def test_merge_vertical_selection_expands_scene_stack_and_singleton(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7478', 'dimgray'),
+            ('IMG_7479', 'blue'),
+            ('IMG_7480', 'green'),
+            ('IMG_7481', 'white'),
+        ],
+        scene_groups=[['IMG_7478'], ['IMG_7479', 'IMG_7480'], ['IMG_7481']],
+    )
+    _select_list_rows(window.thumbnail_list, [0, 1])
+    app.processEvents()
+
+    assert window._mergeable_scene_photo_ids() == [
+        'IMG_7478',
+        'IMG_7479',
+        'IMG_7480',
+    ]
+
+    window.merge_scene_action.trigger()
+    app.processEvents()
+
+    assert [scene.photo_ids for scene in window.library.scenes] == [
+        ['IMG_7478', 'IMG_7479', 'IMG_7480'],
+        ['IMG_7481'],
+    ]
+
+    window.close()
+    del app
+
+
+def test_merge_visible_vertical_cover_preserves_strip_position(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[(f'IMG_{index:04d}', 'dimgray') for index in range(40)],
+    )
+    window.resize(1200, 800)
+    app.processEvents()
+
+    cover_row = 12
+    _select_list_rows(window.thumbnail_list, [cover_row, cover_row + 1])
+    app.processEvents()
+
+    scrollbar = window.thumbnail_list.verticalScrollBar()
+    assert scrollbar.maximum() > 0
+    _set_list_item_viewport_top(window.thumbnail_list, cover_row, 160)
+    app.processEvents()
+
+    cover_item = window.thumbnail_list.item(cover_row)
+    assert cover_item is not None
+    before_top = window.thumbnail_list.visualItemRect(cover_item).top()
+    assert 0 <= before_top < window.thumbnail_list.viewport().height()
+
+    window.merge_scene_action.trigger()
+    app.processEvents()
+
+    assert window.thumbnail_list.currentRow() == cover_row
+    merged_item = window.thumbnail_list.item(cover_row)
+    assert merged_item is not None
+    after_top = window.thumbnail_list.visualItemRect(merged_item).top()
+    assert abs(after_top - before_top) <= 1
+    assert [scene.photo_ids for scene in window.library.scenes][cover_row] == [
+        'IMG_0012',
+        'IMG_0013',
+    ]
+
+    window.close()
+    del app
+
+
+def test_merge_offscreen_vertical_cover_scrolls_new_scene_to_top(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[(f'IMG_{index:04d}', 'dimgray') for index in range(40)],
+    )
+    window.resize(1200, 800)
+    app.processEvents()
+
+    cover_row = 4
+    top_item = window.thumbnail_list.item(0)
+    assert top_item is not None
+    expected_top = window.thumbnail_list.visualItemRect(top_item).top()
+
+    _select_list_rows(window.thumbnail_list, [cover_row, cover_row + 1])
+    app.processEvents()
+
+    scrollbar = window.thumbnail_list.verticalScrollBar()
+    assert scrollbar.maximum() > 0
+    scrollbar.setValue(scrollbar.maximum())
+    app.processEvents()
+
+    cover_item = window.thumbnail_list.item(cover_row)
+    assert cover_item is not None
+    assert window.thumbnail_list.visualItemRect(cover_item).bottom() < 0
+
+    window.merge_scene_action.trigger()
+    app.processEvents()
+
+    assert window.thumbnail_list.currentRow() == cover_row
+    merged_item = window.thumbnail_list.item(cover_row)
+    assert merged_item is not None
+    after_top = window.thumbnail_list.visualItemRect(merged_item).top()
+    assert abs(after_top - expected_top) <= 1
+    assert [scene.photo_ids for scene in window.library.scenes][cover_row] == [
+        'IMG_0004',
+        'IMG_0005',
+    ]
+
+    window.close()
+    del app
+
+
+def test_merge_selected_scene_stacks_ignores_stale_scene_strip_selection(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7480', 'dimgray'),
+            ('IMG_7481', 'blue'),
+            ('IMG_7482', 'green'),
+            ('IMG_7483', 'white'),
+        ],
+    )
+    _select_list_rows(window.thumbnail_list, [0, 1])
+    app.processEvents()
+
+    window.merge_scene_action.trigger()
+    app.processEvents()
+
+    assert [
+        window.scene_list.row(item)
+        for item in window.scene_list.selectedItems()
+    ] == [0]
+
+    window._restore_photo_selection(['IMG_7482', 'IMG_7483'])
+    window._scene_merge_selection_source = 'thumbnail'
+    app.processEvents()
+
+    assert window._mergeable_scene_photo_ids() == ['IMG_7482', 'IMG_7483']
+
+    window.merge_scene_action.trigger()
+    app.processEvents()
+
+    assert [scene.photo_ids for scene in window.library.scenes] == [
+        ['IMG_7480', 'IMG_7481'],
+        ['IMG_7482', 'IMG_7483'],
+    ]
+
+    window.close()
+    del app
+
+
 def test_main_window_progress_overlay_disables_and_restores_interaction(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -312,10 +1116,12 @@ def test_main_window_assignment_actions_update_metadata_and_persist_changes(
     assert json.loads(
         (tmp_path / METADATA_FILENAME).read_text(encoding='utf-8')
     ) == {
-        'IMG_7500': {
-            'rating': 5,
-            'color_label': 'purple',
-            'flag': 'picked',
+        'photos': {
+            'IMG_7500': {
+                'rating': 5,
+                'color_label': 'purple',
+                'flag': 'picked',
+            }
         }
     }
 
@@ -327,10 +1133,9 @@ def test_main_window_assignment_actions_update_metadata_and_persist_changes(
     assert photo.rating is None
     assert photo.color_label is None
     assert photo.flag is None
-    assert (
-        json.loads((tmp_path / METADATA_FILENAME).read_text(encoding='utf-8'))
-        == {}
-    )
+    assert json.loads(
+        (tmp_path / METADATA_FILENAME).read_text(encoding='utf-8')
+    ) == {'photos': {}}
     assert (
         window.metadata_label.text()
         == f'Metadata: {theme_module.NO_METADATA_TEXT}'
@@ -363,10 +1168,9 @@ def test_backtick_shortcut_clears_color_label_from_runtime_keypress(
     app.processEvents()
 
     assert photo.color_label is None
-    assert (
-        json.loads((tmp_path / METADATA_FILENAME).read_text(encoding='utf-8'))
-        == {}
-    )
+    assert json.loads(
+        (tmp_path / METADATA_FILENAME).read_text(encoding='utf-8')
+    ) == {'photos': {}}
     assert (
         window.metadata_label.text()
         == f'Metadata: {theme_module.NO_METADATA_TEXT}'
@@ -639,7 +1443,7 @@ def test_rating_shortcut_assigns_correct_value(
     saved = json.loads(
         (tmp_path / METADATA_FILENAME).read_text(encoding='utf-8')
     )
-    assert saved['IMG_K100']['rating'] == expected_rating
+    assert saved['photos']['IMG_K100']['rating'] == expected_rating
 
     window.close()
     del app
@@ -670,7 +1474,7 @@ def test_rating_clear_shortcut_removes_rating(
     saved = json.loads(
         (tmp_path / METADATA_FILENAME).read_text(encoding='utf-8')
     )
-    assert saved == {}
+    assert saved == {'photos': {}}
 
     window.close()
     del app
@@ -711,7 +1515,7 @@ def test_color_label_shortcut_assigns_correct_value(
     saved = json.loads(
         (tmp_path / METADATA_FILENAME).read_text(encoding='utf-8')
     )
-    assert saved['IMG_K200']['color_label'] == expected_label
+    assert saved['photos']['IMG_K200']['color_label'] == expected_label
 
     window.close()
     del app
@@ -742,7 +1546,7 @@ def test_color_label_clear_shortcut_removes_label(
     saved = json.loads(
         (tmp_path / METADATA_FILENAME).read_text(encoding='utf-8')
     )
-    assert saved == {}
+    assert saved == {'photos': {}}
 
     window.close()
     del app
@@ -778,7 +1582,7 @@ def test_flag_shortcut_assigns_correct_value(
     saved = json.loads(
         (tmp_path / METADATA_FILENAME).read_text(encoding='utf-8')
     )
-    assert saved['IMG_K300']['flag'] == expected_flag
+    assert saved['photos']['IMG_K300']['flag'] == expected_flag
 
     window.close()
     del app
@@ -810,7 +1614,7 @@ def test_flag_clear_shortcut_removes_flag(
     saved = json.loads(
         (tmp_path / METADATA_FILENAME).read_text(encoding='utf-8')
     )
-    assert saved == {}
+    assert saved == {'photos': {}}
 
     window.close()
     del app
@@ -898,7 +1702,7 @@ def test_menu_action_assigns_correct_metadata_value(
     saved = json.loads(
         (tmp_path / METADATA_FILENAME).read_text(encoding='utf-8')
     )
-    assert saved['IMG_M100'][field] == expected
+    assert saved['photos']['IMG_M100'][field] == expected
 
     window.close()
     del app
@@ -943,7 +1747,7 @@ def test_menu_clear_action_removes_metadata_value(
     saved = json.loads(
         (tmp_path / METADATA_FILENAME).read_text(encoding='utf-8')
     )
-    assert saved == {}
+    assert saved == {'photos': {}}
 
     window.close()
     del app
