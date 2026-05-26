@@ -185,6 +185,11 @@ class PhotoLibrary:
             if self.scene_detection_done
             else [[photo.photo_id] for photo in self.photos]
         )
+        # Exact existing groups are already merged; returning here avoids
+        # relabeling detected scene metadata as a manual edit.
+        if any(ordered_selected == group for group in existing_groups):
+            return
+
         selected = set(ordered_selected)
         next_groups: list[list[str]] = []
         inserted_merged_group = False

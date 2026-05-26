@@ -381,6 +381,35 @@ def test_merge_photos_preserves_first_selected_photo_position(
     ]
 
 
+def test_merge_photos_keeps_exact_existing_detected_group_unchanged(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Avoid turning detected scene metadata into manual metadata for a no-op.
+
+    Selecting an already grouped scene stack in the UI should not create an
+    undoable edit or change persisted scene provenance behind the scenes.
+    """
+    for index in range(4):
+        create_jpeg(tmp_path / f'IMG_742{index}.JPG', 'white')
+
+    stub_read_exif(monkeypatch, {})
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+    library.set_scene_group_photo_ids(
+        [['IMG_7420', 'IMG_7421'], ['IMG_7422', 'IMG_7423']],
+        scene_source='detected',
+    )
+
+    library.merge_photos_into_scene(['IMG_7420', 'IMG_7421'])
+
+    assert library.scene_source == 'detected'
+    assert [scene.photo_ids for scene in library.scenes] == [
+        ['IMG_7420', 'IMG_7421'],
+        ['IMG_7422', 'IMG_7423'],
+    ]
+
+
 def test_merge_photos_supports_consecutive_manual_groups(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
