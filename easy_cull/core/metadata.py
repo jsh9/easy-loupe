@@ -14,6 +14,7 @@ from easy_cull.core.records import (
     METADATA_FILENAME,
     MIN_RATING,
     PhotoRecord,
+    SceneGroup,
 )
 
 
@@ -41,8 +42,12 @@ def normalize_metadata_entries(data: Any) -> dict[str, dict[str, Any]]:
     if not isinstance(data, dict):
         return {}
 
+    photos = data.get('photos')
+    if not isinstance(photos, dict):
+        return {}
+
     normalized: dict[str, dict[str, Any]] = {}
-    for key, value in data.items():
+    for key, value in photos.items():
         if not isinstance(value, dict):
             continue
 
@@ -72,6 +77,57 @@ def normalize_metadata_entries(data: Any) -> dict[str, dict[str, Any]]:
     return normalized
 
 
+def normalize_scene_groups(
+        data: Any, photo_ids: list[str]
+) -> tuple[str | None, list[SceneGroup]]:
+    """Normalize persisted scene groups for the current folder contents."""
+    if not isinstance(data, dict):
+        return None, []
+
+    scenes_payload = data.get('scenes')
+    if not isinstance(scenes_payload, dict):
+        return None, []
+
+    raw_groups = scenes_payload.get('groups')
+    if not isinstance(raw_groups, list):
+        return None, []
+
+    source = scenes_payload.get('source')
+    scene_source = source if isinstance(source, str) else None
+    if not raw_groups:
+        return scene_source, []
+
+    valid_photo_ids = set(photo_ids)
+    seen: set[str] = set()
+    groups: list[list[str]] = []
+    for raw_group in raw_groups:
+        if not isinstance(raw_group, list):
+            continue
+
+        group_photo_ids: list[str] = []
+        for raw_photo_id in raw_group:
+            photo_id = str(raw_photo_id)
+            if photo_id not in valid_photo_ids or photo_id in seen:
+                continue
+
+            group_photo_ids.append(photo_id)
+            seen.add(photo_id)
+
+        if group_photo_ids:
+            groups.append(group_photo_ids)
+
+    groups.extend([photo_id] for photo_id in photo_ids if photo_id not in seen)
+
+    return scene_source, _scene_groups_from_photo_ids(groups)
+
+
+def serialize_scene_groups(
+        scenes: list[SceneGroup],
+) -> list[list[str]]:
+    """Serialize scene groups without persisting generated scene ids."""
+    return [list(scene.photo_ids) for scene in scenes if scene.photo_ids]
+
+
 def serialize_metadata_entries(
         photos: list[PhotoRecord],
 ) -> dict[str, dict[str, Any]]:
@@ -90,6 +146,25 @@ def serialize_metadata_entries(
 
         if entry:
             payload[photo.photo_id] = entry
+
+    return payload
+
+
+def serialize_folder_metadata(
+        photos: list[PhotoRecord],
+        scenes: list[SceneGroup] | None = None,
+        scene_source: str | None = None,
+) -> dict[str, Any]:
+    """Serialize the full folder metadata envelope."""
+    payload: dict[str, Any] = {'photos': serialize_metadata_entries(photos)}
+    if scenes:
+        scene_payload: dict[str, Any] = {
+            'groups': serialize_scene_groups(scenes)
+        }
+        if scene_source is not None:
+            scene_payload['source'] = scene_source
+
+        payload['scenes'] = scene_payload
 
     return payload
 
@@ -140,8 +215,32 @@ def validate_and_apply_metadata(
 def write_metadata(folder: Path, photos: list[PhotoRecord]) -> None:
     """Serialize and write photo metadata to the folder JSON file."""
     metadata_path = folder / METADATA_FILENAME
-    payload = serialize_metadata_entries(photos)
+    payload = serialize_folder_metadata(photos)
     metadata_path.write_text(
         json.dumps(payload, indent=2, sort_keys=True) + '\n',
         encoding='utf-8',
     )
+
+
+def write_folder_metadata(
+        folder: Path,
+        photos: list[PhotoRecord],
+        scenes: list[SceneGroup] | None = None,
+        scene_source: str | None = None,
+) -> None:
+    """Write the folder metadata envelope to disk."""
+    metadata_path = folder / METADATA_FILENAME
+    payload = serialize_folder_metadata(photos, scenes, scene_source)
+    metadata_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + '\n',
+        encoding='utf-8',
+    )
+
+
+def _scene_groups_from_photo_ids(
+        groups: list[list[str]],
+) -> list[SceneGroup]:
+    return [
+        SceneGroup(scene_id=f'scene-{index:04d}', photo_ids=photo_ids)
+        for index, photo_ids in enumerate(groups, start=1)
+    ]

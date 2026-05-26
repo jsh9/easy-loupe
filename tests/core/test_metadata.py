@@ -8,6 +8,8 @@ import pytest
 from easy_cull import core
 from easy_cull.core.metadata import (
     normalize_metadata_entries,
+    normalize_scene_groups,
+    serialize_folder_metadata,
     serialize_metadata_entries,
 )
 from easy_cull.core.photo_library import PhotoLibrary
@@ -29,10 +31,12 @@ def test_load_folder_reads_existing_metadata_file(
     metadata_path = tmp_path / METADATA_FILENAME
     metadata_path.write_text(
         json.dumps({
-            'IMG_1000.JPG': {
-                'flag': 'reject',
-                'rating': 5,
-                'color_label': 'purple',
+            'photos': {
+                'IMG_1000.JPG': {
+                    'flag': 'reject',
+                    'rating': 5,
+                    'color_label': 'purple',
+                }
             }
         }),
         encoding='utf-8',
@@ -67,20 +71,28 @@ def test_save_metadata_uses_visible_stem_key_format(
         (tmp_path / METADATA_FILENAME).read_text(encoding='utf-8')
     )
     assert data == {
-        'IMG_2000': {'color_label': 'red', 'flag': 'rejected', 'rating': 4}
+        'photos': {
+            'IMG_2000': {
+                'color_label': 'red',
+                'flag': 'rejected',
+                'rating': 4,
+            }
+        }
     }
 
 
 def test_metadata_normalization_and_serialization() -> None:
     normalized = normalize_metadata_entries({
-        'IMG_1000.JPG': {
-            'files': ['IMG_1000.JPG'],
-            'rating': 4,
-            'flag': 'reject',
-            'color_label': 'yellow',
-        },
-        'IMG_1001': {'flag': 'picked', 'color_label': 'purple'},
-        'IMG_1002.NEF': {'rating': 8, 'color_label': 'orange'},
+        'photos': {
+            'IMG_1000.JPG': {
+                'files': ['IMG_1000.JPG'],
+                'rating': 4,
+                'flag': 'reject',
+                'color_label': 'yellow',
+            },
+            'IMG_1001': {'flag': 'picked', 'color_label': 'purple'},
+            'IMG_1002.NEF': {'rating': 8, 'color_label': 'orange'},
+        }
     })
 
     assert normalized == {
@@ -102,6 +114,73 @@ def test_metadata_normalization_and_serialization() -> None:
     assert serialize_metadata_entries(photos) == {
         'IMG_1000': {'rating': 4, 'color_label': 'yellow', 'flag': 'rejected'},
         'IMG_1001': {'color_label': 'purple', 'flag': 'picked'},
+    }
+
+
+def test_flat_metadata_payload_is_ignored() -> None:
+    assert (
+        normalize_metadata_entries({
+            'IMG_1000.JPG': {'rating': 4, 'flag': 'picked'}
+        })
+        == {}
+    )
+
+
+def test_scene_group_normalization_repairs_folder_changes() -> None:
+    source, scenes = normalize_scene_groups(
+        {
+            'scenes': {
+                'source': 'manual',
+                'groups': [
+                    ['IMG_1000', 'MISSING', 'IMG_1001', 'IMG_1001'],
+                    ['IMG_1002'],
+                ],
+            }
+        },
+        ['IMG_1000', 'IMG_1001', 'IMG_1002', 'IMG_1003'],
+    )
+
+    assert source == 'manual'
+    assert [scene.scene_id for scene in scenes] == [
+        'scene-0001',
+        'scene-0002',
+        'scene-0003',
+    ]
+    assert [scene.photo_ids for scene in scenes] == [
+        ['IMG_1000', 'IMG_1001'],
+        ['IMG_1002'],
+        ['IMG_1003'],
+    ]
+
+
+def test_folder_metadata_serializes_photos_and_scenes() -> None:
+    photos = [
+        make_photo_record(
+            'IMG_1000', rating=4, color_label='yellow', flag='rejected'
+        ),
+        make_photo_record(
+            'IMG_1001', rating=None, color_label=None, flag=None
+        ),
+    ]
+    _, scenes = normalize_scene_groups(
+        {'scenes': {'source': 'manual', 'groups': [['IMG_1000', 'IMG_1001']]}},
+        ['IMG_1000', 'IMG_1001'],
+    )
+
+    assert serialize_folder_metadata(
+        photos, scenes, scene_source='manual'
+    ) == {
+        'photos': {
+            'IMG_1000': {
+                'rating': 4,
+                'color_label': 'yellow',
+                'flag': 'rejected',
+            }
+        },
+        'scenes': {
+            'source': 'manual',
+            'groups': [['IMG_1000', 'IMG_1001']],
+        },
     }
 
 

@@ -36,7 +36,7 @@ def test_folder_loading_load_folder_state_builds_grouped_sorted_records(
     loaded_state = folder_loading_module.load_folder_state(
         tmp_path,
         metadata_entries={
-            'IMG_0101.JPG': {'rating': 4, 'color_label': 'green'}
+            'photos': {'IMG_0101.JPG': {'rating': 4, 'color_label': 'green'}}
         },
         folder_label='Test Folder',
         progress_callback=lambda message, progress: progress_updates.append((

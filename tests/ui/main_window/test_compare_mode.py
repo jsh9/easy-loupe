@@ -1063,8 +1063,10 @@ def test_metadata_assignment_targets_multi_selection_with_undo_and_redo(
     assert json.loads(
         (tmp_path / METADATA_FILENAME).read_text(encoding='utf-8')
     ) == {
-        'IMG_9200': {'rating': 5},
-        'IMG_9201': {'rating': 5},
+        'photos': {
+            'IMG_9200': {'rating': 5},
+            'IMG_9201': {'rating': 5},
+        }
     }
 
     window.undo_metadata_action.trigger()
@@ -1073,10 +1075,9 @@ def test_metadata_assignment_targets_multi_selection_with_undo_and_redo(
     assert window.library.get_photo('IMG_9200').rating is None
     assert window.library.get_photo('IMG_9201').rating is None
     assert window.redo_metadata_action.isEnabled() is True
-    assert (
-        json.loads((tmp_path / METADATA_FILENAME).read_text(encoding='utf-8'))
-        == {}
-    )
+    assert json.loads(
+        (tmp_path / METADATA_FILENAME).read_text(encoding='utf-8')
+    ) == {'photos': {}}
 
     window.redo_metadata_action.trigger()
     app.processEvents()
