@@ -8,7 +8,23 @@ import easy_cull.analysis.scenes as _analysis_scenes_module
 import easy_cull.core.exif as _exif_module
 import easy_cull.core.preview as _preview_module
 from easy_cull.core.folder_loading import (
+    DEFAULT_PHOTO_SORT_MODE,
+    DEFAULT_PHOTO_SORT_REVERSED,
+)
+from easy_cull.core.folder_loading import (
     load_folder_state as _load_folder_state,
+)
+from easy_cull.core.folder_loading import (
+    normalize_sort_mode as _normalize_sort_mode,
+)
+from easy_cull.core.folder_loading import (
+    normalize_sort_reversed as _normalize_sort_reversed,
+)
+from easy_cull.core.folder_loading import (
+    reorder_scene_groups as _reorder_scene_groups,
+)
+from easy_cull.core.folder_loading import (
+    sort_photo_records as _sort_photo_records,
 )
 from easy_cull.core.metadata import (
     normalize_scene_groups as _normalize_scene_groups,
@@ -40,8 +56,16 @@ class PhotoLibrary:
     Photo-library service for folder loading, metadata, previews, and scenes.
     """
 
-    def __init__(self, cache_dir: Path | None = None) -> None:
+    def __init__(
+            self,
+            cache_dir: Path | None = None,
+            *,
+            sort_mode: str = DEFAULT_PHOTO_SORT_MODE,
+            sort_reversed: bool = DEFAULT_PHOTO_SORT_REVERSED,
+    ) -> None:
         self.cache_dir = _preview_module.make_cache_dir(cache_dir)
+        self.sort_mode = _normalize_sort_mode(sort_mode)
+        self.sort_reversed = _normalize_sort_reversed(sort_reversed)
         self.current_folder: Path | None = None
         self.folder_label: str | None = None
         self.photos: list[PhotoRecord] = []
@@ -64,6 +88,8 @@ class PhotoLibrary:
             metadata_entries=metadata_entries,
             folder_label=folder_label,
             progress_callback=progress_callback,
+            sort_mode=self.sort_mode,
+            sort_reversed=self.sort_reversed,
             read_exif_metadata_fn=_exif_module.read_exif_metadata,
         )
         self.current_folder = loaded_state.current_folder
@@ -75,6 +101,44 @@ class PhotoLibrary:
         self.scene_detection_done = loaded_state.scene_detection_done
         if progress_callback:
             progress_callback('Finished loading folder', 100)
+
+    def set_sort_mode(self, sort_mode: object) -> None:
+        """Set photo sort mode and reorder already-loaded state in place."""
+        self.set_sort_order(sort_mode=sort_mode)
+
+    def set_sort_order(
+            self,
+            *,
+            sort_mode: object | None = None,
+            sort_reversed: object | None = None,
+    ) -> None:
+        """Set photo sort mode/direction and reorder loaded state in place."""
+        if sort_mode is not None:
+            self.sort_mode = _normalize_sort_mode(sort_mode)
+
+        if sort_reversed is not None:
+            self.sort_reversed = _normalize_sort_reversed(sort_reversed)
+
+        _sort_photo_records(
+            self.photos,
+            self.sort_mode,
+            sort_reversed=self.sort_reversed,
+        )
+        # Rebuild the map after sorting so lookups and scene-id reassignment
+        # address the same record objects that the UI will render in order.
+        self._photo_map = {photo.photo_id: photo for photo in self.photos}
+        if self.scenes:
+            _reorder_scene_groups(
+                self.scenes, [photo.photo_id for photo in self.photos]
+            )
+            # Sort changes may rebuild scene ids without changing membership,
+            # so clear stale ids before assigning the new ordered scene ids.
+            for photo in self.photos:
+                photo.scene_id = None
+
+            for scene in self.scenes:
+                for photo_id in scene.photo_ids:
+                    self._photo_map[photo_id].scene_id = scene.scene_id
 
     def get_photos(self) -> list[PhotoRecord]:
         """Return a shallow copy of the loaded photo records."""
@@ -167,6 +231,9 @@ class PhotoLibrary:
         _, scenes = _normalize_scene_groups(
             {'scenes': {'source': scene_source, 'groups': groups}},
             [photo.photo_id for photo in self.photos],
+        )
+        _reorder_scene_groups(
+            scenes, [photo.photo_id for photo in self.photos]
         )
         self._set_scene_groups(scenes, scene_source=scene_source)
 

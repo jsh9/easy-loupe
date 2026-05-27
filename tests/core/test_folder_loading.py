@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import easy_cull.core.folder_loading as folder_loading_module
+from easy_cull.core.folder_loading import PHOTO_SORT_MODE_FILENAME
 from tests.core._helpers import create_jpeg
 
 if TYPE_CHECKING:
@@ -62,3 +63,56 @@ def test_folder_loading_load_folder_state_builds_grouped_sorted_records(
     assert loaded_state.scene_detection_done is False
     assert progress_updates[0] == ('Scanning folder', 5)
     assert progress_updates[1] == ('Reading metadata', 20)
+
+
+def test_folder_loading_can_sort_records_by_filename(tmp_path: Path) -> None:
+    """
+    Verify filename sort ignores EXIF chronology at the loader boundary.
+
+    This protects the user preference before records reach ``PhotoLibrary``.
+    """
+    create_jpeg(tmp_path / 'IMG_0102.JPG', 'dimgray')
+    create_jpeg(tmp_path / 'IMG_0100.JPG', 'blue')
+    create_jpeg(tmp_path / 'IMG_0101.JPG', 'green')
+
+    exif_map = {
+        'IMG_0102.JPG': {'DateTimeOriginal': '2024:05:01 10:00:00'},
+        'IMG_0101.JPG': {'DateTimeOriginal': '2024:05:01 10:00:05'},
+    }
+
+    loaded_state = folder_loading_module.load_folder_state(
+        tmp_path,
+        sort_mode=PHOTO_SORT_MODE_FILENAME,
+        read_exif_metadata_fn=lambda _files: exif_map,
+    )
+
+    assert [photo.photo_id for photo in loaded_state.photos] == [
+        'IMG_0100',
+        'IMG_0101',
+        'IMG_0102',
+    ]
+
+
+def test_folder_loading_can_reverse_filename_sort(tmp_path: Path) -> None:
+    """
+    Verify folder loading applies the persisted reverse direction.
+
+    The loader is the first boundary that builds visible photo order, so it
+    must honor reverse sorting before the records reach ``PhotoLibrary``.
+    """
+    create_jpeg(tmp_path / 'IMG_0102.JPG', 'dimgray')
+    create_jpeg(tmp_path / 'IMG_0100.JPG', 'blue')
+    create_jpeg(tmp_path / 'IMG_0101.JPG', 'green')
+
+    loaded_state = folder_loading_module.load_folder_state(
+        tmp_path,
+        sort_mode=PHOTO_SORT_MODE_FILENAME,
+        sort_reversed=True,
+        read_exif_metadata_fn=lambda _files: {},
+    )
+
+    assert [photo.photo_id for photo in loaded_state.photos] == [
+        'IMG_0102',
+        'IMG_0101',
+        'IMG_0100',
+    ]

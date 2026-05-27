@@ -203,7 +203,12 @@ product contract and the tests/docs are updated accordingly.
   `fail`, `skip`, and `overwrite`.
 - Undo for organization/XMP workflows is explicit, filesystem-based, and a
   given `UndoPlan` is intended to be consumed at most once.
-- Photos are sorted by capture timestamp when available, then by display name.
+- Photos default to sorting by EXIF capture timestamp when available, then by
+  display name. Users can change the global sort preference from the top-bar
+  `Sort by:` visual group, which contains a segmented control between
+  `File Name` and `Capture Time` plus the adjacent `Reverse order` checkbox.
+  The choices are persisted with app settings and applied immediately to loaded
+  folders.
 - `get_preview_path()` supports exactly four kinds: `"thumb"`, `"fit"`,
   `"viewer"`, and `"full"`.
 - For RAW files, `"thumb"`, `"fit"`, and `"viewer"` prefer the embedded RAW
@@ -415,6 +420,15 @@ Mode-transition summary:
 - The top bar includes `Show AF point`, checked by default. When checked, the
   main viewer shows a fixed-screen-size red square at the photo's extracted AF
   point in fit view, manual/focus zoom, and both panes of split view.
+- The top bar includes a single `Sort by:` visual group with mutually exclusive
+  `File Name` and `Capture Time` options plus a `Reverse order` checkbox. The
+  sort-mode options are visually one track/pill segmented control with a
+  brand-blue active option, and the whole sort area is framed with a distinct
+  border as one group rather than loose controls. It is not exposed from the
+  menu bar. The `Reverse order` checkbox flips the active sort direction. Sort
+  changes immediately rebuild the vertical thumbnail strip, horizontal scene
+  strip, browse grid, and compare grid while preserving selected photo IDs
+  where those photos still exist.
 - The `F` shortcut toggles `Show AF point`.
 - A photo with no remembered manual view enters focus zoom around the extracted
   AF point. Remembered per-photo manual zoom state takes priority when
@@ -733,6 +747,8 @@ Additional assignment-menu behavior:
 - Limit line length to 79 characters for Python code, docstrings, and inline
   comments (except for unbreakable lines and inline suppression of
   linters/formatters).
+- Name functions and methods with verb phrases, and name classes with noun
+  phrases.
 - Prefer small, surgical changes. This repo still has a lot of behavior packed
   into `ui/main_window/` and the core loading/preview pipeline, so broad
   refactors can create regressions quickly.

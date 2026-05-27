@@ -425,9 +425,60 @@ class MainWindowPresentationMixin:
             color: #7f8791;
         }}
         """
+        if self.current_theme.name == 'dark':
+            sort_group_background = 'rgba(0, 123, 255, 14)'
+            sort_group_border = '#4f8fd8'
+            sort_track_background = 'rgba(0, 123, 255, 28)'
+            sort_track_border = '#345f95'
+            sort_inactive_text = '#b5c7dc'
+        else:
+            sort_group_background = 'rgba(0, 123, 255, 10)'
+            sort_group_border = '#6aaeff'
+            sort_track_background = 'rgba(0, 123, 255, 20)'
+            sort_track_border = '#b8d7ff'
+            sort_inactive_text = '#4f5a66'
+
+        sort_group_style = f"""
+        QFrame#photoSortGroup {{
+            background-color: {sort_group_background};
+            border: 2px solid {sort_group_border};
+            border-radius: 12px;
+            padding: 3px 7px;
+        }}
+        """
+        sort_segment_style = f"""
+        QFrame#photoSortSegment {{
+            background-color: {sort_track_background};
+            border: 1px solid {sort_track_border};
+            border-radius: 9px;
+        }}
+        """
+        sort_button_style = f"""
+        QPushButton#photoSortButton {{
+            color: {sort_inactive_text};
+            background-color: transparent;
+            border: none;
+            border-radius: 7px;
+            padding: 5px 10px;
+            font-weight: 600;
+        }}
+        QPushButton#photoSortButton:checked {{
+            color: #ffffff;
+            background-color: #007bff;
+        }}
+        QPushButton#photoSortButton:disabled {{
+            color: #7f8791;
+        }}
+        """
         self.open_button.setStyleSheet(button_style)
         self.detect_button.setStyleSheet(button_style)
         self.organize_button.setStyleSheet(button_style)
+        self.photo_sort_group.setStyleSheet(sort_group_style)
+        self.sort_label.setStyleSheet(label_style)
+        self.photo_sort_segment.setStyleSheet(sort_segment_style)
+        for button in self.photo_sort_buttons.values():
+            button.setStyleSheet(sort_button_style)
+
         self.folder_label.setStyleSheet(label_style)
         self.selection_label.setStyleSheet(label_style)
         self.metadata_label.setStyleSheet(label_style)
@@ -486,6 +537,9 @@ class MainWindowPresentationMixin:
             """
         )
         self.show_af_point_toggle.setStyleSheet(self.theme_toggle.styleSheet())
+        self.photo_sort_reverse_checkbox.setStyleSheet(
+            self.theme_toggle.styleSheet()
+        )
         self.thumbnail_list.setStyleSheet(strip_style)
         self.browse_list.setStyleSheet(strip_style)
         self.scene_list.setStyleSheet(strip_style)

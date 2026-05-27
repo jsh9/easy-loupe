@@ -8,6 +8,10 @@ import pytest
 
 import easy_cull.analysis.scenes as analysis_scenes_module
 import easy_cull.core.photo_library as library_module
+from easy_cull.core.folder_loading import (
+    PHOTO_SORT_MODE_CAPTURE_TIME,
+    PHOTO_SORT_MODE_FILENAME,
+)
 from easy_cull.core.photo_library import PhotoLibrary
 from easy_cull.core.records import METADATA_FILENAME, SceneGroup
 from tests.core._helpers import FakeHash, create_jpeg, stub_read_exif
@@ -137,6 +141,311 @@ def test_load_folder_sorts_by_capture_time_ignores_unsupported_files_and_reports
         2024, 5, 1, 10, 0, 5, tzinfo=UTC
     )
     assert library.photos[2].capture_at is None
+
+
+def test_load_folder_filename_sort_ignores_missing_capture_times(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify filename sort does not push untimed photos behind timed photos.
+
+    Capture-time fallback behavior should apply only in capture-time mode.
+    """
+    create_jpeg(tmp_path / 'IMG_2102.JPG', 'blue')
+    create_jpeg(tmp_path / 'IMG_2100.JPG', 'green')
+    create_jpeg(tmp_path / 'IMG_2101.JPG', 'purple')
+    stub_read_exif(
+        monkeypatch,
+        {
+            'IMG_2102.JPG': {'DateTimeOriginal': '2024:05:01 10:00:00'},
+            'IMG_2101.JPG': {'DateTimeOriginal': '2024:05:01 10:00:05'},
+        },
+    )
+
+    library = PhotoLibrary(
+        cache_dir=tmp_path / '.cache', sort_mode=PHOTO_SORT_MODE_FILENAME
+    )
+
+    library.load_folder(tmp_path)
+
+    assert [photo.photo_id for photo in library.photos] == [
+        'IMG_2100',
+        'IMG_2101',
+        'IMG_2102',
+    ]
+
+
+def test_load_folder_reversed_capture_sort_keeps_missing_times_last(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify reverse capture-time sort still leaves untimed photos at the end.
+
+    Reverse means newest dated photo first; photos without EXIF capture time
+    should not jump ahead of dated photos just because direction changes.
+    """
+    create_jpeg(tmp_path / 'IMG_2112.JPG', 'blue')
+    create_jpeg(tmp_path / 'IMG_2110.JPG', 'green')
+    create_jpeg(tmp_path / 'IMG_2111.JPG', 'purple')
+    stub_read_exif(
+        monkeypatch,
+        {
+            'IMG_2110.JPG': {'DateTimeOriginal': '2024:05:01 10:00:00'},
+            'IMG_2112.JPG': {'DateTimeOriginal': '2024:05:01 10:00:10'},
+        },
+    )
+
+    library = PhotoLibrary(
+        cache_dir=tmp_path / '.cache',
+        sort_mode=PHOTO_SORT_MODE_CAPTURE_TIME,
+        sort_reversed=True,
+    )
+
+    library.load_folder(tmp_path)
+
+    assert library.sort_reversed is True
+    assert [photo.photo_id for photo in library.photos] == [
+        'IMG_2112',
+        'IMG_2110',
+        'IMG_2111',
+    ]
+
+
+def test_set_sort_mode_reorders_loaded_photos_and_scene_groups(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify changing sort mode reorders loaded records without rereading EXIF.
+
+    Scene groups should keep their membership while following the new photo
+    order so the UI cover rows and scene IDs remain consistent.
+    """
+    for photo_id in ['IMG_2200', 'IMG_2201', 'IMG_2202']:
+        create_jpeg(tmp_path / f'{photo_id}.JPG', 'white')
+
+    stub_read_exif(
+        monkeypatch,
+        {
+            'IMG_2200.JPG': {'DateTimeOriginal': '2024:05:01 10:00:10'},
+            'IMG_2201.JPG': {'DateTimeOriginal': '2024:05:01 10:00:00'},
+            'IMG_2202.JPG': {'DateTimeOriginal': '2024:05:01 10:00:05'},
+        },
+    )
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+    library.set_scene_group_photo_ids(
+        [['IMG_2201', 'IMG_2202'], ['IMG_2200']],
+        scene_source='manual',
+    )
+
+    library.set_sort_mode(PHOTO_SORT_MODE_FILENAME)
+
+    assert library.sort_mode == PHOTO_SORT_MODE_FILENAME
+    assert [photo.photo_id for photo in library.photos] == [
+        'IMG_2200',
+        'IMG_2201',
+        'IMG_2202',
+    ]
+    assert [scene.photo_ids for scene in library.scenes] == [
+        ['IMG_2200'],
+        ['IMG_2201', 'IMG_2202'],
+    ]
+    assert library.get_photo('IMG_2200').scene_id == 'scene-0001'
+    assert library.get_photo('IMG_2201').scene_id == 'scene-0002'
+
+    library.set_sort_mode('invalid')
+
+    assert library.sort_mode == PHOTO_SORT_MODE_CAPTURE_TIME
+    assert [photo.photo_id for photo in library.photos] == [
+        'IMG_2201',
+        'IMG_2202',
+        'IMG_2200',
+    ]
+
+
+def test_set_sort_order_reverses_loaded_photos_and_scene_groups(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify sort direction changes reorder photos and existing scene groups.
+
+    Scene membership should remain unchanged, but covers, scene rows, and
+    ``photo.scene_id`` values need to follow the reversed library order.
+    """
+    for photo_id in ['IMG_2210', 'IMG_2211', 'IMG_2212']:
+        create_jpeg(tmp_path / f'{photo_id}.JPG', 'white')
+
+    stub_read_exif(
+        monkeypatch,
+        {
+            'IMG_2210.JPG': {'DateTimeOriginal': '2024:05:01 10:00:10'},
+            'IMG_2211.JPG': {'DateTimeOriginal': '2024:05:01 10:00:00'},
+            'IMG_2212.JPG': {'DateTimeOriginal': '2024:05:01 10:00:05'},
+        },
+    )
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+    library.set_scene_group_photo_ids(
+        [['IMG_2211', 'IMG_2212'], ['IMG_2210']],
+        scene_source='manual',
+    )
+
+    library.set_sort_order(
+        sort_mode=PHOTO_SORT_MODE_CAPTURE_TIME,
+        sort_reversed=True,
+    )
+
+    assert library.sort_mode == PHOTO_SORT_MODE_CAPTURE_TIME
+    assert library.sort_reversed is True
+    assert [photo.photo_id for photo in library.photos] == [
+        'IMG_2210',
+        'IMG_2212',
+        'IMG_2211',
+    ]
+    assert [scene.photo_ids for scene in library.scenes] == [
+        ['IMG_2210'],
+        ['IMG_2212', 'IMG_2211'],
+    ]
+    assert library.get_photo('IMG_2210').scene_id == 'scene-0001'
+    assert library.get_photo('IMG_2212').scene_id == 'scene-0002'
+
+
+@pytest.mark.parametrize(
+    (
+        'initial_sort_mode',
+        'next_sort_mode',
+        'expected_initial_order',
+        'merge_photo_ids',
+        'expected_groups_after_merge',
+        'expected_groups_after_resort',
+    ),
+    [
+        pytest.param(
+            PHOTO_SORT_MODE_FILENAME,
+            PHOTO_SORT_MODE_CAPTURE_TIME,
+            ['IMG_2300', 'IMG_2301', 'IMG_2302', 'IMG_2303'],
+            ['IMG_2301', 'IMG_2302'],
+            [['IMG_2300'], ['IMG_2301', 'IMG_2302'], ['IMG_2303']],
+            [['IMG_2302', 'IMG_2301'], ['IMG_2300'], ['IMG_2303']],
+            id='filename-to-capture-time',
+        ),
+        pytest.param(
+            PHOTO_SORT_MODE_CAPTURE_TIME,
+            PHOTO_SORT_MODE_FILENAME,
+            ['IMG_2302', 'IMG_2300', 'IMG_2303', 'IMG_2301'],
+            ['IMG_2302', 'IMG_2301'],
+            [['IMG_2302', 'IMG_2301'], ['IMG_2300'], ['IMG_2303']],
+            [['IMG_2300'], ['IMG_2301', 'IMG_2302'], ['IMG_2303']],
+            id='capture-time-to-filename',
+        ),
+    ],
+)
+def test_sort_change_preserves_scene_merge_created_under_current_sort(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        initial_sort_mode: str,
+        next_sort_mode: str,
+        expected_initial_order: list[str],
+        merge_photo_ids: list[str],
+        expected_groups_after_merge: list[list[str]],
+        expected_groups_after_resort: list[list[str]],
+) -> None:
+    """
+    Verify merged scene membership survives later sort-mode changes.
+
+    This covers the multi-photo selection workflow: a merge is created under
+    one display order, then the user changes sorting. Membership should stay
+    intact while each scene group follows the newly active order.
+    """
+    for photo_id in ['IMG_2300', 'IMG_2301', 'IMG_2302', 'IMG_2303']:
+        create_jpeg(tmp_path / f'{photo_id}.JPG', 'white')
+
+    stub_read_exif(
+        monkeypatch,
+        {
+            'IMG_2300.JPG': {'DateTimeOriginal': '2024:05:01 10:00:05'},
+            'IMG_2301.JPG': {'DateTimeOriginal': '2024:05:01 10:00:15'},
+            'IMG_2302.JPG': {'DateTimeOriginal': '2024:05:01 10:00:00'},
+            'IMG_2303.JPG': {'DateTimeOriginal': '2024:05:01 10:00:10'},
+        },
+    )
+    library = PhotoLibrary(
+        cache_dir=tmp_path / '.cache',
+        sort_mode=initial_sort_mode,
+    )
+    library.load_folder(tmp_path)
+
+    assert [photo.photo_id for photo in library.photos] == (
+        expected_initial_order
+    )
+
+    library.merge_photos_into_scene(merge_photo_ids)
+
+    assert library.scene_source == 'manual'
+    assert library.scene_detection_done is True
+    assert [scene.photo_ids for scene in library.scenes] == (
+        expected_groups_after_merge
+    )
+
+    library.set_sort_mode(next_sort_mode)
+
+    assert [scene.photo_ids for scene in library.scenes] == (
+        expected_groups_after_resort
+    )
+    for scene in library.scenes:
+        for photo_id in scene.photo_ids:
+            assert library.get_photo(photo_id).scene_id == scene.scene_id
+
+
+def test_set_scene_group_photo_ids_reorders_replayed_groups_to_active_sort(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify replayed scene history follows the current photo sort order.
+
+    Scene undo/redo stores plain ordered groups. If the user changes sort
+    before replaying one of those entries, the groups need to be normalized to
+    the active library order rather than restoring stale visual order.
+    """
+    for photo_id in ['IMG_2500', 'IMG_2501', 'IMG_2502', 'IMG_2503']:
+        create_jpeg(tmp_path / f'{photo_id}.JPG', 'white')
+
+    stub_read_exif(
+        monkeypatch,
+        {
+            'IMG_2500.JPG': {'DateTimeOriginal': '2024:05:01 10:00:05'},
+            'IMG_2501.JPG': {'DateTimeOriginal': '2024:05:01 10:00:15'},
+            'IMG_2502.JPG': {'DateTimeOriginal': '2024:05:01 10:00:00'},
+            'IMG_2503.JPG': {'DateTimeOriginal': '2024:05:01 10:00:10'},
+        },
+    )
+    library = PhotoLibrary(
+        cache_dir=tmp_path / '.cache',
+        sort_mode=PHOTO_SORT_MODE_CAPTURE_TIME,
+    )
+    library.load_folder(tmp_path)
+
+    assert [photo.photo_id for photo in library.photos] == [
+        'IMG_2502',
+        'IMG_2500',
+        'IMG_2503',
+        'IMG_2501',
+    ]
+
+    library.set_scene_group_photo_ids(
+        [['IMG_2501', 'IMG_2500'], ['IMG_2502'], ['IMG_2503']],
+        scene_source='manual',
+    )
+
+    assert [scene.photo_ids for scene in library.scenes] == [
+        ['IMG_2502'],
+        ['IMG_2500', 'IMG_2501'],
+        ['IMG_2503'],
+    ]
+    assert library.get_photo('IMG_2502').scene_id == 'scene-0001'
+    assert library.get_photo('IMG_2500').scene_id == 'scene-0002'
+    assert library.get_photo('IMG_2501').scene_id == 'scene-0002'
+    assert library.get_photo('IMG_2503').scene_id == 'scene-0003'
 
 
 def test_get_photo_and_save_metadata_require_loaded_photo_state(

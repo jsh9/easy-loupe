@@ -69,6 +69,16 @@ class ComparePhoto:
     metadata_text: str = ''
 
 
+@dataclass(frozen=True)
+class SelectedPhotoViewState:
+    """Restorable state for the one-photo compare inspection view."""
+
+    photo_id: str
+    actual_size_active: bool
+    manual_view: tuple[float, tuple[float, float]] | None
+    center: tuple[float, float] | None
+
+
 class ComparePanePhotoViewer(PhotoViewer):
     """
     Photo viewer variant that emits compare click and drag gestures.
@@ -256,8 +266,14 @@ class ComparePhotoViewer(QWidget):
             photos: list[ComparePhoto],
             *,
             active_photo_id: str | None = None,
+            preserve_selected_view_state: bool = False,
     ) -> None:
         """Load the provided photos into the compare grid."""
+        selected_view_state = (
+            self._selected_photo_view_state()
+            if preserve_selected_view_state
+            else None
+        )
         self.clear()
         self._photos = list(photos[: self.photo_limit])
         self._active_index = 0
@@ -278,6 +294,7 @@ class ComparePhotoViewer(QWidget):
         self._place_photo_panes()
         self._finish_photo_layout(rows, columns)
         self._sync_active_frame_styles()
+        self._restore_selected_photo_view_state(selected_view_state)
         self._emit_active_photo_changed()
 
     def set_photo_limit(self, limit: object) -> int:
@@ -387,6 +404,44 @@ class ComparePhotoViewer(QWidget):
         self._active_index = 0
         self._rows = 1
         self._columns = 1
+
+    def _selected_photo_view_state(self) -> SelectedPhotoViewState | None:
+        if not self._selected_photo_view_active:
+            return None
+
+        photo_id = self.active_photo_id()
+        if photo_id is None:
+            return None
+
+        return SelectedPhotoViewState(
+            photo_id=photo_id,
+            actual_size_active=(
+                self.selected_viewer.is_actual_size_zoom_active()
+            ),
+            manual_view=self.selected_viewer.current_manual_view(),
+            center=self.selected_viewer.normalized_viewport_center(),
+        )
+
+    def _restore_selected_photo_view_state(
+            self, state: SelectedPhotoViewState | None
+    ) -> None:
+        if state is None or state.photo_id not in self.photo_ids():
+            return
+
+        self._active_index = self._active_index_for_photo_id(state.photo_id)
+        photo = self._active_photo()
+        if photo is None:
+            return
+
+        self._load_selected_photo_view(photo)
+        if state.actual_size_active and state.center is not None:
+            self.selected_viewer.zoom_to_actual_size(state.center)
+        elif state.manual_view is not None:
+            zoom_factor, center = state.manual_view
+            self.selected_viewer.set_manual_view(zoom_factor, center)
+
+        self._set_selected_photo_view_active(active=True)
+        self._sync_active_frame_styles()
 
     def _reset_grid_stretches(self) -> None:
         for row in range(max(self._rows, MIN_COMPARE_PHOTO_COUNT)):

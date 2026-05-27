@@ -479,13 +479,24 @@ class MainWindowWorkflowMixin:
         self._clear_metadata_history()
 
     def _rebuild_loaded_views(
-            self: MainWindow, *, show_progress: bool = False
+            self: MainWindow,
+            *,
+            show_progress: bool = False,
+            preserve_current_photo: bool = False,
     ) -> None:
         if not self.library.photos and self._browse_mode:
             self._set_browse_mode(active=False)
 
+        preserved_photo_id = (
+            self.current_photo_id if preserve_current_photo else None
+        )
+        loaded_photo_ids = {photo.photo_id for photo in self.library.photos}
         self.current_photo_id = (
-            self.library.photos[0].photo_id if self.library.photos else None
+            preserved_photo_id
+            if preserved_photo_id in loaded_photo_ids
+            else self.library.photos[0].photo_id
+            if self.library.photos
+            else None
         )
         self._populate_thumbnail_list(show_progress=show_progress)
         self._populate_browse_list(show_progress=show_progress)
@@ -1025,6 +1036,7 @@ class MainWindowWorkflowMixin:
             'browse' if self._browse_mode else 'thumbnail'
         )
         self._refresh_ui()
+        self._restore_active_navigation_focus()
         self._restore_active_navigation_focus(defer=True)
 
     def _set_interaction_enabled(self: MainWindow, *, enabled: bool) -> None:
@@ -1038,6 +1050,10 @@ class MainWindowWorkflowMixin:
         self.organize_button.setEnabled(photo_actions_enabled)
         self.theme_toggle.setEnabled(enabled)
         self.show_af_point_toggle.setEnabled(enabled)
+        for button in self.photo_sort_buttons.values():
+            button.setEnabled(enabled)
+
+        self.photo_sort_reverse_checkbox.setEnabled(enabled)
         self.thumbnail_list.setEnabled(enabled)
         self.browse_list.setEnabled(enabled)
         self.scene_list.setEnabled(enabled)

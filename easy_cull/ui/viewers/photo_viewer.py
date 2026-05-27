@@ -465,6 +465,10 @@ class PhotoViewer(QGraphicsView):
         """Return the zoom level relative to fit-to-window scale."""
         return self._current_scale / max(self._fit_scale, 0.001)
 
+    def is_actual_size_zoom_active(self) -> bool:
+        """Return whether the viewer is in 100% inspection mode."""
+        return not self._image_size.isEmpty() and self._actual_size_zoom_active
+
     def image_aspect_ratio(self) -> float | None:
         """Return the loaded image width/height ratio."""
         if self._image_size.isEmpty() or self._image_size.height() <= 0:
