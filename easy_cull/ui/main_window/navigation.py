@@ -567,7 +567,14 @@ class MainWindowNavigationMixin:
             self._restore_photo_selection(selection_photo_ids)
         else:
             self._preserved_scene_selection_photo_ids.clear()
-            self.thumbnail_list.setCurrentRow(next_row)
+            item = self.thumbnail_list.item(next_row)
+            if item is not None:
+                # Plain up/down from the scene strip is a new navigation
+                # action, so collapse any selection restored by a sort rebuild.
+                self.thumbnail_list.selectionModel().setCurrentIndex(
+                    self.thumbnail_list.indexFromItem(item),
+                    QItemSelectionModel.SelectionFlag.ClearAndSelect,
+                )
 
         self.thumbnail_list.setFocus(Qt.OtherFocusReason)
         return True

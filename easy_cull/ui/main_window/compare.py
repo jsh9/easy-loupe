@@ -104,6 +104,48 @@ class MainWindowCompareMixin:
         self._refresh_visible_region_overlay(force_full=True)
         self.compare_viewer.setFocus(Qt.OtherFocusReason)
 
+    def _refresh_compare_photos_after_sort_change(
+            self: MainWindow,
+            compared_photo_ids: list[str],
+            *,
+            active_photo_id: str | None,
+    ) -> None:
+        if not self._compare_mode:
+            return
+
+        ordered_photo_ids = self._photo_ids_in_library_order(
+            compared_photo_ids
+        )
+        if len(ordered_photo_ids) < MIN_COMPARE_PHOTO_COUNT:
+            return
+
+        if self._compare_restore_selection_photo_ids:
+            # The full restore selection remains the same set, but future
+            # compare-limit changes should expand from the active sort order.
+            self._compare_restore_selection_photo_ids = (
+                self._photo_ids_in_library_order(
+                    self._compare_restore_selection_photo_ids
+                )
+            )
+
+        next_active_photo_id = (
+            active_photo_id
+            if active_photo_id in ordered_photo_ids
+            else ordered_photo_ids[0]
+        )
+        self.compare_viewer.set_photos(
+            self._compare_photos_for_photo_ids(ordered_photo_ids),
+            active_photo_id=next_active_photo_id,
+            preserve_selected_view_state=True,
+        )
+        refreshed_active_photo_id = self.compare_viewer.active_photo_id()
+        if refreshed_active_photo_id is not None:
+            self.current_photo_id = refreshed_active_photo_id
+
+        self._refresh_selection_labels()
+        self._refresh_visible_region_overlay(force_full=True)
+        self.compare_viewer.setFocus(Qt.OtherFocusReason)
+
     def _compare_limit_refresh_needed(self: MainWindow) -> bool:
         return self._compare_limit_refresh_plan() is not None
 

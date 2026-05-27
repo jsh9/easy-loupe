@@ -6,23 +6,38 @@ import pytest
 from PySide6.QtCore import QSettings
 
 from easy_cull.ui.identity import APP_NAME
-from easy_cull.ui.main_window.build import COMPARE_PHOTO_LIMIT_SETTINGS_KEY
+from easy_cull.ui.main_window.build import (
+    COMPARE_PHOTO_LIMIT_SETTINGS_KEY,
+    PHOTO_SORT_MODE_SETTINGS_KEY,
+    PHOTO_SORT_REVERSED_SETTINGS_KEY,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
 @pytest.fixture(autouse=True)
-def clear_compare_photo_limit_setting() -> Iterator[None]:
+def clear_main_window_settings() -> Iterator[None]:
     settings = QSettings(APP_NAME, APP_NAME)
-    had_original_value = settings.contains(COMPARE_PHOTO_LIMIT_SETTINGS_KEY)
-    original_value = settings.value(COMPARE_PHOTO_LIMIT_SETTINGS_KEY)
-    settings.remove(COMPARE_PHOTO_LIMIT_SETTINGS_KEY)
+    setting_keys = [
+        COMPARE_PHOTO_LIMIT_SETTINGS_KEY,
+        PHOTO_SORT_MODE_SETTINGS_KEY,
+        PHOTO_SORT_REVERSED_SETTINGS_KEY,
+    ]
+    original_values = {
+        key: settings.value(key)
+        for key in setting_keys
+        if settings.contains(key)
+    }
+    for key in setting_keys:
+        settings.remove(key)
+
     settings.sync()
     yield
-    if had_original_value:
-        settings.setValue(COMPARE_PHOTO_LIMIT_SETTINGS_KEY, original_value)
-    else:
-        settings.remove(COMPARE_PHOTO_LIMIT_SETTINGS_KEY)
+    for key in setting_keys:
+        if key in original_values:
+            settings.setValue(key, original_values[key])
+        else:
+            settings.remove(key)
 
     settings.sync()

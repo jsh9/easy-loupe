@@ -1,5 +1,11 @@
 # Change Log
 
+## [0.2.1] - 2026-05-27
+
+- Added
+  - A new feature to sort photos by file name or EXIF capture time, and a
+    toggle to reverse the photos' order
+
 ## [0.2.0] - 2026-05-25
 
 - Added

@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any
 
 import easy_cull.core.exif as exif_module
 import easy_cull.core.metadata as metadata_module
-import easy_cull.core.preview as preview_module
 from easy_cull.core.records import (
     COLOR_LABELS,
     JPEG_EXTENSIONS,
@@ -22,7 +21,17 @@ from easy_cull.core.records import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from datetime import datetime
     from pathlib import Path
+
+PHOTO_SORT_MODE_CAPTURE_TIME = 'capture_time'
+PHOTO_SORT_MODE_FILENAME = 'filename'
+DEFAULT_PHOTO_SORT_MODE = PHOTO_SORT_MODE_CAPTURE_TIME
+DEFAULT_PHOTO_SORT_REVERSED = False
+PHOTO_SORT_MODES = frozenset({
+    PHOTO_SORT_MODE_CAPTURE_TIME,
+    PHOTO_SORT_MODE_FILENAME,
+})
 
 
 @dataclass(slots=True)
@@ -44,6 +53,8 @@ def load_folder_state(
         metadata_entries: dict[str, Any] | None = None,
         folder_label: str | None = None,
         progress_callback: Callable[[str, int], None] | None = None,
+        sort_mode: str = DEFAULT_PHOTO_SORT_MODE,
+        sort_reversed: bool = DEFAULT_PHOTO_SORT_REVERSED,
         read_exif_metadata_fn: Callable[
             [list[Path]], dict[str, dict[str, Any]]
         ],
@@ -92,16 +103,12 @@ def load_folder_state(
             progress = 35 + int((index / total_groups) * 55)
             progress_callback('Building photo list', min(progress, 90))
 
-    records.sort(
-        key=lambda photo: (
-            preview_module.sort_timestamp(photo.capture_at),
-            photo.display_name.lower(),
-        )
-    )
+    sort_photo_records(records, sort_mode, sort_reversed=sort_reversed)
     photo_map = {photo.photo_id: photo for photo in records}
     scene_source, scenes = metadata_module.normalize_scene_groups(
         metadata_entries or {}, [photo.photo_id for photo in records]
     )
+    reorder_scene_groups(scenes, [photo.photo_id for photo in records])
     for scene in scenes:
         for photo_id in scene.photo_ids:
             photo_map[photo_id].scene_id = scene.scene_id
@@ -175,3 +182,105 @@ def _build_photo_record(
         image_width=image_width,
         image_height=image_height,
     )
+
+
+def normalize_sort_mode(sort_mode: object) -> str:
+    """Return a supported photo sort mode, falling back to the default."""
+    if sort_mode in PHOTO_SORT_MODES:
+        return str(sort_mode)
+
+    return DEFAULT_PHOTO_SORT_MODE
+
+
+def normalize_sort_reversed(sort_reversed: object) -> bool:
+    """Return a supported photo sort direction, falling back to ascending."""
+    if isinstance(sort_reversed, bool):
+        return sort_reversed
+
+    if isinstance(sort_reversed, str):
+        normalized = sort_reversed.strip().casefold()
+        if normalized in {'1', 'true', 'yes', 'on'}:
+            return True
+
+        if normalized in {'0', 'false', 'no', 'off', ''}:
+            return DEFAULT_PHOTO_SORT_REVERSED
+
+    return DEFAULT_PHOTO_SORT_REVERSED
+
+
+def sort_photo_records(
+        records: list[PhotoRecord],
+        sort_mode: object,
+        *,
+        sort_reversed: object = DEFAULT_PHOTO_SORT_REVERSED,
+) -> None:
+    """Sort photo records in place according to a supported sort mode."""
+    normalized_sort_mode = normalize_sort_mode(sort_mode)
+    reverse = normalize_sort_reversed(sort_reversed)
+    if normalized_sort_mode == PHOTO_SORT_MODE_FILENAME:
+        records.sort(
+            key=lambda photo: (
+                photo.display_name.casefold(),
+                photo.display_name,
+            ),
+            reverse=reverse,
+        )
+        return
+
+    timed_records = [
+        photo for photo in records if photo.capture_at is not None
+    ]
+    untimed_records = [photo for photo in records if photo.capture_at is None]
+
+    def capture_sort_key(photo: PhotoRecord) -> tuple[datetime, str, str]:
+        assert photo.capture_at is not None
+        return (
+            photo.capture_at,
+            photo.display_name.casefold(),
+            photo.display_name,
+        )
+
+    # Unknown capture times stay after dated photos in both directions so the
+    # reverse toggle means newest-first, not "unknowns first".
+    timed_records.sort(
+        key=capture_sort_key,
+        reverse=reverse,
+    )
+    untimed_records.sort(
+        key=lambda photo: (
+            photo.display_name.casefold(),
+            photo.display_name,
+        ),
+        reverse=reverse,
+    )
+    records[:] = [*timed_records, *untimed_records]
+
+
+def reorder_scene_groups(
+        scenes: list[SceneGroup], ordered_photo_ids: list[str]
+) -> None:
+    """Order existing scene groups to match the active photo order."""
+    photo_position = {
+        photo_id: index for index, photo_id in enumerate(ordered_photo_ids)
+    }
+    for scene in scenes:
+        # Sort each scene's contents by the active photo order so its cover
+        # photo and horizontal scene strip match the user's current sort mode.
+        scene.photo_ids.sort(
+            key=lambda photo_id: photo_position.get(
+                photo_id, len(photo_position)
+            )
+        )
+
+    # Scene groups keep their membership across sort changes, but their rows
+    # must follow the earliest photo they contain in the active order.
+    scenes.sort(
+        key=lambda scene: min(
+            photo_position.get(photo_id, len(photo_position))
+            for photo_id in scene.photo_ids
+        )
+    )
+    for index, scene in enumerate(scenes, start=1):
+        # Scene ids are positional labels in this app, so rebuild them after
+        # reordering groups to keep photo.scene_id references consistent.
+        scene.scene_id = f'scene-{index:04d}'

@@ -9,6 +9,7 @@ from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QButtonGroup,
     QCheckBox,
     QFrame,
     QHBoxLayout,
@@ -19,12 +20,21 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QSplitter,
     QStackedLayout,
     QVBoxLayout,
     QWidget,
 )
 
+from easy_cull.core.folder_loading import (
+    DEFAULT_PHOTO_SORT_MODE,
+    DEFAULT_PHOTO_SORT_REVERSED,
+    PHOTO_SORT_MODE_CAPTURE_TIME,
+    PHOTO_SORT_MODE_FILENAME,
+    normalize_sort_mode,
+    normalize_sort_reversed,
+)
 from easy_cull.ui.identity import APP_NAME, APP_VERSION
 from easy_cull.ui.theme import NO_METADATA_TEXT
 from easy_cull.ui.viewers.compare_photo_viewer import (
@@ -44,6 +54,8 @@ if TYPE_CHECKING:
 
 VIEWER_KEYBOARD_PAN_STEP = 120
 COMPARE_PHOTO_LIMIT_SETTINGS_KEY = 'compare/photo_limit'
+PHOTO_SORT_MODE_SETTINGS_KEY = 'photos/sort_mode'
+PHOTO_SORT_REVERSED_SETTINGS_KEY = 'photos/sort_reversed'
 MIN_SCENE_MERGE_PHOTO_COUNT = 2
 TRANSIENT_MESSAGE_FONT_SIZE_PX = 28
 TRANSIENT_MESSAGE_FONT_WEIGHT = 600
@@ -99,6 +111,7 @@ class MainWindowBuildMixin:
         self.theme_toggle.setChecked(False)
         self.theme_toggle.toggled.connect(self._toggle_theme_checked)
         top_bar.addWidget(self.theme_toggle)
+        top_bar.addSpacing(6)
 
         self.show_af_point_toggle = QCheckBox('Show AF point')
         self.show_af_point_toggle.setChecked(True)
@@ -112,11 +125,49 @@ class MainWindowBuildMixin:
         )
         top_bar.addWidget(self.show_af_point_toggle)
 
+        top_bar.addSpacing(8)
+        self.photo_sort_group = QFrame()
+        self.photo_sort_group.setObjectName('photoSortGroup')
+        sort_control_row = QHBoxLayout(self.photo_sort_group)
+        sort_control_row.setContentsMargins(0, 0, 0, 0)
+        sort_control_row.setSpacing(6)
+        self.sort_label = QLabel('Sort by:')
+        sort_control_row.addWidget(self.sort_label)
+        self._build_photo_sort_control(sort_control_row)
+        self.photo_sort_reverse_checkbox = QCheckBox('Reverse order')
+        self.photo_sort_reverse_checkbox.setObjectName(
+            'photoSortReverseCheckbox'
+        )
+        self.photo_sort_reverse_checkbox.setFocusPolicy(Qt.NoFocus)
+        self.photo_sort_reverse_checkbox.setToolTip(
+            'Reverse the current sort order'
+        )
+        self.photo_sort_reverse_checkbox.toggled.connect(
+            lambda checked: self._set_photo_sort_reversed(
+                checked, persist=True
+            )
+        )
+        sort_control_row.addWidget(self.photo_sort_reverse_checkbox)
+        self._set_photo_sort_order(
+            self._load_photo_sort_mode(),
+            self._load_photo_sort_reversed(),
+            persist=False,
+        )
+        top_bar.addWidget(self.photo_sort_group)
+        top_bar.addSpacing(16)
+
         self.folder_label = QLabel('Folder: No folder selected')
         self.folder_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.selection_label = QLabel('Selection: Nothing selected')
         self.metadata_label = QLabel(f'Metadata: {NO_METADATA_TEXT}')
         self.metadata_label.setTextFormat(Qt.RichText)
+        for label in (
+            self.folder_label,
+            self.selection_label,
+            self.metadata_label,
+        ):
+            label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+
         top_bar.addWidget(self.folder_label, 2)
         top_bar.addWidget(self.selection_label, 1)
         top_bar.addWidget(self.metadata_label, 1)
@@ -469,6 +520,45 @@ class MainWindowBuildMixin:
             self._load_compare_photo_limit(), persist=False
         )
 
+    def _build_photo_sort_control(
+            self: MainWindow, target_layout: QHBoxLayout
+    ) -> None:
+        self.photo_sort_segment = QFrame()
+        self.photo_sort_segment.setObjectName('photoSortSegment')
+        segment_layout = QHBoxLayout(self.photo_sort_segment)
+        segment_layout.setContentsMargins(3, 3, 3, 3)
+        segment_layout.setSpacing(2)
+
+        self.photo_sort_button_group = QButtonGroup(self)
+        self.photo_sort_button_group.setExclusive(True)
+        self.photo_sort_buttons: dict[str, QPushButton] = {}
+        button_specs = {
+            PHOTO_SORT_MODE_FILENAME: (
+                'File Name',
+                'Sort photos by file name',
+            ),
+            PHOTO_SORT_MODE_CAPTURE_TIME: (
+                'Capture Time',
+                'Sort photos by EXIF capture time',
+            ),
+        }
+        for sort_mode, (label, tooltip) in button_specs.items():
+            button = QPushButton(label)
+            button.setObjectName('photoSortButton')
+            button.setCheckable(True)
+            button.setFocusPolicy(Qt.NoFocus)
+            button.setToolTip(tooltip)
+            button.clicked.connect(
+                lambda _checked=False, selected_mode=sort_mode: (
+                    self._set_photo_sort_mode(selected_mode, persist=True)
+                )
+            )
+            self.photo_sort_button_group.addButton(button)
+            self.photo_sort_buttons[sort_mode] = button
+            segment_layout.addWidget(button)
+
+        target_layout.addWidget(self.photo_sort_segment)
+
     @staticmethod
     def _settings() -> QSettings:
         return QSettings(APP_NAME, APP_NAME)
@@ -479,6 +569,128 @@ class MainWindowBuildMixin:
             DEFAULT_COMPARE_PHOTO_LIMIT,
         )
         return self.compare_viewer.normalized_photo_limit(value)
+
+    def _load_photo_sort_mode(self: MainWindow) -> str:
+        value = self._settings().value(
+            PHOTO_SORT_MODE_SETTINGS_KEY,
+            DEFAULT_PHOTO_SORT_MODE,
+        )
+        return normalize_sort_mode(value)
+
+    def _load_photo_sort_reversed(self: MainWindow) -> bool:
+        value = self._settings().value(
+            PHOTO_SORT_REVERSED_SETTINGS_KEY,
+            DEFAULT_PHOTO_SORT_REVERSED,
+        )
+        return normalize_sort_reversed(value)
+
+    def _set_photo_sort_mode(
+            self: MainWindow,
+            sort_mode: object,
+            *,
+            persist: bool,
+    ) -> None:
+        self._set_photo_sort_order(
+            sort_mode,
+            self.library.sort_reversed,
+            persist=persist,
+        )
+
+    def _set_photo_sort_reversed(
+            self: MainWindow,
+            sort_reversed: object,
+            *,
+            persist: bool,
+    ) -> None:
+        self._set_photo_sort_order(
+            self.library.sort_mode,
+            sort_reversed,
+            persist=persist,
+        )
+
+    def _set_photo_sort_order(
+            self: MainWindow,
+            sort_mode: object,
+            sort_reversed: object,
+            *,
+            persist: bool,
+    ) -> None:
+        normalized_sort_mode = normalize_sort_mode(sort_mode)
+        normalized_sort_reversed = normalize_sort_reversed(sort_reversed)
+        if persist and (self._busy or self._background_task_active()):
+            self._check_photo_sort_control(self.library.sort_mode)
+            self._check_photo_sort_reverse_control(self.library.sort_reversed)
+            return
+
+        can_refresh_loaded_views = bool(self.library.photos) and hasattr(
+            self, 'thumbnail_list'
+        )
+        selected_photo_ids = (
+            self._resolved_selection_photo_ids()
+            if can_refresh_loaded_views
+            else []
+        )
+        compared_photo_ids = (
+            self.compare_viewer.photo_ids()
+            if can_refresh_loaded_views and self._compare_mode
+            else []
+        )
+        active_compare_photo_id = (
+            self.compare_viewer.active_photo_id()
+            if can_refresh_loaded_views and self._compare_mode
+            else None
+        )
+        self.library.set_sort_order(
+            sort_mode=normalized_sort_mode,
+            sort_reversed=normalized_sort_reversed,
+        )
+        self._check_photo_sort_control(normalized_sort_mode)
+        self._check_photo_sort_reverse_control(normalized_sort_reversed)
+
+        if persist:
+            self._settings().setValue(
+                PHOTO_SORT_MODE_SETTINGS_KEY, normalized_sort_mode
+            )
+            self._settings().setValue(
+                PHOTO_SORT_REVERSED_SETTINGS_KEY, normalized_sort_reversed
+            )
+
+        if not can_refresh_loaded_views:
+            return
+
+        self._rebuild_loaded_views(preserve_current_photo=True)
+        if selected_photo_ids:
+            # Sorting changes row positions only; restore by photo id so sparse
+            # multi-selections survive after the lists are rebuilt.
+            self._restore_photo_selection(selected_photo_ids)
+
+        if compared_photo_ids:
+            self._refresh_compare_photos_after_sort_change(
+                compared_photo_ids,
+                active_photo_id=active_compare_photo_id,
+            )
+
+        self._restore_active_navigation_focus(defer=True)
+
+    def _check_photo_sort_control(self: MainWindow, sort_mode: object) -> None:
+        normalized_sort_mode = normalize_sort_mode(sort_mode)
+        button = self.photo_sort_buttons.get(normalized_sort_mode)
+        if button is not None and not button.isChecked():
+            button.setChecked(True)
+
+    def _check_photo_sort_reverse_control(
+            self: MainWindow, sort_reversed: object
+    ) -> None:
+        normalized_sort_reversed = normalize_sort_reversed(sort_reversed)
+        if (
+            self.photo_sort_reverse_checkbox.isChecked()
+            != normalized_sort_reversed
+        ):
+            self.photo_sort_reverse_checkbox.blockSignals(True)
+            self.photo_sort_reverse_checkbox.setChecked(
+                normalized_sort_reversed
+            )
+            self.photo_sort_reverse_checkbox.blockSignals(False)
 
     def _set_compare_photo_limit(
             self: MainWindow,

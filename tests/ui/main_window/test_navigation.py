@@ -12,13 +12,18 @@ from pathlib import Path
 from typing import Never
 
 import pytest
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, QItemSelectionModel, Qt
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
 
 import easy_cull.ui.main_window.window as main_window_module
+from easy_cull.core.folder_loading import PHOTO_SORT_MODE_FILENAME
+from easy_cull.core.photo_library import PhotoLibrary
 from tests.ui._helpers import (
+    create_jpeg,
     create_main_window_with_library,
+    stub_read_exif,
     trigger_scene_shortcut,
 )
 
@@ -50,6 +55,84 @@ def _ctrl_click_item(list_widget: object, row: int) -> None:
         Qt.ControlModifier,
         item_rect.center(),
     )
+
+
+def _collect_photo_ids_from_selected_items(list_widget: object) -> list[str]:
+    """Return selected photo IDs in visible row order for assertions."""
+    return [
+        str(item.data(Qt.UserRole))
+        for item in sorted(list_widget.selectedItems(), key=list_widget.row)
+    ]
+
+
+def _select_rows_preserving_current(
+        list_widget: object,
+        rows: list[int],
+) -> None:
+    """
+    Select rows while keeping the last row as Qt's current navigation row.
+    """
+    list_widget.clearSelection()
+    for row in rows:
+        item = list_widget.item(row)
+        assert item is not None
+        item.setSelected(True)
+
+    current_item = list_widget.item(rows[-1])
+    assert current_item is not None
+    list_widget.selectionModel().setCurrentIndex(
+        list_widget.indexFromItem(current_item),
+        QItemSelectionModel.SelectionFlag.NoUpdate,
+    )
+
+
+def _create_sort_navigation_window(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> tuple[object, object, object]:
+    """
+    Build a shown scene-mode window with sort orders that differ visibly.
+
+    The sticky-selection regression needs real Qt focus and selection state, so
+    these tests use a displayed ``MainWindow`` rather than a fake object.
+    """
+    for photo_id, color in [
+        ('IMG_2402', 'blue'),
+        ('IMG_2400', 'green'),
+        ('IMG_2403', 'purple'),
+        ('IMG_2401', 'red'),
+    ]:
+        create_jpeg(tmp_path / f'{photo_id}.JPG', color)
+
+    stub_read_exif(
+        monkeypatch,
+        {
+            'IMG_2402.JPG': {'DateTimeOriginal': '2024:05:01 10:00:00'},
+            'IMG_2400.JPG': {'DateTimeOriginal': '2024:05:01 10:00:05'},
+            'IMG_2403.JPG': {'DateTimeOriginal': '2024:05:01 10:00:10'},
+            'IMG_2401.JPG': {'DateTimeOriginal': '2024:05:01 10:00:15'},
+        },
+    )
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+    library.set_scene_group_photo_ids(
+        [['IMG_2402'], ['IMG_2400'], ['IMG_2403'], ['IMG_2401']],
+        scene_source='manual',
+    )
+
+    app = QApplication.instance() or QApplication([])
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    window.library = library
+    window.current_photo_id = 'IMG_2400'
+    window._populate_thumbnail_list()
+    window._populate_browse_list()
+    window._populate_scene_list()
+    window._display_current_photo()
+    window._refresh_ui()
+    window.show()
+    app.processEvents()
+    return app, library, window
 
 
 def test_main_window_uses_viewer_preview_for_central_image() -> None:
@@ -761,6 +844,120 @@ def test_scene_list_up_and_down_keys_navigate_global_scene_selection(
         window.thumbnail_list.currentItem().data(theme_module.PHOTO_ID_ROLE)
         == 'IMG_7610'
     )
+
+    window.close()
+
+
+def test_scene_list_down_after_sort_change_clears_restored_multi_selection(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify plain scene-strip navigation unsticks sort-restored selections.
+
+    Sort changes intentionally preserve a multi-selection, but the first plain
+    Down key should behave like a fresh navigation action and select only the
+    target row.
+    """
+    app, _library, window = _create_sort_navigation_window(
+        tmp_path, monkeypatch
+    )
+    _select_rows_preserving_current(window.thumbnail_list, [0, 1])
+
+    window.photo_sort_buttons[PHOTO_SORT_MODE_FILENAME].click()
+    app.processEvents()
+
+    assert _collect_photo_ids_from_selected_items(window.thumbnail_list) == [
+        'IMG_2400',
+        'IMG_2402',
+    ]
+
+    down_event = QKeyEvent(QEvent.KeyPress, Qt.Key_Down, Qt.NoModifier)
+    window.scene_list.keyPressEvent(down_event)
+    app.processEvents()
+
+    assert down_event.isAccepted() is True
+    assert window.current_photo_id == 'IMG_2401'
+    assert _collect_photo_ids_from_selected_items(window.thumbnail_list) == [
+        'IMG_2401'
+    ]
+    assert _collect_photo_ids_from_selected_items(window.scene_list) == [
+        'IMG_2401'
+    ]
+
+    window.close()
+
+
+def test_scene_list_down_after_reverse_sort_clears_restored_multi_selection(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify plain scene-strip navigation unsticks reverse-sort selections.
+
+    The Reverse checkbox uses the same immediate-selection restoration path as
+    sort-mode changes, so its first plain Down key should also collapse to one
+    selected row.
+    """
+    app, _library, window = _create_sort_navigation_window(
+        tmp_path, monkeypatch
+    )
+    _select_rows_preserving_current(window.thumbnail_list, [0, 1])
+
+    window.photo_sort_reverse_checkbox.setChecked(True)
+    app.processEvents()
+
+    assert _collect_photo_ids_from_selected_items(window.thumbnail_list) == [
+        'IMG_2400',
+        'IMG_2402',
+    ]
+
+    down_event = QKeyEvent(QEvent.KeyPress, Qt.Key_Down, Qt.NoModifier)
+    window.scene_list.keyPressEvent(down_event)
+    app.processEvents()
+
+    assert down_event.isAccepted() is True
+    assert window.current_photo_id == 'IMG_2402'
+    assert _collect_photo_ids_from_selected_items(window.thumbnail_list) == [
+        'IMG_2402'
+    ]
+    assert _collect_photo_ids_from_selected_items(window.scene_list) == [
+        'IMG_2402'
+    ]
+
+    window.close()
+
+
+def test_scene_list_shift_down_after_sort_change_still_extends_selection(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify the sticky-selection fix preserves intentional Shift extension.
+
+    Only plain up/down should collapse sort-restored selection; holding Shift
+    should keep the existing selected photos and add the next scene row.
+    """
+    app, _library, window = _create_sort_navigation_window(
+        tmp_path, monkeypatch
+    )
+    _select_rows_preserving_current(window.thumbnail_list, [0, 1])
+
+    window.photo_sort_buttons[PHOTO_SORT_MODE_FILENAME].click()
+    app.processEvents()
+
+    down_event = QKeyEvent(
+        QEvent.KeyPress,
+        Qt.Key_Down,
+        Qt.ShiftModifier,
+    )
+    window.scene_list.keyPressEvent(down_event)
+    app.processEvents()
+
+    assert down_event.isAccepted() is True
+    assert window.current_photo_id == 'IMG_2401'
+    assert window._resolved_selection_photo_ids() == [
+        'IMG_2400',
+        'IMG_2401',
+        'IMG_2402',
+    ]
 
     window.close()
 
