@@ -420,6 +420,11 @@ Mode-transition summary:
 - The top bar includes `Show AF point`, checked by default. When checked, the
   main viewer shows a fixed-screen-size red square at the photo's extracted AF
   point in fit view, manual/focus zoom, and both panes of split view.
+- The `I` shortcut toggles a floating EXIF and RGB histogram overlay in normal
+  view mode. The overlay is anchored over the top-right of the main viewer,
+  follows the current photo, hides automatically in browse mode, compare mode,
+  and busy/progress states, and reappears when returning to eligible normal
+  view state if the overlay preference remains enabled.
 - The top bar includes a single `Sort by:` visual group with mutually exclusive
   `File Name` and `Capture Time` options plus a `Reverse order` checkbox. The
   sort-mode options are visually one track/pill segmented control with a
@@ -592,6 +597,10 @@ Keep these expectations intact unless intentionally redesigning the UI:
   `Compare > Limit` with options 2, 3, 4, 6, 8, 10, 12, 16, and 20.
 - When `Show AF point` is checked, the main viewer shows the fixed-size red AF
   point marker in fit view, manual/focus zoom, and both split-view panes.
+- Pressing `I` toggles the viewer info overlay for the current normal-view
+  photo. It shows load-time EXIF display rows and an RGB histogram when
+  available, and is hidden during browse mode, compare mode, and busy/progress
+  workflows.
 - First-time manual/focus zoom starts at the extracted AF point. Remembered
   per-photo zoom/pan state takes priority.
 - While the main viewer is in manual zoom, the active strip thumbnail shows the
@@ -630,6 +639,7 @@ Current shortcut coverage in code includes:
 - `C`: enter compare mode
 - `Esc`: exit compare mode and restore the prior selection/view state
 - `F`: toggle the `Show AF point` overlay
+- `I`: toggle the normal-view EXIF and RGB histogram overlay
 - `Space`: exit browse mode into fit-to-window view mode, promote split view
   into full zoom, toggle focus zoom while already in single-pane view mode, or
   open/toggle the active photo in compare mode
@@ -708,6 +718,9 @@ Additional assignment-menu behavior:
     changes
   - verify AF point marker visibility in fit view, manual/focus zoom, and both
     split-view panes when marker behavior changes
+  - verify the `I` info overlay toggles only in eligible normal view state,
+    follows current-photo changes, hides during browse/compare/busy states, and
+    remains readable when the viewer is resized
   - verify first-time focus zoom uses the AF point while remembered manual zoom
     remains higher priority
   - verify scene-detection completion preserves split view in normal view mode

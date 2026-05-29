@@ -35,6 +35,7 @@ from easy_cull.core.folder_loading import (
     normalize_sort_mode,
     normalize_sort_reversed,
 )
+from easy_cull.core.histogram import compute_rgb_histogram
 from easy_cull.ui.identity import APP_NAME, APP_VERSION
 from easy_cull.ui.theme import NO_METADATA_TEXT
 from easy_cull.ui.viewers.compare_photo_viewer import (
@@ -42,6 +43,7 @@ from easy_cull.ui.viewers.compare_photo_viewer import (
     DEFAULT_COMPARE_PHOTO_LIMIT,
     ComparePhotoViewer,
 )
+from easy_cull.ui.viewers.exif_overlay import ExifOverlayWidget
 from easy_cull.ui.viewers.main_photo_viewer import MainPhotoViewer
 from easy_cull.ui.widgets import SceneListWidget
 
@@ -281,6 +283,9 @@ class MainWindowBuildMixin:
         self.viewer_stack.addWidget(self.viewer)
         self.viewer_stack.addWidget(self.compare_viewer)
         content_splitter.addWidget(self.viewer_stack_widget)
+        self.exif_overlay = ExifOverlayWidget(self.viewer_stack_widget)
+        self.exif_overlay.hide()
+        self.viewer_stack_widget.installEventFilter(self)
 
     def _build_progress_overlay(self: MainWindow) -> None:
         self.progress_overlay = QWidget(self.central_widget)
@@ -743,6 +748,9 @@ class MainWindowBuildMixin:
         self.show_af_point_shortcut = self._make_shortcut(
             'F', self._toggle_show_af_point
         )
+        self.info_overlay_shortcut = self._make_shortcut(
+            'I', self._toggle_info_overlay
+        )
         self.compare_mode_shortcut = self._make_shortcut(
             'C', self._enter_compare_mode
         )
@@ -811,6 +819,7 @@ class MainWindowBuildMixin:
         self.compare_mode_shortcut.setEnabled(
             not self._compare_mode and bool(self.library.photos)
         )
+        self.info_overlay_shortcut.setEnabled(bool(self.library.photos))
         self.exit_compare_shortcut.setEnabled(
             self._compare_mode or self.transient_message_overlay.isVisible()
         )
@@ -906,6 +915,94 @@ class MainWindowBuildMixin:
             not self.show_af_point_toggle.isChecked()
         )
 
+    def _toggle_info_overlay(self: MainWindow) -> None:
+        """Toggle the EXIF and histogram overlay preference."""
+        self._info_overlay_enabled = not self._info_overlay_enabled
+        self._refresh_info_overlay()
+
+    def _refresh_info_overlay(
+            self: MainWindow, *, allow_defer: bool = True
+    ) -> None:
+        """Show or hide the EXIF/histogram pane for the active normal photo."""
+        if not hasattr(self, 'exif_overlay'):
+            return
+
+        if (
+            not self._info_overlay_enabled
+            or self._busy
+            or self._browse_mode
+            or self._compare_mode
+            or self.current_photo_id is None
+            or not self.library.photos
+            or self.viewer_stack.currentWidget() is not self.viewer
+        ):
+            self.exif_overlay.hide()
+            return
+
+        photo = self.library.get_photo(self.current_photo_id)
+        histogram = None
+        try:
+            image_path = self.library.get_preview_path(
+                photo.photo_id, 'viewer'
+            )
+            histogram = compute_rgb_histogram(image_path)
+        except (OSError, RuntimeError, ValueError):
+            histogram = None
+
+        self.exif_overlay.set_content(photo.exif_display, histogram)
+        if not self._info_overlay_geometry_ready():
+            self.exif_overlay.hide()
+            if allow_defer:
+                self._defer_info_overlay_refresh()
+
+            return
+
+        self._update_info_overlay_geometry()
+        self.exif_overlay.show()
+        self.exif_overlay.raise_()
+
+    def _info_overlay_geometry_ready(self: MainWindow) -> bool:
+        """Return whether the viewer stack is large enough for the overlay."""
+        parent_rect = self.viewer_stack_widget.rect()
+        margin = 14
+        return parent_rect.width() >= self.exif_overlay.width() + (
+            margin * 2
+        ) and parent_rect.height() >= self.exif_overlay.minimumHeight() + (
+            margin * 2
+        )
+
+    def _defer_info_overlay_refresh(self: MainWindow) -> None:
+        """Retry overlay refresh after Qt has settled the viewer geometry."""
+        if self._info_overlay_refresh_deferred:
+            return
+
+        self._info_overlay_refresh_deferred = True
+        QTimer.singleShot(0, self._finish_deferred_info_overlay_refresh)
+
+    def _finish_deferred_info_overlay_refresh(self: MainWindow) -> None:
+        self._info_overlay_refresh_deferred = False
+        self._refresh_info_overlay(allow_defer=False)
+
+    def _update_info_overlay_geometry(self: MainWindow) -> None:
+        """Anchor the info overlay at the top right of the viewer stack."""
+        if not hasattr(self, 'exif_overlay'):
+            return
+
+        margin = 14
+        parent_rect = self.viewer_stack_widget.rect()
+        size_hint = self.exif_overlay.sizeHint()
+        width = self.exif_overlay.width()
+        minimum_height = self.exif_overlay.minimumSizeHint().height()
+        height = min(
+            max(size_hint.height(), minimum_height),
+            max(parent_rect.height() - (margin * 2), 0),
+        )
+        if height < minimum_height:
+            return
+
+        x = max(margin, parent_rect.width() - width - margin)
+        self.exif_overlay.setGeometry(x, margin, width, height)
+
     def _create_assignment_action(
             self: MainWindow,
             menu: QMenu,
@@ -965,6 +1062,9 @@ class MainWindowBuildMixin:
         if hasattr(self, 'transient_message_overlay'):
             self._update_transient_message_overlay_geometry()
 
+        if hasattr(self, 'exif_overlay'):
+            self._update_info_overlay_geometry()
+
         if (
             getattr(self, '_browse_mode', False)
             and hasattr(self, 'browse_list')
@@ -999,3 +1099,16 @@ class MainWindowBuildMixin:
             return
 
         QTimer.singleShot(0, self._restore_active_navigation_focus)
+
+    def eventFilter(  # noqa: N802 - Qt API
+            self: MainWindow, watched: object, event: QEvent
+    ) -> bool:
+        """Keep the viewer overlay geometry synchronized with stack resizes."""
+        if (
+            hasattr(self, 'viewer_stack_widget')
+            and watched is self.viewer_stack_widget
+            and event.type() == QEvent.Resize
+        ):
+            self._update_info_overlay_geometry()
+
+        return super().eventFilter(watched, event)

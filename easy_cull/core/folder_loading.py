@@ -157,6 +157,11 @@ def _build_photo_record(
         source_metadata, image_width, image_height
     )
     capture_at = exif_module.parse_capture_time(source_metadata)
+    exif_display: dict[str, str] = {}
+    _add_capture_time_display(exif_display, capture_at)
+    exif_display.update(exif_module.format_exif_display(source_metadata))
+    _add_resolution_display(exif_display, image_width, image_height)
+    _add_file_size_display(exif_display, jpeg_files, raw_files)
 
     existing_metadata = normalized_metadata.get(shared_stem, {})
     rating = existing_metadata.get('rating')
@@ -181,7 +186,60 @@ def _build_photo_record(
         scene_id=None,
         image_width=image_width,
         image_height=image_height,
+        exif_display=exif_display,
     )
+
+
+def _add_capture_time_display(
+        exif_display: dict[str, str],
+        capture_at: datetime | None,
+) -> None:
+    if capture_at is None:
+        return
+
+    capture_time = capture_at.strftime('%Y-%m-%d, %I:%M:%S %p')
+    exif_display['Captured'] = capture_time.replace(', 0', ', ', 1)
+
+
+def _add_resolution_display(
+        exif_display: dict[str, str],
+        image_width: int | None,
+        image_height: int | None,
+) -> None:
+    if image_width is None or image_height is None:
+        return
+
+    megapixels = (image_width * image_height) / 1_000_000
+    exif_display['Resolution'] = (
+        f'{image_width} x {image_height} pixels ({megapixels:.1f} MP)'
+    )
+
+
+def _add_file_size_display(
+        exif_display: dict[str, str],
+        jpeg_files: list[Path],
+        raw_files: list[Path],
+) -> None:
+    parts: list[str] = []
+    jpeg_size = sum(path.stat().st_size for path in jpeg_files)
+    raw_size = sum(path.stat().st_size for path in raw_files)
+    if jpeg_size:
+        parts.append(f'JPG: {_format_file_size(jpeg_size)}')
+
+    if raw_size:
+        parts.append(f'RAW: {_format_file_size(raw_size)}')
+
+    if parts:
+        exif_display['File Size'] = ', '.join(parts)
+
+
+def _format_file_size(size_bytes: int) -> str:
+    one_mb = 1024 * 1024
+    if size_bytes >= one_mb:
+        return f'{size_bytes / one_mb:.1f} MB'
+
+    size_kb = max(1, round(size_bytes / 1024))
+    return f'{size_kb} KB'
 
 
 def normalize_sort_mode(sort_mode: object) -> str:

@@ -18,18 +18,21 @@ def test_folder_loading_load_folder_state_builds_grouped_sorted_records(
         tmp_path: Path,
 ) -> None:
     """Folder-loading helper builds sorted records and resets scene state."""
-    create_jpeg(tmp_path / 'IMG_0101.JPG', 'dimgray')
-    (tmp_path / 'IMG_0101.CR3').write_bytes(b'raw')
+    (tmp_path / 'IMG_0101.JPG').write_bytes(b'j' * 1536)
+    (tmp_path / 'IMG_0101.CR3').write_bytes(b'r' * (2 * 1024 * 1024))
     create_jpeg(tmp_path / 'IMG_0100.JPG', 'blue')
 
     exif_map = {
-        'IMG_0100.JPG': {'DateTimeOriginal': '2024:05:01 10:00:00'},
+        'IMG_0100.JPG': {'DateTimeOriginal': '2024:05:01 08:00:00'},
         'IMG_0101.CR3': {
+            'Make': 'Canon',
+            'Model': 'EOS R5',
+            'LensModel': 'RF 50mm F1.2L USM',
             'ImageWidth': 6000,
             'ImageHeight': 4000,
             'AFAreaXPosition': 3000,
             'AFAreaYPosition': 2000,
-            'DateTimeOriginal': '2024:05:01 10:00:05',
+            'DateTimeOriginal': '2024:05:01 09:00:05',
         },
     }
     progress_updates: list[tuple[str, int]] = []
@@ -57,6 +60,14 @@ def test_folder_loading_load_folder_state_builds_grouped_sorted_records(
         'IMG_0101.JPG',
     ]
     assert loaded_state.photo_map['IMG_0101'].focus_point == (0.5, 0.5)
+    assert loaded_state.photo_map['IMG_0101'].exif_display == {
+        'Captured': '2024-05-01, 9:00:05 AM',
+        'Camera Make': 'Canon',
+        'Camera Model': 'EOS R5',
+        'Lens Model': 'RF 50mm F1.2L USM',
+        'Resolution': '6000 x 4000 pixels (24.0 MP)',
+        'File Size': 'JPG: 2 KB, RAW: 2.0 MB',
+    }
     assert loaded_state.photo_map['IMG_0101'].rating == 4
     assert loaded_state.photo_map['IMG_0101'].color_label == 'green'
     assert loaded_state.scenes == []

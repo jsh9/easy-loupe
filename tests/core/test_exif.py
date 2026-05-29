@@ -31,20 +31,29 @@ def test_format_exif_display_returns_human_readable_fields() -> None:
     metadata = {
         'Make': 'NIKON CORPORATION',
         'Model': 'Z 8',
+        'LensID': 'NIKKOR Z 50mm f/1.8 S',
+        'LensMake': 'Nikon',
         'LensModel': 'NIKKOR Z 50mm f/1.8 S',
         'FNumber': '2.8',
         'ExposureTime': '0.004',
         'ISO': 800,
         'FocalLength': '50',
+        'GPSLatitude': 40.712776,
+        'GPSLongitude': -74.005974,
+        'GPSAltitude': 12.4,
     }
 
     assert core_exif_module.format_exif_display(metadata) == {
-        'Camera': 'NIKON CORPORATION Z 8',
-        'Lens': 'NIKKOR Z 50mm f/1.8 S',
+        'Camera Make': 'NIKON CORPORATION',
+        'Camera Model': 'Z 8',
+        'Lens ID': 'NIKKOR Z 50mm f/1.8 S',
+        'Lens Make': 'Nikon',
+        'Lens Model': 'NIKKOR Z 50mm f/1.8 S',
+        'Focal Length': '50\u00a0mm',
         'Aperture': '\u0192/2.8',
-        'Shutter': '1/250\u00a0s',
+        'Shutter Speed': '1/250\u00a0s',
         'ISO': '800',
-        'Focal': '50\u00a0mm',
+        'GPS': '40.712776º, -74.005974º, 12.4\u00a0m',
     }
 
 
@@ -56,10 +65,14 @@ def test_format_exif_display_uses_lens_fallback_and_long_exposure() -> None:
     }
 
     assert core_exif_module.format_exif_display(metadata) == {
-        'Camera': 'Canon',
-        'Lens': 'RF 24-70mm F2.8L IS USM',
-        'Shutter': '2\u00a0s',
+        'Camera Make': 'Canon',
+        'Lens Model': 'RF 24-70mm F2.8L IS USM',
+        'Shutter Speed': '2\u00a0s',
     }
+
+
+def test_format_exif_display_omits_missing_fields() -> None:
+    assert core_exif_module.format_exif_display({}) == {}
 
 
 @pytest.mark.parametrize(

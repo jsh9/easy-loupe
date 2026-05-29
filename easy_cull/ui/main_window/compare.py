@@ -60,6 +60,7 @@ class MainWindowCompareMixin:
         self.scene_list.setVisible(False)
         self.viewer_stack.setCurrentWidget(self.compare_viewer)
         self._refresh_visible_region_overlay(force_full=True)
+        self._refresh_info_overlay()
         self._update_mode_shortcuts()
         self.compare_viewer.setFocus(Qt.OtherFocusReason)
 
@@ -211,6 +212,7 @@ class MainWindowCompareMixin:
             self.browse_list.setVisible(False)
             self.scene_list.setVisible(False)
             self._update_mode_shortcuts()
+            self._refresh_info_overlay()
             return
 
         if restore_browse_mode:
@@ -231,5 +233,6 @@ class MainWindowCompareMixin:
             self._restore_photo_selection(selection_photo_ids)
 
         self._refresh_visible_region_overlay(force_full=True)
+        self._refresh_info_overlay()
         self._update_mode_shortcuts()
         self._restore_active_navigation_focus(defer=True)

@@ -1,5 +1,10 @@
 # Change Log
 
+## [0.2.2] - 2026-05-29
+
+- Added
+  - EXIF and RGB histogram viewer overlay toggled with `I`
+
 ## [0.2.1] - 2026-05-27
 
 - Added

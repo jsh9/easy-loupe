@@ -53,6 +53,7 @@ class PhotoRecord:
     scene_id: str | None = None
     image_width: int | None = None
     image_height: int | None = None
+    exif_display: dict[str, str] = field(default_factory=dict)
 
     def to_api_dict(self) -> dict[str, Any]:
         """Serialize the photo record to the API response shape."""
