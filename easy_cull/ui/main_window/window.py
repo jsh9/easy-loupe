@@ -57,6 +57,8 @@ class MainWindow(
         self._scene_selection_anchor_row: int | None = None
         self._extending_scene_selection = False
         self._scene_merge_selection_source: str | None = None
+        self._info_overlay_enabled = False
+        self._info_overlay_refresh_deferred = False
 
         # Stores selected non-cover photo IDs from a scene strip that is no
         # longer visible. This is needed because the horizontal scene strip

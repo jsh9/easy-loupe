@@ -545,6 +545,9 @@ class MainWindowPresentationMixin:
         self.scene_list.setStyleSheet(strip_style)
         self.viewer.set_theme(self.current_theme)
         self.compare_viewer.set_theme(self.current_theme)
+        if hasattr(self, 'exif_overlay'):
+            self.exif_overlay.set_theme(self.current_theme)
+
         self._refresh_item_styles(self.thumbnail_list)
         self._refresh_item_styles(self.browse_list)
         self._refresh_item_styles(self.scene_list)
@@ -818,6 +821,11 @@ class MainWindowPresentationMixin:
 
         if self.current_photo_id is None or not self.library.photos:
             self._refresh_strip_items()
+            if not self._browse_mode:
+                self._refresh_info_overlay()
+
             return
 
         self._refresh_strip_items()
+        if not self._browse_mode:
+            self._refresh_info_overlay()

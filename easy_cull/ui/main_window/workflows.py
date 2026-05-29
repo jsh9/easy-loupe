@@ -531,6 +531,7 @@ class MainWindowWorkflowMixin:
         self.overlay_progress_bar.setRange(0, max_value)
         self.overlay_progress_bar.setValue(max(0, min(max_value, progress)))
         self._update_progress_overlay_geometry()
+        self._refresh_info_overlay()
         QApplication.processEvents()
 
     def _hide_progress(self: MainWindow) -> None:
@@ -541,6 +542,7 @@ class MainWindowWorkflowMixin:
         self.overlay_message_label.setText('')
         self._busy = False
         self._set_interaction_enabled(enabled=True)
+        self._refresh_info_overlay()
 
     def _handle_load_progress(
             self: MainWindow, message: str, progress: int

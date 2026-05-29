@@ -170,21 +170,34 @@ def format_exif_display(metadata: dict[str, Any]) -> dict[str, str]:
     Return human-readable EXIF fields for the overlay display.
 
     Returns a dict of label → formatted string for fields that are present.
-    Example keys: 'Camera', 'Lens', 'Aperture', 'Shutter', 'ISO', 'Focal'.
+    Example keys: 'Camera Model', 'Lens Model', 'Aperture', 'Shutter Speed',
+    'ISO', 'Focal Length', and 'GPS'.
     """
     result: dict[str, str] = {}
 
-    camera_parts = [
-        metadata.get('Make', ''),
-        metadata.get('Model', ''),
-    ]
-    camera = ' '.join(p for p in camera_parts if p).strip()
-    if camera:
-        result['Camera'] = camera
+    camera_make = _first_string(metadata, ['Make'])
+    if camera_make:
+        result['Camera Make'] = camera_make
 
-    lens = metadata.get('LensModel') or metadata.get('Lens')
-    if lens:
-        result['Lens'] = str(lens)
+    camera_model = _first_string(metadata, ['Model', 'CameraModelName'])
+    if camera_model:
+        result['Camera Model'] = camera_model
+
+    lens_id = _first_string(metadata, ['LensID', 'LensType'])
+    if lens_id:
+        result['Lens ID'] = lens_id
+
+    lens_make = _first_string(metadata, ['LensMake'])
+    if lens_make:
+        result['Lens Make'] = lens_make
+
+    lens_model = _first_string(metadata, ['LensModel', 'Lens'])
+    if lens_model:
+        result['Lens Model'] = lens_model
+
+    focal = _coerce_float(metadata.get('FocalLength'))
+    if focal is not None:
+        result['Focal Length'] = f'{focal:g}\u00a0mm'
 
     f_number = _coerce_float(metadata.get('FNumber'))
     if f_number is not None:
@@ -194,17 +207,17 @@ def format_exif_display(metadata: dict[str, Any]) -> dict[str, str]:
     if exposure is not None:
         if exposure > 0 and exposure < 1:
             denom = round(1 / exposure)
-            result['Shutter'] = f'1/{denom}\u00a0s'
+            result['Shutter Speed'] = f'1/{denom}\u00a0s'
         else:
-            result['Shutter'] = f'{exposure:g}\u00a0s'
+            result['Shutter Speed'] = f'{exposure:g}\u00a0s'
 
     iso = metadata.get('ISO')
     if iso is not None:
         result['ISO'] = str(iso)
 
-    focal = _coerce_float(metadata.get('FocalLength'))
-    if focal is not None:
-        result['Focal'] = f'{focal:g}\u00a0mm'
+    gps = _format_gps(metadata)
+    if gps:
+        result['GPS'] = gps
 
     return result
 
@@ -294,3 +307,31 @@ def _coerce_float(value: Any) -> float | None:
             return None
 
     return None
+
+
+def _first_string(metadata: dict[str, Any], keys: list[str]) -> str:
+    """Return the first non-empty scalar value for the given EXIF keys."""
+    for key in keys:
+        value = metadata.get(key)
+        if value is None:
+            continue
+
+        text = str(value).strip()
+        if text:
+            return text
+
+    return ''
+
+
+def _format_gps(metadata: dict[str, Any]) -> str:
+    latitude = _coerce_float(metadata.get('GPSLatitude'))
+    longitude = _coerce_float(metadata.get('GPSLongitude'))
+    if latitude is None or longitude is None:
+        return ''
+
+    parts = [f'{latitude:.6f}º', f'{longitude:.6f}º']
+    altitude = _coerce_float(metadata.get('GPSAltitude'))
+    if altitude is not None:
+        parts.append(f'{altitude:g}\u00a0m')
+
+    return ', '.join(parts)

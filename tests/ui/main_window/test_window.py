@@ -20,6 +20,7 @@ from easy_cull.ui.viewers.compare_photo_viewer import (
     COMPARE_PHOTO_LIMIT_OPTIONS,
     DEFAULT_COMPARE_PHOTO_LIMIT,
 )
+from easy_cull.ui.viewers.exif_overlay import HISTOGRAM_HEIGHT
 from tests.ui._helpers import (
     create_jpeg,
     create_main_window_with_library,
@@ -196,22 +197,19 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:
         == '1'
     )
     assert (
-        window
-        .rating_actions[None]
+        window.rating_actions[None]
         .shortcut()
         .toString(QKeySequence.PortableText)
         == '0'
     )
     assert (
-        window
-        .color_label_actions['red']
+        window.color_label_actions['red']
         .shortcut()
         .toString(QKeySequence.PortableText)
         == '6'
     )
     assert (
-        window
-        .color_label_actions['blue']
+        window.color_label_actions['blue']
         .shortcut()
         .toString(QKeySequence.PortableText)
         == '9'
@@ -219,22 +217,19 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:
     assert window.color_label_actions[None].shortcut().isEmpty()
     assert window.color_label_actions[None].text().endswith('\t`')
     assert (
-        window
-        .color_label_actions['purple']
+        window.color_label_actions['purple']
         .shortcut()
         .toString(QKeySequence.PortableText)
         == ''
     )
     assert (
-        window
-        .flag_actions['picked']
+        window.flag_actions['picked']
         .shortcut()
         .toString(QKeySequence.PortableText)
         == 'P'
     )
     assert (
-        window
-        .flag_actions[None]
+        window.flag_actions[None]
         .shortcut()
         .toString(QKeySequence.PortableText)
         == 'U'
@@ -254,6 +249,10 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:
     assert (
         window.show_af_point_shortcut.key().toString(QKeySequence.PortableText)
         == 'F'
+    )
+    assert (
+        window.info_overlay_shortcut.key().toString(QKeySequence.PortableText)
+        == 'I'
     )
     assert (
         window.open_button.toolTip()
@@ -306,6 +305,121 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:
 
     window.close()
     del app
+
+
+def test_info_overlay_shortcut_toggles_normal_view_only_overlay(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_2500', 'indianred'), ('IMG_2501', 'steelblue')],
+    )
+    window.library.get_photo('IMG_2500').exif_display = {
+        'Camera Model': 'Z 8',
+        'ISO': '800',
+    }
+
+    assert window.exif_overlay.isHidden() is True
+
+    window.info_overlay_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._info_overlay_enabled is True
+    assert window.exif_overlay.isVisible() is True
+    assert window.exif_overlay.exif_display() == {
+        'Camera Model': 'Z 8',
+        'ISO': '800',
+    }
+    assert window.exif_overlay.histogram_plot.histogram() is not None
+
+    window.browse_mode_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._browse_mode is True
+    assert window._info_overlay_enabled is True
+    assert window.exif_overlay.isHidden() is True
+
+    window.space_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._browse_mode is False
+    assert window.exif_overlay.isVisible() is True
+
+    for row in range(window.thumbnail_list.count()):
+        item = window.thumbnail_list.item(row)
+        assert item is not None
+        item.setSelected(True)
+
+    window.compare_mode_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._compare_mode is True
+    assert window.exif_overlay.isHidden() is True
+
+    window.exit_compare_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._compare_mode is False
+    assert window.exif_overlay.isVisible() is True
+
+    window.info_overlay_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._info_overlay_enabled is False
+    assert window.exif_overlay.isHidden() is True
+
+    window.close()
+
+
+def test_info_overlay_stays_readable_after_folder_rebuild(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_2600', 'indianred'), ('IMG_2601', 'steelblue')],
+    )
+    window.library.get_photo('IMG_2600').exif_display = {
+        'Camera Model': 'Z 8',
+        'Lens Model': 'NIKKOR Z 50mm f/1.8 S',
+        'Focal Length': '50\u00a0mm',
+        'Aperture': '\u0192/2.8',
+        'Shutter Speed': '1/250\u00a0s',
+        'ISO': '800',
+        'GPS': '40.712776º, -74.005974º, 12.4\u00a0m',
+    }
+    window.info_overlay_shortcut.activated.emit()
+    app.processEvents()
+    assert window.exif_overlay.isVisible() is True
+
+    next_folder = tmp_path / 'next'
+    next_folder.mkdir()
+    create_jpeg(next_folder / 'IMG_2700.JPG', 'seagreen')
+    create_jpeg(next_folder / 'IMG_2701.JPG', 'mediumpurple')
+    window._show_progress('Scanning folder', 0)
+    window.library.load_folder(next_folder)
+    window.library.get_photo('IMG_2700').exif_display = {
+        'Camera Model': 'EOS R5',
+        'Lens Model': 'RF 50mm F1.2L USM',
+        'Focal Length': '50\u00a0mm',
+        'Aperture': '\u0192/1.2',
+        'Shutter Speed': '1/500\u00a0s',
+        'ISO': '100',
+        'GPS': '34.052235º, -118.243683º',
+    }
+    window._rebuild_loaded_views(show_progress=True)
+    window._hide_progress()
+    window._refresh_ui()
+    app.processEvents()
+
+    assert window._info_overlay_enabled is True
+    assert window.exif_overlay.isVisible() is True
+    assert window.exif_overlay.height() >= window.exif_overlay.minimumHeight()
+    assert window.exif_overlay.histogram_plot.height() == HISTOGRAM_HEIGHT
+    assert window.exif_overlay.exif_display()['Camera Model'] == 'EOS R5'
+
+    window.close()
 
 
 def test_main_window_compare_limit_menu_persists_selection() -> None:

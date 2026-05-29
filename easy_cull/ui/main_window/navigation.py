@@ -354,6 +354,9 @@ class MainWindowNavigationMixin:
     ) -> None:
         if self.current_photo_id is None:
             self.viewer.clear_photo()
+            if hasattr(self, '_refresh_info_overlay'):
+                self._refresh_info_overlay()
+
             return
 
         photo = self.library.get_photo(self.current_photo_id)
@@ -373,6 +376,8 @@ class MainWindowNavigationMixin:
             preserve_zoom=preserve_zoom,
             preserved_center=preserved_center,
         )
+        if hasattr(self, '_refresh_info_overlay'):
+            self._refresh_info_overlay()
 
     def _set_browse_mode(self: MainWindow, *, active: bool) -> None:
         self._browse_mode = active
@@ -385,6 +390,7 @@ class MainWindowNavigationMixin:
             self.scene_list.setVisible(False)
 
         self._update_mode_shortcuts()
+        self._refresh_info_overlay()
 
     def _refresh_browse_layout(self: MainWindow) -> None:
         if self.browse_list.count() == 0:
