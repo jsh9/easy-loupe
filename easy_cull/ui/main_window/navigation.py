@@ -457,6 +457,7 @@ class MainWindowNavigationMixin:
             self.browse_list.setVisible(False)
             self.viewer.set_fit_view()
         else:
+            self._photo_viewer_title_suffix = None
             self.top_bar_widget.setVisible(True)
             self.thumbnail_list.setVisible(not self._compare_mode)
 

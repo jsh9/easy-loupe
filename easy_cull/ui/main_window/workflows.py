@@ -153,6 +153,7 @@ class MainWindowWorkflowMixin:
 
         self._clear_metadata_history()
         self._photo_viewer_folder_access_granted = folder_access_granted
+        self._photo_viewer_title_suffix = resolved_path.suffix.casefold()
         self.current_photo_id = self._photo_id_for_opened_file(resolved_path)
         if self.current_photo_id is None and self.library.photos:
             self.current_photo_id = self.library.photos[0].photo_id

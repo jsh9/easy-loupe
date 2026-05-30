@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QSize
 from PySide6.QtWidgets import QListWidget, QListWidgetItem
 
+from easy_cull.ui.identity import APP_NAME
 from easy_cull.ui.main_window.build import (
     TRANSIENT_MESSAGE_FONT_SIZE_PX,
     TRANSIENT_MESSAGE_FONT_WEIGHT,
@@ -135,6 +137,46 @@ class MainWindowPresentationMixin:
             self.metadata_label.setText(
                 f'Metadata: {symbols or NO_METADATA_TEXT}'
             )
+
+    def _refresh_window_title(self: MainWindow) -> None:
+        """
+        Keep the native title bar aligned with photo-viewer navigation.
+
+        Photo records group same-stem files, so the title prefers the suffix
+        originally opened by Finder/Explorer and falls back to the preview file
+        when the navigated-to group does not contain that suffix.
+        """
+        if (
+            not self._photo_viewer_mode
+            or self.current_photo_id is None
+            or not self.library.photos
+        ):
+            self.setWindowTitle(APP_NAME)
+            return
+
+        photos = self.library.get_photos()
+        photo_ids = [photo.photo_id for photo in photos]
+        try:
+            photo_index = photo_ids.index(self.current_photo_id)
+        except ValueError:
+            self.setWindowTitle(APP_NAME)
+            return
+
+        photo = photos[photo_index]
+        preferred_suffix = self._photo_viewer_title_suffix
+        title_filename = next(
+            (
+                filename
+                for filename in photo.files
+                if preferred_suffix is not None
+                and Path(filename).suffix.casefold() == preferred_suffix
+            ),
+            photo.preview_source.name,
+        )
+        self.setWindowTitle(
+            f'{APP_NAME} - {title_filename} ({photo_index + 1} /'
+            f' {len(photos)})'
+        )
 
     def _refresh_compare_metadata_labels(self: MainWindow) -> None:
         if not self._compare_mode:
@@ -812,6 +854,7 @@ class MainWindowPresentationMixin:
             else 'No folder selected'
         )
         self.folder_label.setText(f'Folder: {folder_text}')
+        self._refresh_window_title()
         self._refresh_action_controls(
             photo_actions_enabled=photo_actions_enabled
         )

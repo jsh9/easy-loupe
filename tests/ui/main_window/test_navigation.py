@@ -260,6 +260,12 @@ def test_main_window_browse_mode_toggles_grid_and_space_behavior(
 def test_main_window_system_open_enters_photo_viewer_and_browse_grid(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """
+    Open a file into photo-viewer mode and transition into browse mode.
+
+    The title assertions protect the viewer-only native title state, which
+    must follow arrow navigation and reset when the user enters the grid.
+    """
     create_jpeg(tmp_path / 'A.JPG', 'green')
     create_jpeg(tmp_path / 'B.JPG', 'blue')
     create_jpeg(tmp_path / 'C.JPG', 'purple')
@@ -283,6 +289,7 @@ def test_main_window_system_open_enters_photo_viewer_and_browse_grid(
 
     assert window._photo_viewer_mode is True
     assert window.current_photo_id == 'B'
+    assert window.windowTitle() == 'EasyCull - B.JPG (2 / 3)'
     assert window.top_bar_widget.isHidden() is True
     assert window.thumbnail_list.isHidden() is True
     assert window.browse_list.isHidden() is True
@@ -290,15 +297,59 @@ def test_main_window_system_open_enters_photo_viewer_and_browse_grid(
 
     window._navigate_photo_viewer(1)
     assert window.current_photo_id == 'C'
+    assert window.windowTitle() == 'EasyCull - C.JPG (3 / 3)'
     window._navigate_photo_viewer(-1)
     assert window.current_photo_id == 'B'
+    assert window.windowTitle() == 'EasyCull - B.JPG (2 / 3)'
 
     window._handle_browse_mode_shortcut()
 
     assert window._photo_viewer_mode is False
     assert window._browse_mode is True
+    assert window.windowTitle() == 'EasyCull'
     assert window.browse_list.isVisible() is True
     assert window.browse_list.currentRow() == window._browse_photo_rows['B']
+    window.close()
+
+
+def test_main_window_photo_viewer_title_prefers_opened_file_extension(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Prefer the opened file suffix when rendering the viewer title.
+
+    This guards grouped JPEG+RAW records, where the preview source may be a
+    JPEG but the title should still reflect that the user opened the RAW file.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    create_jpeg(tmp_path / 'B.JPG', 'blue')
+    (tmp_path / 'B.CR3').write_bytes(b'raw')
+    create_jpeg(tmp_path / 'C.JPG', 'purple')
+    stub_read_exif(monkeypatch, {})
+    app = QApplication.instance() or QApplication([])
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    window.show()
+    monkeypatch.setattr(
+        window.folder_access_manager,
+        'ensure_access_for_file',
+        lambda _path, _parent: True,
+    )
+    monkeypatch.setattr(window, '_start_viewer_prefetch', lambda: None)
+    monkeypatch.setattr(
+        window, '_start_folder_hydration', lambda _folder: None
+    )
+
+    window.open_file_from_system(tmp_path / 'B.CR3')
+    app.processEvents()
+
+    assert window.current_photo_id == 'B'
+    assert window.windowTitle() == 'EasyCull - B.CR3 (2 / 3)'
+
+    window._navigate_photo_viewer(1)
+
+    assert window.current_photo_id == 'C'
+    assert window.windowTitle() == 'EasyCull - C.JPG (3 / 3)'
     window.close()
 
 
@@ -339,6 +390,12 @@ def test_main_window_late_file_open_cancels_initial_folder_prompt(
 def test_main_window_canceled_photo_viewer_access_opens_single_photo_only(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """
+    Denied folder access keeps photo-viewer mode scoped to the opened file.
+
+    The title should count the single loaded record, matching disabled
+    adjacent navigation and blocked browse-grid entry.
+    """
     create_jpeg(tmp_path / 'A.JPG', 'green')
     create_jpeg(tmp_path / 'B.JPG', 'blue')
     stub_read_exif(monkeypatch, {})
@@ -362,6 +419,7 @@ def test_main_window_canceled_photo_viewer_access_opens_single_photo_only(
     assert window._photo_viewer_mode is True
     assert window._photo_viewer_folder_access_granted is False
     assert [photo.photo_id for photo in window.library.photos] == ['B']
+    assert window.windowTitle() == 'EasyCull - B.JPG (1 / 1)'
 
     window._navigate_photo_viewer(-1)
     assert window.current_photo_id == 'B'

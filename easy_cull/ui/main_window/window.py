@@ -57,6 +57,9 @@ class MainWindow(
         self._busy = False
         self._photo_viewer_mode = False
         self._photo_viewer_folder_access_granted = True
+        # Preserve the file type the user opened so the viewer title can show
+        # RAW vs raster intent even when a grouped JPEG is the preview source.
+        self._photo_viewer_title_suffix: str | None = None
         self._pending_browse_after_hydration = False
         self._folder_hydration_message = ''
         self._folder_hydration_progress = 0
