@@ -6,8 +6,8 @@
   - Photo-viewer launch mode for opening a single photo from Finder, Explorer,
     or an argv file path, with fit-to-window display, adjacent-folder
     navigation, background prefetching, and handoff into the full browse grid
-  - Support for HEIC/HEIF and additional RAW photo extensions in folder
-    loading and preview generation
+  - Support for HEIC/HEIF and additional RAW photo extensions in folder loading
+    and preview generation
   - macOS photo-viewer folder access now uses TCC-backed protected-folder
     prompts for `~/Desktop`, `~/Documents`, and `~/Downloads`, while keeping a
     native folder chooser fallback for other roots

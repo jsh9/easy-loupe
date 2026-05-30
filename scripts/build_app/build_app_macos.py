@@ -170,13 +170,13 @@ def mark_bundled_exiftool_executable() -> None:
 def remove_bundled_pyside_tool_apps(app_path: Path = APP_PATH) -> None:
     """Remove unused Qt utility apps that break strict bundle verification."""
     for base in (
-            app_path / 'Contents' / 'Frameworks' / 'PySide6',
-            app_path / 'Contents' / 'Resources' / 'PySide6',
+        app_path / 'Contents' / 'Frameworks' / 'PySide6',
+        app_path / 'Contents' / 'Resources' / 'PySide6',
     ):
         for app_name in PYSIDE_TOOL_APP_NAMES:
             for candidate in (
-                    base / f'{app_name}.app',
-                    base / f'{app_name}__dot__app',
+                base / f'{app_name}.app',
+                base / f'{app_name}__dot__app',
             ):
                 if candidate.is_symlink() or candidate.is_file():
                     candidate.unlink()
@@ -312,8 +312,7 @@ def _print_signing_diagnostic() -> None:
             print('codesign verify: ok')
         else:
             output = (
-                verify_result.stderr or verify_result.stdout
-                or 'unknown error'
+                verify_result.stderr or verify_result.stdout or 'unknown error'
             )
             print(f'codesign verify: failed: {output.strip()}')
 

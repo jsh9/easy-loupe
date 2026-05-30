@@ -49,12 +49,11 @@ making UI or library changes based on assumptions.
   artifact.
 - macOS folder access is controlled by TCC, Apple's Transparency, Consent, and
   Control privacy database. EasyCull's own `QSettings` approved-root list only
-  records product intent; real access to protected folders such as
-  `~/Desktop`, `~/Documents`, and `~/Downloads` comes from the macOS TCC
-  prompt, a native file/folder chooser, or manual Full Disk Access. For
-  VSCode-style access prompts, keep the bundle identifier stable
-  (`com.easycull.EasyCull`) and keep the signed app valid after Info.plist
-  changes.
+  records product intent; real access to protected folders such as `~/Desktop`,
+  `~/Documents`, and `~/Downloads` comes from the macOS TCC prompt, a native
+  file/folder chooser, or manual Full Disk Access. For VSCode-style access
+  prompts, keep the bundle identifier stable (`com.easycull.EasyCull`) and keep
+  the signed app valid after Info.plist changes.
 - The build scripts stage official ExifTool payloads under ignored `build`
   cache/staging directories and bundle them under
   `easy_cull/vendor/exiftool/...` inside the PyInstaller artifact. Do not
