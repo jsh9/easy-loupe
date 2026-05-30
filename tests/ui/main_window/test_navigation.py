@@ -15,8 +15,9 @@ import pytest
 from PySide6.QtCore import QEvent, QItemSelectionModel, Qt
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
+import easy_cull.ui.folder_access as folder_access_module
 import easy_cull.ui.main_window.build as build_module
 import easy_cull.ui.main_window.window as main_window_module
 from easy_cull.core.folder_loading import PHOTO_SORT_MODE_FILENAME
@@ -263,8 +264,8 @@ def test_main_window_system_open_enters_photo_viewer_and_browse_grid(
     """
     Open a file into photo-viewer mode and transition into browse mode.
 
-    The title assertions protect the viewer-only native title state, which
-    must follow arrow navigation and reset when the user enters the grid.
+    The title assertions protect the viewer-only native title state, which must
+    follow arrow navigation and reset when the user enters the grid.
     """
     create_jpeg(tmp_path / 'A.JPG', 'green')
     create_jpeg(tmp_path / 'B.JPG', 'blue')
@@ -393,8 +394,8 @@ def test_main_window_canceled_photo_viewer_access_opens_single_photo_only(
     """
     Denied folder access keeps photo-viewer mode scoped to the opened file.
 
-    The title should count the single loaded record, matching disabled
-    adjacent navigation and blocked browse-grid entry.
+    The title should count the single loaded record, matching disabled adjacent
+    navigation and blocked browse-grid entry.
     """
     create_jpeg(tmp_path / 'A.JPG', 'green')
     create_jpeg(tmp_path / 'B.JPG', 'blue')
@@ -426,6 +427,112 @@ def test_main_window_canceled_photo_viewer_access_opens_single_photo_only(
 
     window._handle_browse_mode_shortcut()
     assert window._browse_mode is False
+    window.close()
+
+
+def test_main_window_denied_cloud_storage_access_opens_single_photo_only(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Keep denied CloudStorage access in selected-photo-only viewer mode.
+
+    This verifies the File Provider prompt path has the same safe fallback as
+    Desktop/Documents/Downloads when macOS does not grant folder scanning.
+    """
+    home = tmp_path / 'home'
+    root = home / 'Library' / 'CloudStorage' / 'Dropbox'
+    (root / 'Shoot').mkdir(parents=True)
+    create_jpeg(root / 'Shoot' / 'A.JPG', 'green')
+    create_jpeg(root / 'Shoot' / 'B.JPG', 'blue')
+    stub_read_exif(monkeypatch, {})
+    app = QApplication.instance() or QApplication([])
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    window.show()
+    monkeypatch.setattr(folder_access_module.sys, 'platform', 'darwin')
+    monkeypatch.setattr(folder_access_module.Path, 'home', lambda: home)
+    monkeypatch.setattr(
+        window.folder_access_manager,
+        '_confirm_access_root',
+        lambda _parent, path: path == root,
+    )
+    monkeypatch.setattr(
+        window.folder_access_manager,
+        '_probe_folder_access',
+        lambda _path: False,
+    )
+    monkeypatch.setattr(window, '_start_viewer_prefetch', lambda: None)
+    monkeypatch.setattr(
+        window, '_start_folder_hydration', lambda _folder: None
+    )
+
+    window.open_file_from_system(root / 'Shoot' / 'B.JPG')
+    app.processEvents()
+
+    assert window._photo_viewer_mode is True
+    assert window._photo_viewer_folder_access_granted is False
+    assert [photo.photo_id for photo in window.library.photos] == ['B']
+    assert window.windowTitle() == 'EasyCull - B.JPG (1 / 1)'
+    window.close()
+
+
+def test_main_window_cloud_storage_retry_uses_macos_permission_prompt(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Show the macOS-permission retry path for CloudStorage roots.
+
+    The retry dialog should not steer File Provider folders back to the native
+    folder chooser wording because the first recovery attempt is another OS
+    permission probe.
+    """
+    root = tmp_path / 'home' / 'Library' / 'CloudStorage' / 'OneDrive'
+    photo = root / 'Shoot' / 'IMG_1000.JPG'
+    photo.parent.mkdir(parents=True)
+    photo.write_bytes(b'jpg')
+    captured: dict[str, object] = {}
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    monkeypatch.setattr(
+        window.folder_access_manager,
+        'suggest_access_root',
+        lambda _file_path: root,
+    )
+    monkeypatch.setattr(
+        window.folder_access_manager,
+        'is_macos_promptable_root',
+        lambda path: path == root,
+    )
+    monkeypatch.setattr(
+        window.folder_access_manager,
+        'request_access_for_file',
+        lambda _file_path, _parent: True,
+    )
+
+    def fake_exec(message_box: QMessageBox) -> int:
+        captured['informative_text'] = message_box.informativeText()
+        captured['buttons'] = [
+            button.text().replace('&', '') for button in message_box.buttons()
+        ]
+        message_box._clicked_button = next(
+            button
+            for button in message_box.buttons()
+            if button.text().replace('&', '') == 'Try macOS Permission Again'
+        )
+        return 0
+
+    monkeypatch.setattr(QMessageBox, 'exec', fake_exec)
+    monkeypatch.setattr(
+        QMessageBox,
+        'clickedButton',
+        lambda message_box: getattr(message_box, '_clicked_button', None),
+    )
+
+    assert window._retry_photo_viewer_folder_access(photo) is True
+
+    assert 'again' in str(captured['informative_text'])
+    assert 'Try macOS Permission Again' in captured['buttons']
+    assert 'Choose Folder' not in captured['buttons']
     window.close()
 
 

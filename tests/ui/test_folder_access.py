@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import pytest
 from PySide6.QtCore import QSettings
 
 import easy_cull.ui.folder_access as folder_access_module
@@ -42,6 +43,36 @@ def test_folder_access_manager_suggests_common_home_parent(
     assert (
         folder_access_module.FolderAccessManager.suggest_access_root(photo)
         == home / 'Downloads'
+    )
+
+
+@pytest.mark.parametrize('provider', ['Dropbox', 'OneDrive'])
+def test_folder_access_manager_suggests_cloud_storage_provider_root(
+        tmp_path: Path, monkeypatch: Any, provider: str
+) -> None:
+    """
+    Resolve deeply nested File Provider photos to the provider root.
+
+    This keeps Dropbox, OneDrive, and similar roots eligible for a macOS prompt
+    instead of falling back to a one-off nested folder chooser.
+    """
+    home = tmp_path / 'home'
+    photo = (
+        home
+        / 'Library'
+        / 'CloudStorage'
+        / provider
+        / 'Shoots'
+        / 'Trip'
+        / 'IMG_1000.JPG'
+    )
+    photo.parent.mkdir(parents=True)
+    photo.write_bytes(b'jpg')
+    monkeypatch.setattr(folder_access_module.Path, 'home', lambda: home)
+
+    assert (
+        folder_access_module.FolderAccessManager.suggest_access_root(photo)
+        == home / 'Library' / 'CloudStorage' / provider
     )
 
 
@@ -88,6 +119,71 @@ def test_folder_access_manager_uses_tcc_prompt_for_standard_root(
 
     assert manager.ensure_access_for_file(photo) is True
     assert manager.approved_roots() == [root.resolve()]
+
+
+def test_folder_access_manager_uses_macos_prompt_for_cloud_storage_root(
+        tmp_path: Path, monkeypatch: Any
+) -> None:
+    """
+    Use the OS-prompt path for File Provider roots.
+
+    CloudStorage access should probe the provider root directly so macOS can
+    grant access, and must not open EasyCull's native folder chooser first.
+    """
+    manager = folder_access_module.FolderAccessManager(_settings(tmp_path))
+    home = tmp_path / 'home'
+    root = home / 'Library' / 'CloudStorage' / 'Dropbox'
+    photo = root / 'Shoot' / 'IMG_1000.JPG'
+    photo.parent.mkdir(parents=True)
+    photo.write_bytes(b'jpg')
+    monkeypatch.setattr(folder_access_module.sys, 'platform', 'darwin')
+    monkeypatch.setattr(folder_access_module.Path, 'home', lambda: home)
+    monkeypatch.setattr(
+        manager, '_confirm_access_root', lambda _parent, path: path == root
+    )
+    monkeypatch.setattr(
+        manager,
+        '_probe_folder_access',
+        lambda path: path == root,
+    )
+
+    def fail_folder_chooser(*_args: object) -> str:
+        raise AssertionError('folder chooser should not open')
+
+    monkeypatch.setattr(
+        folder_access_module.QFileDialog,
+        'getExistingDirectory',
+        fail_folder_chooser,
+    )
+
+    assert manager.ensure_access_for_file(photo) is True
+    assert manager.approved_roots() == [root.resolve()]
+
+
+def test_folder_access_manager_cloud_storage_denial_leaves_root_unapproved(
+        tmp_path: Path, monkeypatch: Any
+) -> None:
+    """
+    Avoid persisting File Provider roots when macOS denies the probe.
+
+    Persisting only after a successful probe keeps EasyCull's approved-root
+    preference aligned with actual OS access.
+    """
+    manager = folder_access_module.FolderAccessManager(_settings(tmp_path))
+    home = tmp_path / 'home'
+    root = home / 'Library' / 'CloudStorage' / 'OneDrive'
+    photo = root / 'Shoot' / 'IMG_1000.JPG'
+    photo.parent.mkdir(parents=True)
+    photo.write_bytes(b'jpg')
+    monkeypatch.setattr(folder_access_module.sys, 'platform', 'darwin')
+    monkeypatch.setattr(folder_access_module.Path, 'home', lambda: home)
+    monkeypatch.setattr(
+        manager, '_confirm_access_root', lambda _parent, _path: True
+    )
+    monkeypatch.setattr(manager, '_probe_folder_access', lambda _path: False)
+
+    assert manager.ensure_access_for_file(photo) is False
+    assert manager.approved_roots() == []
 
 
 def test_folder_access_manager_tcc_denial_leaves_root_unapproved(

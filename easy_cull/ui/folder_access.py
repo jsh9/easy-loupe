@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox, QWidget
 from easy_cull.ui.identity import APP_NAME
 
 APPROVED_ROOTS_SETTINGS_KEY = 'photo_viewer/approved_roots'
+MACOS_CLOUD_STORAGE_DIR = 'Library/CloudStorage'
 COMMON_MAC_PARENT_NAMES = frozenset({
     'Desktop',
     'Documents',
@@ -62,7 +63,7 @@ class FolderAccessManager:
         if not self._confirm_access_root(parent, suggested_root):
             return False
 
-        if self.is_standard_tcc_root(suggested_root):
+        if self.is_macos_promptable_root(suggested_root):
             if not self._probe_folder_access(suggested_root):
                 return False
 
@@ -160,11 +161,11 @@ class FolderAccessManager:
         )
         dialog.addButton(QMessageBox.StandardButton.Cancel)
         dialog.setDefaultButton(allow_button)
-        if self.is_standard_tcc_root(root):
+        if self.is_macos_promptable_root(root):
             dialog.setInformativeText(
-                'macOS may show a privacy prompt after you click Allow. This'
-                ' lets EasyCull navigate adjacent photos in that folder tree'
-                ' without asking again.'
+                'macOS may show a privacy or cloud-file-provider prompt after'
+                ' you click Allow. This lets EasyCull navigate adjacent photos'
+                ' in that folder tree without asking again.'
             )
         else:
             dialog.setInformativeText(
@@ -181,8 +182,8 @@ class FolderAccessManager:
         """
         Return True when macOS allows directory scanning for a root.
 
-        On Desktop/Documents/Downloads this read is what triggers the native
-        TCC prompt for unsigned or unsandboxed builds with a valid bundle ID.
+        On promptable macOS roots this read is what triggers the native TCC or
+        File Provider prompt for builds with a valid bundle ID.
         """
         try:
             iterator = root.iterdir()
@@ -219,6 +220,12 @@ class FolderAccessManager:
         except ValueError:
             return resolved_file.parent
 
+        cloud_root = FolderAccessManager._cloud_storage_provider_root(
+            home, relative
+        )
+        if cloud_root is not None:
+            return cloud_root
+
         if relative.parts and relative.parts[0] in COMMON_MAC_PARENT_NAMES:
             return home / relative.parts[0]
 
@@ -227,16 +234,56 @@ class FolderAccessManager:
     @staticmethod
     def is_standard_tcc_root(root: Path) -> bool:
         """Return True for home Desktop/Documents/Downloads roots."""
-        resolved_root = root.expanduser().resolve()
-        home = Path.home().expanduser().resolve()
-        try:
-            relative = resolved_root.relative_to(home)
-        except ValueError:
+        relative = FolderAccessManager._relative_to_home(root)
+        if relative is None:
             return False
 
         return len(relative.parts) == 1 and (
             relative.parts[0] in STANDARD_TCC_PARENT_NAMES
         )
+
+    @staticmethod
+    def is_macos_promptable_root(root: Path) -> bool:
+        """Return True for roots that can use a macOS permission prompt."""
+        if FolderAccessManager.is_standard_tcc_root(root):
+            return True
+
+        relative = FolderAccessManager._relative_to_home(root)
+        if relative is None:
+            return False
+
+        return (
+            FolderAccessManager._cloud_storage_provider_root(
+                Path.home().expanduser().resolve(), relative
+            )
+            == root.expanduser().resolve()
+        )
+
+    @staticmethod
+    def _relative_to_home(path: Path) -> Path | None:
+        resolved_path = path.expanduser().resolve()
+        home = Path.home().expanduser().resolve()
+        try:
+            relative = resolved_path.relative_to(home)
+        except ValueError:
+            return None
+
+        return relative
+
+    @staticmethod
+    def _cloud_storage_provider_root(
+            home: Path, relative: Path
+    ) -> Path | None:
+        cloud_parts = tuple(Path(MACOS_CLOUD_STORAGE_DIR).parts)
+        if (
+            len(relative.parts) <= len(cloud_parts)
+            or relative.parts[: len(cloud_parts)] != cloud_parts
+        ):
+            return None
+
+        # File Provider roots live one level below CloudStorage. Return that
+        # provider root so one OS grant covers nested Dropbox/OneDrive shoots.
+        return home.joinpath(*relative.parts[: len(cloud_parts) + 1])
 
     @staticmethod
     def display_path(path: Path) -> str:

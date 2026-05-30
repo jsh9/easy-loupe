@@ -9,8 +9,9 @@
   - Support for HEIC/HEIF and additional RAW photo extensions in folder loading
     and preview generation
   - macOS photo-viewer folder access now uses TCC-backed protected-folder
-    prompts for `~/Desktop`, `~/Documents`, and `~/Downloads`, while keeping a
-    native folder chooser fallback for other roots
+    prompts for `~/Desktop`, `~/Documents`, `~/Downloads`, and File Provider
+    cloud storage roots, while keeping a native folder chooser fallback for
+    other roots
   - macOS app builds now register EasyCull as a photo document viewer and
     include the privacy usage strings needed for protected-folder access
 

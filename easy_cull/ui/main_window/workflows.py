@@ -171,8 +171,8 @@ class MainWindowWorkflowMixin:
         suggested_root = self.folder_access_manager.suggest_access_root(
             file_path
         )
-        uses_tcc_prompt = self.folder_access_manager.is_standard_tcc_root(
-            suggested_root
+        uses_macos_prompt = (
+            self.folder_access_manager.is_macos_promptable_root(suggested_root)
         )
         dialog = QMessageBox(self)
         dialog.setWindowTitle('Folder Access Blocked')
@@ -180,11 +180,11 @@ class MainWindowWorkflowMixin:
         dialog.setText(
             'macOS blocked EasyCull from scanning this photo folder.'
         )
-        if uses_tcc_prompt:
+        if uses_macos_prompt:
             dialog.setInformativeText(
-                'EasyCull can ask macOS for this protected-folder permission'
-                ' again. If macOS still blocks access, add EasyCull in System'
-                ' Settings > Privacy & Security > Full Disk Access.'
+                'EasyCull can ask macOS for this folder permission again. If'
+                ' macOS still blocks access, add EasyCull in System Settings >'
+                ' Privacy & Security > Full Disk Access.'
             )
             retry_label = 'Try macOS Permission Again'
         else:
