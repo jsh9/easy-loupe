@@ -119,8 +119,11 @@ class MainWindowWorkflowMixin:
         if self._busy:
             return
 
+        self._initial_folder_prompt_timer.stop()
         self._initial_folder_prompt_pending = False
+        self._startup_file = None
         path = Path(str(file_path)).expanduser()
+        folder_access_granted = False
         try:
             resolved_path = path.resolve()
             folder_access_granted = (
@@ -132,6 +135,33 @@ class MainWindowWorkflowMixin:
                 resolved_path,
                 allow_folder_scan=folder_access_granted,
             )
+        except PermissionError as exc:
+            if not folder_access_granted:
+                QMessageBox.critical(self, 'Failed to Open Photo', str(exc))
+                return
+
+            QMessageBox.warning(
+                self,
+                'Folder Access Blocked',
+                (
+                    'EasyCull has an app-level grant for this folder, but'
+                    ' macOS still blocked folder scanning. Check System'
+                    ' Settings > Privacy & Security > Files and Folders or'
+                    ' Full Disk Access, then try again.\n\n'
+                    'The selected photo will open by itself for now.'
+                ),
+            )
+            folder_access_granted = False
+            try:
+                self.library.load_viewer_folder(
+                    resolved_path,
+                    allow_folder_scan=False,
+                )
+            except Exception as fallback_exc:  # noqa: BLE001 - surface file-open failures
+                QMessageBox.critical(
+                    self, 'Failed to Open Photo', str(fallback_exc)
+                )
+                return
         except Exception as exc:  # noqa: BLE001 - surface file-open failures
             QMessageBox.critical(self, 'Failed to Open Photo', str(exc))
             return
@@ -205,8 +235,44 @@ class MainWindowWorkflowMixin:
         self._viewer_prefetch_thread.start()
 
     def _clear_viewer_prefetch_worker(self: MainWindow) -> None:
+        if self._closing:
+            return
+
         self._viewer_prefetch_thread = None
         self._viewer_prefetch_worker = None
+
+    def _stop_photo_viewer_background_tasks(self: MainWindow) -> None:
+        """Cancel and wait for photo-viewer background work to finish."""
+        self._pending_browse_after_hydration = False
+        self._stop_background_thread(
+            thread_attr='_viewer_prefetch_thread',
+            worker_attr='_viewer_prefetch_worker',
+        )
+        self._stop_background_thread(
+            thread_attr='_folder_hydration_thread',
+            worker_attr='_folder_hydration_worker',
+        )
+        self._folder_hydration_message = ''
+        self._folder_hydration_progress = 0
+
+    def _stop_background_thread(
+            self: MainWindow,
+            *,
+            thread_attr: str,
+            worker_attr: str,
+    ) -> None:
+        thread = getattr(self, thread_attr)
+        worker = getattr(self, worker_attr)
+        if worker is not None and hasattr(worker, 'cancel'):
+            worker.cancel()
+
+        if thread is not None:
+            thread.quit()
+            if thread.isRunning():
+                thread.wait()
+
+        setattr(self, thread_attr, None)
+        setattr(self, worker_attr, None)
 
     def _start_folder_hydration(self: MainWindow, folder: Path) -> None:
         if self._folder_hydration_thread is not None:
@@ -432,6 +498,9 @@ class MainWindowWorkflowMixin:
     def _handle_folder_hydration_progress(
             self: MainWindow, message: str, progress: int
     ) -> None:
+        if self._closing:
+            return
+
         self._folder_hydration_message = message
         self._folder_hydration_progress = progress
         if self._pending_browse_after_hydration and self._busy:
@@ -440,6 +509,9 @@ class MainWindowWorkflowMixin:
     def _handle_folder_hydration_finished(
             self: MainWindow, library: object
     ) -> None:
+        if self._closing:
+            return
+
         if not hasattr(library, 'photos'):
             self._handle_folder_hydration_failed(
                 'Folder loading returned an invalid result.'
@@ -455,6 +527,9 @@ class MainWindowWorkflowMixin:
             self._enter_browse_mode()
 
     def _handle_folder_hydration_failed(self: MainWindow, error: str) -> None:
+        if self._closing:
+            return
+
         if self._pending_browse_after_hydration:
             self._pending_browse_after_hydration = False
             self._hide_progress()
@@ -464,6 +539,9 @@ class MainWindowWorkflowMixin:
         self._show_transient_message('Folder loading failed in the background')
 
     def _clear_folder_hydration_worker(self: MainWindow) -> None:
+        if self._closing:
+            return
+
         self._folder_hydration_thread = None
         self._folder_hydration_worker = None
         self._folder_hydration_message = ''

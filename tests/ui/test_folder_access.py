@@ -55,3 +55,44 @@ def test_folder_access_manager_prompts_only_on_macos(
     monkeypatch.setattr(folder_access_module.sys, 'platform', 'linux')
 
     assert manager.ensure_access_for_file(photo) is True
+
+
+def test_folder_access_manager_confirms_and_persists_suggested_root(
+        tmp_path: Path, monkeypatch: Any
+) -> None:
+    manager = folder_access_module.FolderAccessManager(_settings(tmp_path))
+    root = tmp_path / 'Documents'
+    photo = root / 'Shoot' / 'IMG_1000.JPG'
+    photo.parent.mkdir(parents=True)
+    photo.write_bytes(b'jpg')
+    monkeypatch.setattr(folder_access_module.sys, 'platform', 'darwin')
+    monkeypatch.setattr(
+        manager, '_confirm_access_root', lambda _parent, path: path == root
+    )
+    monkeypatch.setattr(
+        manager, 'suggest_access_root', lambda _file_path: root
+    )
+
+    assert manager.ensure_access_for_file(photo) is True
+    assert manager.approved_roots() == [root.resolve()]
+    assert not hasattr(folder_access_module, 'QFileDialog')
+
+
+def test_folder_access_manager_cancel_leaves_root_unapproved(
+        tmp_path: Path, monkeypatch: Any
+) -> None:
+    manager = folder_access_module.FolderAccessManager(_settings(tmp_path))
+    root = tmp_path / 'Documents'
+    photo = root / 'Shoot' / 'IMG_1000.JPG'
+    photo.parent.mkdir(parents=True)
+    photo.write_bytes(b'jpg')
+    monkeypatch.setattr(folder_access_module.sys, 'platform', 'darwin')
+    monkeypatch.setattr(
+        manager, '_confirm_access_root', lambda _parent, _path: False
+    )
+    monkeypatch.setattr(
+        manager, 'suggest_access_root', lambda _file_path: root
+    )
+
+    assert manager.ensure_access_for_file(photo) is False
+    assert manager.approved_roots() == []

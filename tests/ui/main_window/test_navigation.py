@@ -17,6 +17,7 @@ from PySide6.QtGui import QKeyEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
+import easy_cull.ui.main_window.build as build_module
 import easy_cull.ui.main_window.window as main_window_module
 from easy_cull.core.folder_loading import PHOTO_SORT_MODE_FILENAME
 from easy_cull.core.photo_library import PhotoLibrary
@@ -298,6 +299,115 @@ def test_main_window_system_open_enters_photo_viewer_and_browse_grid(
     assert window._browse_mode is True
     assert window.browse_list.isVisible() is True
     assert window.browse_list.currentRow() == window._browse_photo_rows['B']
+    window.close()
+
+
+def test_main_window_late_file_open_cancels_initial_folder_prompt(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    stub_read_exif(monkeypatch, {})
+    app = QApplication.instance() or QApplication([])
+    window = main_window_module.MainWindow()
+    choose_calls: list[str] = []
+    window.choose_folder = lambda: choose_calls.append('choose')
+    monkeypatch.setattr(build_module.sys, 'platform', 'darwin')
+    monkeypatch.setattr(
+        window.folder_access_manager,
+        'ensure_access_for_file',
+        lambda _path, _parent: True,
+    )
+    monkeypatch.setattr(window, '_start_viewer_prefetch', lambda: None)
+    monkeypatch.setattr(
+        window, '_start_folder_hydration', lambda _folder: None
+    )
+
+    window.show()
+    app.processEvents()
+    assert window._initial_folder_prompt_timer.isActive() is True
+
+    window.open_file_from_system(tmp_path / 'A.JPG')
+    QTest.qWait(build_module.INITIAL_FOLDER_PROMPT_GRACE_MS + 20)
+    app.processEvents()
+
+    assert choose_calls == []
+    assert window._photo_viewer_mode is True
+    assert window.current_photo_id == 'A'
+    window.close()
+
+
+def test_main_window_canceled_photo_viewer_access_opens_single_photo_only(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    create_jpeg(tmp_path / 'B.JPG', 'blue')
+    stub_read_exif(monkeypatch, {})
+    app = QApplication.instance() or QApplication([])
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    window.show()
+    monkeypatch.setattr(
+        window.folder_access_manager,
+        'ensure_access_for_file',
+        lambda _path, _parent: False,
+    )
+    monkeypatch.setattr(window, '_start_viewer_prefetch', lambda: None)
+    monkeypatch.setattr(
+        window, '_start_folder_hydration', lambda _folder: None
+    )
+
+    window.open_file_from_system(tmp_path / 'B.JPG')
+    app.processEvents()
+
+    assert window._photo_viewer_mode is True
+    assert window._photo_viewer_folder_access_granted is False
+    assert [photo.photo_id for photo in window.library.photos] == ['B']
+
+    window._navigate_photo_viewer(-1)
+    assert window.current_photo_id == 'B'
+
+    window._handle_browse_mode_shortcut()
+    assert window._browse_mode is False
+    window.close()
+
+
+def test_main_window_stops_photo_viewer_background_threads() -> None:
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    calls: list[str] = []
+
+    class Worker:
+        @staticmethod
+        def cancel() -> None:
+            calls.append('cancel')
+
+    class Thread:
+        @staticmethod
+        def quit() -> None:
+            calls.append('quit')
+
+        @staticmethod
+        def isRunning() -> bool:  # noqa: N802 - Qt naming in fake
+            return True
+
+        @staticmethod
+        def wait() -> None:
+            calls.append('wait')
+
+    window._viewer_prefetch_worker = Worker()
+    window._viewer_prefetch_thread = Thread()
+    window._folder_hydration_worker = Worker()
+    window._folder_hydration_thread = Thread()
+    window._pending_browse_after_hydration = True
+
+    window._stop_photo_viewer_background_tasks()
+
+    assert calls == ['cancel', 'quit', 'wait', 'cancel', 'quit', 'wait']
+    assert window._viewer_prefetch_worker is None
+    assert window._viewer_prefetch_thread is None
+    assert window._folder_hydration_worker is None
+    assert window._folder_hydration_thread is None
+    assert window._pending_browse_after_hydration is False
     window.close()
 
 

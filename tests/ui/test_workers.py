@@ -101,6 +101,25 @@ def test_viewer_prefetch_worker_warms_requested_viewer_previews() -> None:
     assert failed_events == []
 
 
+def test_viewer_prefetch_worker_cancel_skips_remaining_previews() -> None:
+    calls: list[tuple[str, str]] = []
+    finished_events: list[str] = []
+
+    class Library:
+        @staticmethod
+        def get_preview_path(photo_id: str, kind: str) -> str:
+            calls.append((photo_id, kind))
+            return '/tmp/preview.jpg'
+
+    worker = workers_module.ViewerPrefetchWorker(Library(), ['A'])
+    worker.finished.connect(lambda: finished_events.append('finished'))
+    worker.cancel()
+    worker.run()
+
+    assert calls == []
+    assert finished_events == ['finished']
+
+
 def test_folder_hydration_worker_loads_and_warms_folder(
         tmp_path: Path, monkeypatch: Any
 ) -> None:
@@ -161,6 +180,54 @@ def test_folder_hydration_worker_loads_and_warms_folder(
         ('B', 'thumb'),
         ('B', 'viewer'),
     ]
+
+
+def test_folder_hydration_worker_cancel_skips_preview_warming(
+        tmp_path: Path, monkeypatch: Any
+) -> None:
+    finished_results: list[object] = []
+
+    @dataclass
+    class Photo:
+        photo_id: str
+
+    class Library:
+        def __init__(
+                self,
+                *,
+                cache_dir: object,
+                sort_mode: str,
+                sort_reversed: bool,
+        ) -> None:
+            del cache_dir, sort_mode, sort_reversed
+            self.preview_calls: list[tuple[str, str]] = []
+
+        def load_folder(
+                self, folder: object, *, progress_callback: object
+        ) -> None:
+            del folder, progress_callback
+            self.photos = [Photo('A')]
+
+        def get_photos(self) -> list[Photo]:
+            return self.photos
+
+        def get_preview_path(self, photo_id: str, kind: str) -> str:
+            self.preview_calls.append((photo_id, kind))
+            return '/tmp/preview.jpg'
+
+    monkeypatch.setattr(workers_module, 'PhotoLibrary', Library)
+    worker = workers_module.FolderHydrationWorker(
+        tmp_path,
+        cache_dir=tmp_path / '.cache',
+        sort_mode='filename',
+        sort_reversed=False,
+    )
+    worker.finished.connect(finished_results.append)
+    worker.cancel()
+    worker.run()
+
+    assert len(finished_results) == 1
+    assert finished_results[0].preview_calls == []
 
 
 def _good_operation(

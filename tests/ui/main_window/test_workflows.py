@@ -9,6 +9,7 @@ from PySide6.QtCore import QItemSelectionModel, QPoint, Qt, QThread
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
+import easy_cull.ui.main_window.build as build_module
 import easy_cull.ui.main_window.window as main_window_module
 import easy_cull.ui.main_window.workflows as workflows_module
 import easy_cull.ui.theme as theme_module
@@ -159,6 +160,7 @@ def test_main_window_show_event_triggers_initial_folder_prompt_once() -> None:
 
     window.show()
     app.processEvents()
+    QTest.qWait(build_module.INITIAL_FOLDER_PROMPT_GRACE_MS + 20)
     app.processEvents()
 
     assert choose_calls == ['choose']

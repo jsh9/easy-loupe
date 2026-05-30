@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QEvent, QSettings, Qt, QTimer
@@ -50,7 +51,7 @@ from easy_cull.ui.widgets import SceneListWidget, ThumbnailListWidget
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from PySide6.QtGui import QResizeEvent, QShowEvent
+    from PySide6.QtGui import QCloseEvent, QResizeEvent, QShowEvent
 
     from easy_cull.ui.main_window.window import MainWindow
 
@@ -62,6 +63,7 @@ MIN_SCENE_MERGE_PHOTO_COUNT = 2
 TRANSIENT_MESSAGE_FONT_SIZE_PX = 28
 TRANSIENT_MESSAGE_FONT_WEIGHT = 600
 TRANSIENT_MESSAGE_TIMEOUT_MS = 1600
+INITIAL_FOLDER_PROMPT_GRACE_MS = 250
 
 
 class MainWindowBuildMixin:
@@ -1127,25 +1129,44 @@ class MainWindowBuildMixin:
     def showEvent(self: MainWindow, event: QShowEvent) -> None:  # noqa: N802 - Qt API
         """Trigger the initial folder prompt when the window first shows."""
         super().showEvent(event)
-        if (
-            self._initial_folder_prompt_pending
-            and self.library.current_folder is None
-        ):
-            QTimer.singleShot(0, self._open_initial_folder_if_needed)
-        elif getattr(self, '_startup_file', None) is not None:
+        if getattr(self, '_startup_file', None) is not None:
             startup_file = self._startup_file
             self._startup_file = None
+            self._initial_folder_prompt_pending = False
+            self._initial_folder_prompt_timer.stop()
             QTimer.singleShot(
                 0, lambda: self.open_file_from_system(startup_file)
             )
+            return
+
+        if (
+            self._initial_folder_prompt_pending
+            and self.library.current_folder is None
+            and not self._initial_folder_prompt_timer.isActive()
+        ):
+            delay_ms = (
+                INITIAL_FOLDER_PROMPT_GRACE_MS
+                if sys.platform == 'darwin'
+                else 0
+            )
+            self._initial_folder_prompt_timer.start(delay_ms)
 
     def _open_initial_folder_if_needed(self: MainWindow) -> None:
         if (
             self._initial_folder_prompt_pending
             and self.library.current_folder is None
+            and getattr(self, '_startup_file', None) is None
         ):
             self._initial_folder_prompt_pending = False
             self.choose_folder()
+
+    def closeEvent(self: MainWindow, event: QCloseEvent) -> None:  # noqa: N802 - Qt API
+        """Stop viewer background threads before the window is destroyed."""
+        self._closing = True
+        self._initial_folder_prompt_pending = False
+        self._initial_folder_prompt_timer.stop()
+        self._stop_photo_viewer_background_tasks()
+        super().closeEvent(event)
 
     def changeEvent(self: MainWindow, event: QEvent) -> None:  # noqa: N802 - Qt API
         """Restore navigation focus when the main window becomes active."""

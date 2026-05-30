@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QSettings
-from PySide6.QtWidgets import QFileDialog, QMessageBox, QWidget
+from PySide6.QtWidgets import QMessageBox, QWidget
 
 from easy_cull.ui.identity import APP_NAME
 
@@ -47,27 +47,10 @@ class FolderAccessManager:
             return True
 
         suggested_root = self.suggest_access_root(resolved_file)
-        selected = QFileDialog.getExistingDirectory(
-            parent,
-            'Allow EasyCull to Browse This Folder',
-            str(suggested_root),
-        )
-        if not selected:
+        if not self._confirm_access_root(parent, suggested_root):
             return False
 
-        selected_root = Path(selected).expanduser().resolve()
-        if not self._contains(selected_root, resolved_file.parent):
-            QMessageBox.warning(
-                parent,
-                'Folder Access Not Granted',
-                (
-                    'Choose the opened photo folder or one of its parent'
-                    ' folders to enable adjacent-photo navigation.'
-                ),
-            )
-            return False
-
-        self.add_approved_root(selected_root)
+        self.add_approved_root(suggested_root)
         return True
 
     def is_file_approved(self, file_path: Path) -> bool:
@@ -118,6 +101,25 @@ class FolderAccessManager:
             [str(path) for path in filtered_roots],
         )
 
+    def _confirm_access_root(self, parent: QWidget | None, root: Path) -> bool:
+        dialog = QMessageBox(parent)
+        dialog.setWindowTitle('Allow Folder Access?')
+        dialog.setIcon(QMessageBox.Icon.Question)
+        dialog.setText(
+            f'Allow EasyCull to browse photos under {self.display_path(root)}?'
+        )
+        dialog.setInformativeText(
+            'This lets the photo viewer navigate adjacent photos in that'
+            ' folder tree without asking again.'
+        )
+        allow_button = dialog.addButton(
+            'Allow', QMessageBox.ButtonRole.AcceptRole
+        )
+        dialog.addButton(QMessageBox.StandardButton.Cancel)
+        dialog.setDefaultButton(allow_button)
+        dialog.exec()
+        return dialog.clickedButton() is allow_button
+
     @staticmethod
     def suggest_access_root(file_path: Path) -> Path:
         """Suggest a stable parent root for a system-opened photo."""
@@ -132,6 +134,18 @@ class FolderAccessManager:
             return home / relative.parts[0]
 
         return resolved_file.parent
+
+    @staticmethod
+    def display_path(path: Path) -> str:
+        """Return a compact user-facing form of a path."""
+        resolved_path = path.expanduser().resolve()
+        home = Path.home().expanduser().resolve()
+        try:
+            relative = resolved_path.relative_to(home)
+        except ValueError:
+            return str(resolved_path)
+
+        return '~' if not relative.parts else f'~/{relative}'
 
     @staticmethod
     def _contains(root: Path, path: Path) -> bool:

@@ -73,11 +73,19 @@ class ViewerPrefetchWorker(QObject):
         super().__init__()
         self._library = library
         self._photo_ids = list(photo_ids)
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        """Request cancellation before the next preview render starts."""
+        self._cancelled = True
 
     def run(self) -> None:
         """Render nearby viewer previews and ignore per-photo failures."""
         try:
             for photo_id in self._photo_ids:
+                if self._cancelled:
+                    break
+
                 try:
                     self._library.get_preview_path(photo_id, 'viewer')
                 except (KeyError, OSError, RuntimeError, ValueError):
@@ -109,6 +117,11 @@ class FolderHydrationWorker(QObject):
         self._cache_dir = cache_dir
         self._sort_mode = sort_mode
         self._sort_reversed = sort_reversed
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        """Request cancellation before the next preview render starts."""
+        self._cancelled = True
 
     def run(self) -> None:
         """Load the folder and warm thumbnail/viewer previews."""
@@ -124,10 +137,16 @@ class FolderHydrationWorker(QObject):
             photos = library.get_photos()
             total = max(len(photos), 1)
             for index, photo in enumerate(photos, start=1):
+                if self._cancelled:
+                    break
+
                 progress = 100 + int((index / total) * 100)
                 self.progress.emit('Preparing photo viewer cache', progress)
                 try:
                     library.get_preview_path(photo.photo_id, 'thumb')
+                    if self._cancelled:
+                        break
+
                     library.get_preview_path(photo.photo_id, 'viewer')
                 except (OSError, RuntimeError, ValueError):
                     continue

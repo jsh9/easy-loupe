@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction, QKeySequence, QShortcut
 from PySide6.QtWidgets import QMainWindow
 
@@ -112,6 +113,12 @@ class MainWindow(
         self._scene_overlay_photo_id: str | None = None
         self._metadata_undo_stack: list[MetadataEdit | SceneEdit] = []
         self._metadata_redo_stack: list[MetadataEdit | SceneEdit] = []
+        self._closing = False
+        self._initial_folder_prompt_timer = QTimer(self)
+        self._initial_folder_prompt_timer.setSingleShot(True)
+        self._initial_folder_prompt_timer.timeout.connect(
+            self._open_initial_folder_if_needed
+        )
 
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(easy_cull_icon())
