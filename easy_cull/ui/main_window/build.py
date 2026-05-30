@@ -76,9 +76,11 @@ class MainWindowBuildMixin:
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(10)
 
-        top_bar = QHBoxLayout()
+        self.top_bar_widget = QWidget(self.central_widget)
+        top_bar = QHBoxLayout(self.top_bar_widget)
+        top_bar.setContentsMargins(0, 0, 0, 0)
         top_bar.setSpacing(10)
-        root.addLayout(top_bar)
+        root.addWidget(self.top_bar_widget)
         self._build_top_bar(top_bar)
         self._build_view_mode_ui(root)
         self._build_progress_overlay()
@@ -740,7 +742,13 @@ class MainWindowBuildMixin:
             'Z', self._handle_zoom_toggle_shortcut
         )
         self.browse_mode_shortcut = self._make_shortcut(
-            'G', self._enter_browse_mode
+            'G', self._handle_browse_mode_shortcut
+        )
+        self.enter_browse_mode_shortcut = self._make_shortcut(
+            Qt.Key_Return, self._handle_browse_mode_shortcut
+        )
+        self.keypad_enter_browse_mode_shortcut = self._make_shortcut(
+            Qt.Key_Enter, self._handle_browse_mode_shortcut
         )
         self.split_mode_shortcut = self._make_shortcut(
             Qt.Key_Backslash, self._handle_split_shortcut
@@ -781,6 +789,20 @@ class MainWindowBuildMixin:
                 'Shift+Right', lambda: self._extend_scene_selection(1)
             ),
         ]
+        self._photo_viewer_nav_shortcuts = [
+            self._make_shortcut(
+                Qt.Key_Left, lambda: self._navigate_photo_viewer(-1)
+            ),
+            self._make_shortcut(
+                Qt.Key_Up, lambda: self._navigate_photo_viewer(-1)
+            ),
+            self._make_shortcut(
+                Qt.Key_Right, lambda: self._navigate_photo_viewer(1)
+            ),
+            self._make_shortcut(
+                Qt.Key_Down, lambda: self._navigate_photo_viewer(1)
+            ),
+        ]
         self._compare_nav_shortcuts = [
             self._make_shortcut(
                 Qt.Key_Left, lambda: self._move_compare_selection(0, -1)
@@ -809,15 +831,35 @@ class MainWindowBuildMixin:
 
     def _update_mode_shortcuts(self: MainWindow) -> None:
         normal_view_shortcuts_enabled = (
-            not self._browse_mode and not self._compare_mode
+            not self._photo_viewer_mode
+            and not self._browse_mode
+            and not self._compare_mode
         )
-        viewer_shortcuts_enabled = not self._browse_mode or self._compare_mode
+        viewer_shortcuts_enabled = (
+            self._photo_viewer_mode
+            or not self._browse_mode
+            or self._compare_mode
+        )
         self.split_mode_shortcut.setEnabled(
-            normal_view_shortcuts_enabled or self._compare_mode
+            self._photo_viewer_mode
+            or normal_view_shortcuts_enabled
+            or self._compare_mode
         )
-        self.browse_mode_shortcut.setEnabled(bool(self.library.photos))
+        can_enter_browse = bool(self.library.photos) and (
+            not self._photo_viewer_mode
+            or self._photo_viewer_folder_access_granted
+        )
+        self.browse_mode_shortcut.setEnabled(can_enter_browse)
+        self.enter_browse_mode_shortcut.setEnabled(
+            self._photo_viewer_mode and can_enter_browse
+        )
+        self.keypad_enter_browse_mode_shortcut.setEnabled(
+            self._photo_viewer_mode and can_enter_browse
+        )
         self.compare_mode_shortcut.setEnabled(
-            not self._compare_mode and bool(self.library.photos)
+            not self._photo_viewer_mode
+            and not self._compare_mode
+            and bool(self.library.photos)
         )
         self.info_overlay_shortcut.setEnabled(bool(self.library.photos))
         self.exit_compare_shortcut.setEnabled(
@@ -829,8 +871,18 @@ class MainWindowBuildMixin:
         for shortcut in self._scene_nav_shortcuts:
             shortcut.setEnabled(normal_view_shortcuts_enabled)
 
+        for shortcut in self._photo_viewer_nav_shortcuts:
+            shortcut.setEnabled(self._photo_viewer_mode)
+
         for shortcut in self._compare_nav_shortcuts:
             shortcut.setEnabled(self._compare_mode)
+
+    def _handle_browse_mode_shortcut(self: MainWindow) -> None:
+        if self._photo_viewer_mode:
+            self._enter_browse_mode_from_photo_viewer()
+            return
+
+        self._enter_browse_mode()
 
     def _handle_space_shortcut(self: MainWindow) -> None:
         if self._compare_mode:
@@ -1079,8 +1131,21 @@ class MainWindowBuildMixin:
             self._initial_folder_prompt_pending
             and self.library.current_folder is None
         ):
+            QTimer.singleShot(0, self._open_initial_folder_if_needed)
+        elif getattr(self, '_startup_file', None) is not None:
+            startup_file = self._startup_file
+            self._startup_file = None
+            QTimer.singleShot(
+                0, lambda: self.open_file_from_system(startup_file)
+            )
+
+    def _open_initial_folder_if_needed(self: MainWindow) -> None:
+        if (
+            self._initial_folder_prompt_pending
+            and self.library.current_folder is None
+        ):
             self._initial_folder_prompt_pending = False
-            QTimer.singleShot(0, self.choose_folder)
+            self.choose_folder()
 
     def changeEvent(self: MainWindow, event: QEvent) -> None:  # noqa: N802 - Qt API
         """Restore navigation focus when the main window becomes active."""

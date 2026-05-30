@@ -10,8 +10,39 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 JPEG_EXTENSIONS = {'.jpg', '.jpeg'}
-RAW_EXTENSIONS = {'.cr3', '.nef'}
-SUPPORTED_EXTENSIONS = JPEG_EXTENSIONS | RAW_EXTENSIONS
+HEIF_EXTENSIONS = {'.heic', '.heif'}
+RASTER_EXTENSIONS = JPEG_EXTENSIONS | HEIF_EXTENSIONS
+RAW_EXTENSIONS = {
+    '.3fr',
+    '.arw',
+    '.cr2',
+    '.cr3',
+    '.crw',
+    '.dcr',
+    '.dng',
+    '.erf',
+    '.fff',
+    '.iiq',
+    '.kdc',
+    '.mef',
+    '.mos',
+    '.mrw',
+    '.nef',
+    '.nrw',
+    '.orf',
+    '.ori',
+    '.pef',
+    '.ptx',
+    '.raf',
+    '.raw',
+    '.rw2',
+    '.rwl',
+    '.sr2',
+    '.srf',
+    '.srw',
+    '.x3f',
+}
+SUPPORTED_EXTENSIONS = RASTER_EXTENSIONS | RAW_EXTENSIONS
 METADATA_FILENAME = 'easy-cull.json'
 COLOR_LABELS = {'red', 'yellow', 'green', 'blue', 'purple'}
 

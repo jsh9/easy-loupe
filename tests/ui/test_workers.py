@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-from typing import Any, Never
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Never
 
 import easy_cull.ui.workers as workers_module
 from easy_cull.operations.common import OperationSummary
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_scene_detection_worker_emits_finished_and_failed() -> None:
@@ -69,6 +73,94 @@ def test_operation_worker_emits_result_and_failed_state() -> None:
 
     assert failed_events == ['operation failure']
     assert finished_results == [OperationSummary(written_sidecars=2)]
+
+
+def test_viewer_prefetch_worker_warms_requested_viewer_previews() -> None:
+    calls: list[tuple[str, str]] = []
+    failed_events: list[str] = []
+    finished_events: list[str] = []
+
+    class Library:
+        @staticmethod
+        def get_preview_path(photo_id: str, kind: str) -> str:
+            calls.append((photo_id, kind))
+            if photo_id == 'missing':
+                raise KeyError(photo_id)
+
+            return '/tmp/preview.jpg'
+
+    worker = workers_module.ViewerPrefetchWorker(
+        Library(), ['A', 'missing', 'B']
+    )
+    worker.finished.connect(lambda: finished_events.append('finished'))
+    worker.failed.connect(failed_events.append)
+    worker.run()
+
+    assert calls == [('A', 'viewer'), ('missing', 'viewer'), ('B', 'viewer')]
+    assert finished_events == ['finished']
+    assert failed_events == []
+
+
+def test_folder_hydration_worker_loads_and_warms_folder(
+        tmp_path: Path, monkeypatch: Any
+) -> None:
+    progress_events: list[tuple[str, int]] = []
+    finished_results: list[object] = []
+
+    @dataclass
+    class Photo:
+        photo_id: str
+
+    class Library:
+        def __init__(
+                self,
+                *,
+                cache_dir: object,
+                sort_mode: str,
+                sort_reversed: bool,
+        ) -> None:
+            self.cache_dir = cache_dir
+            self.sort_mode = sort_mode
+            self.sort_reversed = sort_reversed
+            self.preview_calls: list[tuple[str, str]] = []
+
+        def load_folder(
+                self, folder: object, *, progress_callback: object
+        ) -> None:
+            del folder
+            progress_callback('Scanning folder', 5)
+            self.photos = [Photo('A'), Photo('B')]
+
+        def get_photos(self) -> list[Photo]:
+            return self.photos
+
+        def get_preview_path(self, photo_id: str, kind: str) -> str:
+            self.preview_calls.append((photo_id, kind))
+            return '/tmp/preview.jpg'
+
+    monkeypatch.setattr(workers_module, 'PhotoLibrary', Library)
+    worker = workers_module.FolderHydrationWorker(
+        tmp_path,
+        cache_dir=tmp_path / '.cache',
+        sort_mode='filename',
+        sort_reversed=True,
+    )
+    worker.progress.connect(
+        lambda message, progress: progress_events.append((message, progress))
+    )
+    worker.finished.connect(finished_results.append)
+
+    worker.run()
+
+    assert progress_events[0] == ('Scanning folder', 5)
+    assert progress_events[-1] == ('Preparing photo viewer cache', 200)
+    assert len(finished_results) == 1
+    assert finished_results[0].preview_calls == [
+        ('A', 'thumb'),
+        ('A', 'viewer'),
+        ('B', 'thumb'),
+        ('B', 'viewer'),
+    ]
 
 
 def _good_operation(

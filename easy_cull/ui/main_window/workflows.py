@@ -37,7 +37,12 @@ from easy_cull.ui.theme import (
     LOAD_PROGRESS_MAX,
     PHOTO_ID_ROLE,
 )
-from easy_cull.ui.workers import OperationWorker, SceneDetectionWorker
+from easy_cull.ui.workers import (
+    FolderHydrationWorker,
+    OperationWorker,
+    SceneDetectionWorker,
+    ViewerPrefetchWorker,
+)
 
 if TYPE_CHECKING:
     from easy_cull.core.records import SceneGroup
@@ -88,6 +93,7 @@ class MainWindowWorkflowMixin:
             return
 
         try:
+            self._set_photo_viewer_mode(active=False)
             self._show_progress('Scanning folder', 0)
             self.open_button.setEnabled(False)
             self.detect_button.setEnabled(False)
@@ -107,6 +113,148 @@ class MainWindowWorkflowMixin:
         self.open_button.setEnabled(True)
         self._refresh_ui()
         self._restore_active_navigation_focus(defer=True)
+
+    def open_file_from_system(self: MainWindow, file_path: object) -> None:
+        """Open a photo file passed by Finder, Explorer, or argv."""
+        if self._busy:
+            return
+
+        self._initial_folder_prompt_pending = False
+        path = Path(str(file_path)).expanduser()
+        try:
+            resolved_path = path.resolve()
+            folder_access_granted = (
+                self.folder_access_manager.ensure_access_for_file(
+                    resolved_path, self
+                )
+            )
+            self.library.load_viewer_folder(
+                resolved_path,
+                allow_folder_scan=folder_access_granted,
+            )
+        except Exception as exc:  # noqa: BLE001 - surface file-open failures
+            QMessageBox.critical(self, 'Failed to Open Photo', str(exc))
+            return
+
+        self._clear_metadata_history()
+        self._photo_viewer_folder_access_granted = folder_access_granted
+        self.current_photo_id = self._photo_id_for_opened_file(resolved_path)
+        if self.current_photo_id is None and self.library.photos:
+            self.current_photo_id = self.library.photos[0].photo_id
+
+        self._set_photo_viewer_mode(active=True)
+        self._display_current_photo(force_fit=True)
+        self._refresh_ui()
+        self._start_viewer_prefetch()
+        if folder_access_granted and self.library.current_folder is not None:
+            self._start_folder_hydration(self.library.current_folder)
+
+    def _photo_id_for_opened_file(
+            self: MainWindow, file_path: Path
+    ) -> str | None:
+        target_name = file_path.name.casefold()
+        for photo in self.library.get_photos():
+            if any(name.casefold() == target_name for name in photo.files):
+                return photo.photo_id
+
+        return None
+
+    def _start_viewer_prefetch(self: MainWindow) -> None:
+        if (
+            self._viewer_prefetch_thread is not None
+            or self.current_photo_id is None
+            or not self.library.photos
+        ):
+            return
+
+        photo_ids = [photo.photo_id for photo in self.library.get_photos()]
+        try:
+            current_index = photo_ids.index(self.current_photo_id)
+        except ValueError:
+            return
+
+        first_index = max(0, current_index - 5)
+        last_index = min(len(photo_ids), current_index + 6)
+        prefetch_ids = photo_ids[first_index:last_index]
+        self._viewer_prefetch_thread = QThread(self)
+        self._viewer_prefetch_worker = ViewerPrefetchWorker(
+            self.library, prefetch_ids
+        )
+        self._viewer_prefetch_worker.moveToThread(self._viewer_prefetch_thread)
+        self._viewer_prefetch_thread.started.connect(
+            self._viewer_prefetch_worker.run
+        )
+        self._viewer_prefetch_worker.finished.connect(
+            self._viewer_prefetch_thread.quit
+        )
+        self._viewer_prefetch_worker.failed.connect(
+            self._viewer_prefetch_thread.quit
+        )
+        self._viewer_prefetch_worker.finished.connect(
+            self._viewer_prefetch_worker.deleteLater
+        )
+        self._viewer_prefetch_worker.failed.connect(
+            self._viewer_prefetch_worker.deleteLater
+        )
+        self._viewer_prefetch_thread.finished.connect(
+            self._viewer_prefetch_thread.deleteLater
+        )
+        self._viewer_prefetch_thread.finished.connect(
+            self._clear_viewer_prefetch_worker
+        )
+        self._viewer_prefetch_thread.start()
+
+    def _clear_viewer_prefetch_worker(self: MainWindow) -> None:
+        self._viewer_prefetch_thread = None
+        self._viewer_prefetch_worker = None
+
+    def _start_folder_hydration(self: MainWindow, folder: Path) -> None:
+        if self._folder_hydration_thread is not None:
+            return
+
+        self._folder_hydration_message = 'Loading folder...'
+        self._folder_hydration_progress = 0
+        self._folder_hydration_thread = QThread(self)
+        self._folder_hydration_worker = FolderHydrationWorker(
+            folder,
+            cache_dir=self.library.cache_dir,
+            sort_mode=self.library.sort_mode,
+            sort_reversed=self.library.sort_reversed,
+        )
+        self._folder_hydration_worker.moveToThread(
+            self._folder_hydration_thread
+        )
+        self._folder_hydration_thread.started.connect(
+            self._folder_hydration_worker.run
+        )
+        self._folder_hydration_worker.progress.connect(
+            self._handle_folder_hydration_progress
+        )
+        self._folder_hydration_worker.finished.connect(
+            self._handle_folder_hydration_finished
+        )
+        self._folder_hydration_worker.failed.connect(
+            self._handle_folder_hydration_failed
+        )
+        self._folder_hydration_worker.finished.connect(
+            self._folder_hydration_thread.quit
+        )
+        self._folder_hydration_worker.failed.connect(
+            self._folder_hydration_thread.quit
+        )
+        self._folder_hydration_worker.finished.connect(
+            self._folder_hydration_worker.deleteLater
+        )
+        self._folder_hydration_worker.failed.connect(
+            self._folder_hydration_worker.deleteLater
+        )
+        self._folder_hydration_thread.finished.connect(
+            self._folder_hydration_thread.deleteLater
+        )
+        self._folder_hydration_thread.finished.connect(
+            self._clear_folder_hydration_worker
+        )
+        self._folder_hydration_thread.start()
 
     def detect_scenes(self: MainWindow) -> None:
         """Start asynchronous scene detection for the loaded photo set."""
@@ -280,6 +428,48 @@ class MainWindowWorkflowMixin:
             self: MainWindow, message: str, progress: int
     ) -> None:
         self._show_progress(message, progress)
+
+    def _handle_folder_hydration_progress(
+            self: MainWindow, message: str, progress: int
+    ) -> None:
+        self._folder_hydration_message = message
+        self._folder_hydration_progress = progress
+        if self._pending_browse_after_hydration and self._busy:
+            self._show_progress(message, progress)
+
+    def _handle_folder_hydration_finished(
+            self: MainWindow, library: object
+    ) -> None:
+        if not hasattr(library, 'photos'):
+            self._handle_folder_hydration_failed(
+                'Folder loading returned an invalid result.'
+            )
+            return
+
+        self.library = library
+        self._photo_viewer_folder_access_granted = True
+        self._rebuild_loaded_views(preserve_current_photo=True)
+        if self._pending_browse_after_hydration:
+            self._pending_browse_after_hydration = False
+            self._hide_progress()
+            self._enter_browse_mode()
+
+    def _handle_folder_hydration_failed(self: MainWindow, error: str) -> None:
+        if self._pending_browse_after_hydration:
+            self._pending_browse_after_hydration = False
+            self._hide_progress()
+            QMessageBox.critical(self, 'Failed to Open Folder', error)
+            return
+
+        self._show_transient_message('Folder loading failed in the background')
+
+    def _clear_folder_hydration_worker(self: MainWindow) -> None:
+        self._folder_hydration_thread = None
+        self._folder_hydration_worker = None
+        self._folder_hydration_message = ''
+        self._folder_hydration_progress = 0
+        self._refresh_ui()
+        self._update_mode_shortcuts()
 
     def _handle_scene_finished(self: MainWindow) -> None:
         was_browse_mode = self._browse_mode

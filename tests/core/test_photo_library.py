@@ -13,7 +13,12 @@ from easy_cull.core.folder_loading import (
     PHOTO_SORT_MODE_FILENAME,
 )
 from easy_cull.core.photo_library import PhotoLibrary
-from easy_cull.core.records import METADATA_FILENAME, SceneGroup
+from easy_cull.core.records import (
+    METADATA_FILENAME,
+    RAW_EXTENSIONS,
+    SUPPORTED_EXTENSIONS,
+    SceneGroup,
+)
 from tests.core._helpers import FakeHash, create_jpeg, stub_read_exif
 
 if TYPE_CHECKING:
@@ -85,6 +90,68 @@ def test_load_folder_groups_jpeg_and_raw_files_by_stem(
     assert first.flag == 'rejected'
     assert first.rating == 4
     assert first.color_label == 'green'
+
+
+def test_supported_extensions_include_major_viewer_formats() -> None:
+    assert {'.jpg', '.jpeg', '.heic', '.heif'} <= SUPPORTED_EXTENSIONS
+    assert {
+        '.crw',
+        '.cr2',
+        '.cr3',
+        '.nef',
+        '.nrw',
+        '.arw',
+        '.raf',
+        '.rwl',
+        '.dng',
+        '.rw2',
+        '.orf',
+        '.ori',
+    } <= RAW_EXTENSIONS
+
+
+def test_load_folder_prefers_heic_preview_over_raw_with_shared_stem(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / 'IMG_0100.HEIC').write_bytes(b'heic')
+    (tmp_path / 'IMG_0100.ARW').write_bytes(b'raw')
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+
+    assert [photo.photo_id for photo in library.photos] == ['IMG_0100']
+    photo = library.photos[0]
+    assert photo.preview_source == tmp_path / 'IMG_0100.HEIC'
+    assert photo.metadata_source == tmp_path / 'IMG_0100.ARW'
+    assert photo.has_raw is True
+
+
+def test_load_viewer_folder_uses_filename_order_and_can_open_single_file(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    create_jpeg(tmp_path / 'B.JPG', 'blue')
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    create_jpeg(tmp_path / 'C.JPG', 'purple')
+    stub_read_exif(
+        monkeypatch,
+        {
+            'C.JPG': {'DateTimeOriginal': '2024:05:01 10:00:00'},
+            'A.JPG': {'DateTimeOriginal': '2024:05:01 10:00:10'},
+        },
+    )
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_viewer_folder(tmp_path / 'B.JPG')
+
+    assert [photo.photo_id for photo in library.photos] == ['A', 'B', 'C']
+
+    single_library = PhotoLibrary(cache_dir=tmp_path / '.single-cache')
+    single_library.load_viewer_folder(
+        tmp_path / 'B.JPG', allow_folder_scan=False
+    )
+
+    assert [photo.photo_id for photo in single_library.photos] == ['B']
 
 
 def test_load_folder_rejects_missing_directory(tmp_path: Path) -> None:

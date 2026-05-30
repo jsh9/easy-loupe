@@ -13,7 +13,7 @@ from PIL import Image, ImageOps
 
 from easy_cull.core.records import (
     FIT_MAX_SIZE,
-    JPEG_EXTENSIONS,
+    RASTER_EXTENSIONS,
     THUMB_MAX_SIZE,
     PhotoRecord,
 )
@@ -22,6 +22,13 @@ try:
     import rawpy
 except ImportError:  # pragma: no cover - handled by dependency installation
     rawpy = cast('Any', None)
+
+try:
+    from pillow_heif import register_heif_opener
+except ImportError:  # pragma: no cover - handled by dependency installation
+    register_heif_opener = cast('Any', None)
+else:
+    register_heif_opener()
 
 
 def _default_cache_dir() -> Path:
@@ -58,7 +65,14 @@ def get_preview_path(
 
 def render_source_image(source: Path, kind: str) -> Image.Image:
     """Open and optionally resize a source image for the requested kind."""
-    if source.suffix.lower() in JPEG_EXTENSIONS:
+    if source.suffix.lower() in RASTER_EXTENSIONS:
+        if source.suffix.lower() in {'.heic', '.heif'} and (
+            register_heif_opener is None
+        ):
+            raise RuntimeError(
+                'pillow-heif is required to render HEIC/HEIF previews'
+            )
+
         with Image.open(source) as opened:
             image = ImageOps.exif_transpose(opened).convert('RGB')
     else:

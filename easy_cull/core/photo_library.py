@@ -15,6 +15,9 @@ from easy_cull.core.folder_loading import (
     load_folder_state as _load_folder_state,
 )
 from easy_cull.core.folder_loading import (
+    load_viewer_folder_state as _load_viewer_folder_state,
+)
+from easy_cull.core.folder_loading import (
     normalize_sort_mode as _normalize_sort_mode,
 )
 from easy_cull.core.folder_loading import (
@@ -101,6 +104,24 @@ class PhotoLibrary:
         self.scene_detection_done = loaded_state.scene_detection_done
         if progress_callback:
             progress_callback('Finished loading folder', 100)
+
+    def load_viewer_folder(
+            self,
+            opened_file: Path,
+            *,
+            allow_folder_scan: bool = True,
+    ) -> None:
+        """Load a fast filename-sorted state for photo-viewer startup."""
+        loaded_state = _load_viewer_folder_state(
+            opened_file, allow_folder_scan=allow_folder_scan
+        )
+        self.current_folder = loaded_state.current_folder
+        self.folder_label = loaded_state.folder_label
+        self.photos = loaded_state.photos
+        self._photo_map = loaded_state.photo_map
+        self.scenes = loaded_state.scenes
+        self.scene_source = loaded_state.scene_source
+        self.scene_detection_done = loaded_state.scene_detection_done
 
     def set_sort_mode(self, sort_mode: object) -> None:
         """Set photo sort mode and reorder already-loaded state in place."""

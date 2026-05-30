@@ -13,6 +13,7 @@ from easy_cull.core.records import (
     JPEG_EXTENSIONS,
     MAX_RATING,
     MIN_RATING,
+    RASTER_EXTENSIONS,
     RAW_EXTENSIONS,
     SUPPORTED_EXTENSIONS,
     PhotoRecord,
@@ -124,6 +125,66 @@ def load_folder_state(
     )
 
 
+def load_viewer_folder_state(
+        opened_file: Path,
+        *,
+        allow_folder_scan: bool,
+) -> LoadedFolderState:
+    """Build a fast filename-sorted state for photo-viewer startup."""
+    opened_file = opened_file.expanduser().resolve()
+    if not opened_file.is_file():
+        raise FileNotFoundError(f'{opened_file} is not a file')
+
+    if opened_file.suffix.lower() not in SUPPORTED_EXTENSIONS:
+        raise ValueError(f'{opened_file.name} is not a supported photo file')
+
+    folder = opened_file.parent
+    if allow_folder_scan:
+        files = sorted(
+            [
+                path
+                for path in folder.iterdir()
+                if (
+                    path.is_file()
+                    and path.suffix.lower() in SUPPORTED_EXTENSIONS
+                )
+            ],
+            key=lambda path: path.name.lower(),
+        )
+        metadata_entries = metadata_module.read_folder_metadata(folder)
+    else:
+        files = [opened_file]
+        metadata_entries = {}
+
+    groups: dict[str, list[Path]] = {}
+    for path in files:
+        groups.setdefault(path.stem.lower(), []).append(path)
+
+    normalized_metadata = metadata_module.normalize_metadata_entries(
+        metadata_entries or {}
+    )
+    records = [
+        _build_photo_record(grouped_files, {}, normalized_metadata)
+        for _, grouped_files in sorted(
+            groups.items(), key=operator.itemgetter(0)
+        )
+    ]
+    sort_photo_records(
+        records,
+        PHOTO_SORT_MODE_FILENAME,
+        sort_reversed=DEFAULT_PHOTO_SORT_REVERSED,
+    )
+    return LoadedFolderState(
+        current_folder=folder,
+        folder_label=folder.name,
+        photos=records,
+        photo_map={photo.photo_id: photo for photo in records},
+        scenes=[],
+        scene_source=None,
+        scene_detection_done=False,
+    )
+
+
 def _build_photo_record(
         grouped_files: list[Path],
         exif_map: dict[str, dict[str, Any]],
@@ -132,10 +193,13 @@ def _build_photo_record(
     sorted_group_files = sorted(
         grouped_files, key=lambda path: path.name.lower()
     )
-    jpeg_files = [
+    raster_files = [
         path
         for path in sorted_group_files
-        if path.suffix.lower() in JPEG_EXTENSIONS
+        if path.suffix.lower() in RASTER_EXTENSIONS
+    ]
+    jpeg_files = [
+        path for path in raster_files if path.suffix.lower() in JPEG_EXTENSIONS
     ]
     raw_files = [
         path
@@ -143,7 +207,7 @@ def _build_photo_record(
         if path.suffix.lower() in RAW_EXTENSIONS
     ]
 
-    preview_source = jpeg_files[0] if jpeg_files else raw_files[0]
+    preview_source = raster_files[0] if raster_files else raw_files[0]
     metadata_source = raw_files[0] if raw_files else preview_source
     shared_stem = preview_source.stem
 

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtGui import QAction, QKeySequence, QShortcut
 from PySide6.QtWidgets import QMainWindow
 
 from easy_cull.core.photo_library import PhotoLibrary
+from easy_cull.ui.folder_access import FolderAccessManager
 from easy_cull.ui.identity import APP_NAME, easy_cull_icon
 from easy_cull.ui.main_window.build import MainWindowBuildMixin
 from easy_cull.ui.main_window.compare import MainWindowCompareMixin
@@ -27,8 +29,10 @@ if TYPE_CHECKING:
     from easy_cull.ui.main_window.dialogs import OrganizerDialogResult
     from easy_cull.ui.main_window.workflows import MetadataEdit, SceneEdit
     from easy_cull.ui.workers import (
+        FolderHydrationWorker,
         OperationWorker,
         SceneDetectionWorker,
+        ViewerPrefetchWorker,
     )
 
 
@@ -43,12 +47,18 @@ class MainWindow(
 ):
     """Desktop photo-culling main window and view-state controller."""
 
-    def __init__(self) -> None:
+    def __init__(self, startup_file: Path | None = None) -> None:  # noqa: PLR0915
         super().__init__()
         self.library = PhotoLibrary()
+        self.folder_access_manager = FolderAccessManager()
         self.current_photo_id: str | None = None
         self.current_theme = THEMES['light']
         self._busy = False
+        self._photo_viewer_mode = False
+        self._photo_viewer_folder_access_granted = True
+        self._pending_browse_after_hydration = False
+        self._folder_hydration_message = ''
+        self._folder_hydration_progress = 0
         self._browse_mode = False
         self._compare_mode = False
         self._compare_restore_browse_mode = False
@@ -76,6 +86,10 @@ class MainWindow(
         self._initial_folder_prompt_pending = True
         self._scene_thread: QThread | None = None
         self._scene_worker: SceneDetectionWorker | None = None
+        self._folder_hydration_thread: QThread | None = None
+        self._folder_hydration_worker: FolderHydrationWorker | None = None
+        self._viewer_prefetch_thread: QThread | None = None
+        self._viewer_prefetch_worker: ViewerPrefetchWorker | None = None
         self._operation_thread: QThread | None = None
         self._operation_worker: OperationWorker | None = None
         self._operation_kind: str | None = None
@@ -84,6 +98,7 @@ class MainWindow(
         self._assignment_shortcuts: list[QShortcut] = []
         self._viewer_shortcuts: list[QShortcut] = []
         self._scene_nav_shortcuts: list[QShortcut] = []
+        self._photo_viewer_nav_shortcuts: list[QShortcut] = []
         self._compare_nav_shortcuts: list[QShortcut] = []
         self._browse_photo_rows: dict[str, int] = {}
         self._thumbnail_photo_rows: dict[str, int] = {}
@@ -105,6 +120,12 @@ class MainWindow(
         self._build_ui()
         self._build_menu()
         self._build_shortcuts()
+        if startup_file is not None:
+            self._initial_folder_prompt_pending = False
+            self._startup_file = Path(startup_file)
+        else:
+            self._startup_file = None
+
         self._refresh_ui()
 
     @staticmethod
@@ -118,5 +139,6 @@ class MainWindow(
         """Return True while any background operation thread is active."""
         return (
             self._scene_thread is not None
+            or self._folder_hydration_thread is not None
             or self._operation_thread is not None
         )

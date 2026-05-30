@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import plistlib
 import shutil
 import subprocess  # noqa: S404 - explicit PyInstaller/ExifTool integration
 import sys
@@ -13,6 +14,7 @@ if __package__ in {None, ''}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.build_app import utils
+from easy_cull.core.records import SUPPORTED_EXTENSIONS
 
 APP_NAME = utils.APP_NAME
 EXIFTOOL_VERSION = utils.EXIFTOOL_VERSION
@@ -60,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
     command = pyinstaller_command(clean=not args.no_clean)
     subprocess.run(command, cwd=REPO_ROOT, check=True)  # noqa: S603
     mark_bundled_exiftool_executable()
+    inject_document_types()
     print(APP_PATH)
     return 0
 
@@ -131,6 +134,34 @@ def mark_bundled_exiftool_executable() -> None:
     """Ensure the app-bundled exiftool script keeps executable bits."""
     for path in _bundled_exiftool_paths():
         path.chmod(path.stat().st_mode | 0o755)
+
+
+def document_type_entry() -> dict[str, object]:
+    """Return the macOS document type registration for supported photos."""
+    return {
+        'CFBundleTypeExtensions': [
+            extension.removeprefix('.')
+            for extension in sorted(SUPPORTED_EXTENSIONS)
+        ],
+        'CFBundleTypeIconFile': ICON_PATH.name,
+        'CFBundleTypeName': 'EasyCull Photo',
+        'CFBundleTypeRole': 'Viewer',
+        'LSHandlerRank': 'Alternate',
+    }
+
+
+def inject_document_types(app_path: Path = APP_PATH) -> None:
+    """Add supported photo document types to the built app bundle plist."""
+    info_plist = app_path / 'Contents' / 'Info.plist'
+    if not info_plist.exists():
+        raise FileNotFoundError(f'Info.plist missing: {info_plist}')
+
+    with info_plist.open('rb') as file:
+        payload = plistlib.load(file)
+
+    payload['CFBundleDocumentTypes'] = [document_type_entry()]
+    with info_plist.open('wb') as file:
+        plistlib.dump(payload, file)
 
 
 def print_diagnostics() -> None:

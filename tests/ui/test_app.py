@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtWidgets import QApplication
 
 import easy_cull.ui as ui_package
+import easy_cull.ui.app as app_module
 import easy_cull.ui.identity as identity_module
 import easy_cull.ui.main_window as ui_main_window_package
 import easy_cull.ui.main_window.window as main_window_module
@@ -12,6 +15,9 @@ import easy_cull.ui.viewers.main_photo_viewer as main_photo_viewer_module
 import easy_cull.ui.viewers.photo_viewer as photo_viewer_module
 import easy_cull.ui.widgets as widgets_module
 import easy_cull.ui.workers as workers_module
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_ui_packages_do_not_export_shortcuts() -> None:
@@ -82,6 +88,27 @@ def test_branded_argv_replaces_process_executable_name() -> None:
         'easy_cull',
     ]
     assert identity_module.branded_argv([]) == ['EasyCull']
+
+
+def test_app_extracts_supported_startup_photo_path(tmp_path: Path) -> None:
+    photo_path = tmp_path / 'IMG_1000.ARW'
+    photo_path.write_bytes(b'raw')
+
+    assert (
+        app_module._extract_startup_file([
+            'EasyCull',
+            '--some-qt-flag',
+            str(photo_path),
+        ])
+        == photo_path
+    )
+    assert (
+        app_module._extract_startup_file([
+            'EasyCull',
+            str(tmp_path / 'notes.txt'),
+        ])
+        is None
+    )
 
 
 def test_apply_app_identity_sets_qt_name_and_icon() -> None:

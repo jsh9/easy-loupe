@@ -234,7 +234,6 @@ def test_main_window_browse_mode_toggles_grid_and_space_behavior(
     app.processEvents()
 
     assert focus_zoom_calls == ['toggle']
-    assert window._browse_mode is False
 
     window.browse_mode_shortcut.activated.emit()
     app.processEvents()
@@ -255,6 +254,75 @@ def test_main_window_browse_mode_toggles_grid_and_space_behavior(
     assert window.split_mode_shortcut.isEnabled() is True
 
     window.close()
+
+
+def test_main_window_system_open_enters_photo_viewer_and_browse_grid(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    create_jpeg(tmp_path / 'B.JPG', 'blue')
+    create_jpeg(tmp_path / 'C.JPG', 'purple')
+    stub_read_exif(monkeypatch, {})
+    app = QApplication.instance() or QApplication([])
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    window.show()
+    monkeypatch.setattr(
+        window.folder_access_manager,
+        'ensure_access_for_file',
+        lambda _path, _parent: True,
+    )
+    monkeypatch.setattr(window, '_start_viewer_prefetch', lambda: None)
+    monkeypatch.setattr(
+        window, '_start_folder_hydration', lambda _folder: None
+    )
+
+    window.open_file_from_system(tmp_path / 'B.JPG')
+    app.processEvents()
+
+    assert window._photo_viewer_mode is True
+    assert window.current_photo_id == 'B'
+    assert window.top_bar_widget.isHidden() is True
+    assert window.thumbnail_list.isHidden() is True
+    assert window.browse_list.isHidden() is True
+    assert window.viewer.single_viewer._mode == 'fit'
+
+    window._navigate_photo_viewer(1)
+    assert window.current_photo_id == 'C'
+    window._navigate_photo_viewer(-1)
+    assert window.current_photo_id == 'B'
+
+    window._handle_browse_mode_shortcut()
+
+    assert window._photo_viewer_mode is False
+    assert window._browse_mode is True
+    assert window.browse_list.isVisible() is True
+    assert window.browse_list.currentRow() == window._browse_photo_rows['B']
+    window.close()
+
+
+def test_main_window_photo_viewer_browse_waits_for_hydration(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _theme, _app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('A', 'green'), ('B', 'blue')],
+    )
+    window._set_photo_viewer_mode(active=True)
+    window._photo_viewer_folder_access_granted = True
+    window._folder_hydration_thread = object()
+    window._folder_hydration_message = 'Loading folder...'
+    window._folder_hydration_progress = 42
+
+    window._handle_browse_mode_shortcut()
+
+    assert window._pending_browse_after_hydration is True
+    assert window._busy is True
+    assert window.overlay_message_label.text() == 'Loading folder...'
+    window._folder_hydration_thread = None
+    window._hide_progress()
+    assert window._browse_mode is False
 
 
 def test_main_window_browse_mode_keeps_photo_selection_and_shows_all_photos(
