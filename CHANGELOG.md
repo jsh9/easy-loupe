@@ -1,5 +1,19 @@
 # Change Log
 
+## [Unreleased]
+
+- Added
+  - Photo-viewer launch mode for opening a single photo from Finder, Explorer,
+    or an argv file path, with fit-to-window display, adjacent-folder
+    navigation, background prefetching, and handoff into the full browse grid
+  - Support for HEIC/HEIF and additional RAW photo extensions in folder
+    loading and preview generation
+  - macOS photo-viewer folder access now uses TCC-backed protected-folder
+    prompts for `~/Desktop`, `~/Documents`, and `~/Downloads`, while keeping a
+    native folder chooser fallback for other roots
+  - macOS app builds now register EasyCull as a photo document viewer and
+    include the privacy usage strings needed for protected-folder access
+
 ## [0.2.3] - 2026-05-30
 
 - Fixed
