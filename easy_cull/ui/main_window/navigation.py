@@ -117,6 +117,14 @@ class MainWindowNavigationMixin:
         if sender in list_widgets:
             if sender is self.thumbnail_list:
                 self._scene_merge_selection_source = 'thumbnail'
+                if (
+                    not self._extending_thumbnail_selection
+                    and not self._selection_extending_modifier_active()
+                ):
+                    # A fresh click/plain navigation starts a new range.
+                    # Without this reset, the next Shift+Up/Down would extend
+                    # from an old anchor instead of the user's current row.
+                    self._thumbnail_selection_anchor_row = None
             elif sender is self.scene_list:
                 self._scene_merge_selection_source = 'scene'
             elif sender is self.browse_list:
@@ -156,6 +164,12 @@ class MainWindowNavigationMixin:
             previous.data(PHOTO_ID_ROLE) if previous is not None else None
         )
         self._scene_selection_anchor_row = None
+        if not self._extending_thumbnail_selection:
+            # currentItemChanged also fires for our custom Shift navigation.
+            # Keep the anchor during that path, but clear it for ordinary
+            # thumbnail moves so later Shift selection starts where expected.
+            self._thumbnail_selection_anchor_row = None
+
         photo_id = str(photo_id)
         preserved_selection_photo_ids = (
             self._capture_scene_selection_for_left_change(photo_id)
@@ -583,6 +597,73 @@ class MainWindowNavigationMixin:
                 )
 
         self.thumbnail_list.setFocus(Qt.OtherFocusReason)
+        return True
+
+    def extend_thumbnail_selection(self: MainWindow, direction: int) -> bool:
+        """
+        Extend vertical thumbnail selection as one exact anchored range.
+
+        The default Qt range behavior can leave rows selected after reversing
+        direction. This method makes Shift+Up/Down deterministic by moving the
+        current row, clearing the vertical strip, and selecting only the range
+        between the saved anchor and the new current row.
+        """
+        if (
+            self._busy
+            or self._compare_mode
+            or self._browse_mode
+            or self.thumbnail_list.count() == 0
+        ):
+            return False
+
+        current_row = self.thumbnail_list.currentRow()
+        if current_row < 0:
+            self._select_left_item_for_current_photo()
+            current_row = self.thumbnail_list.currentRow()
+
+        if current_row < 0:
+            return False
+
+        if self._thumbnail_selection_anchor_row is None:
+            self._thumbnail_selection_anchor_row = current_row
+
+        next_row = current_row + direction
+        if next_row < 0 or next_row >= self.thumbnail_list.count():
+            return False
+
+        item = self.thumbnail_list.item(next_row)
+        if item is None:
+            return False
+
+        previous_photo_id = self.current_photo_id
+        self._extending_thumbnail_selection = True
+        self.thumbnail_list.setCurrentRow(next_row)
+        self._extending_thumbnail_selection = False
+
+        first_row = min(self._thumbnail_selection_anchor_row, next_row)
+        last_row = max(self._thumbnail_selection_anchor_row, next_row)
+        # Vertical range navigation is a new cover/stack selection, so hidden
+        # exact scene-strip selections from prior scenes no longer apply.
+        self._preserved_scene_selection_photo_ids.clear()
+        self.thumbnail_list.blockSignals(True)
+        self.thumbnail_list.clearSelection()
+        for row in range(first_row, last_row + 1):
+            range_item = self.thumbnail_list.item(row)
+            if range_item is not None:
+                range_item.setSelected(True)
+
+        self.thumbnail_list.blockSignals(False)
+        self._refresh_selection_labels()
+        self._refresh_metadata_history_actions()
+        self._refresh_item_styles(self.thumbnail_list)
+        if self.library.scene_detection_done:
+            self._refresh_item_styles(self.scene_list)
+
+        self._refresh_selection_styles(
+            previous_photo_id, self.current_photo_id, 'main'
+        )
+        self.thumbnail_list.setFocus(Qt.OtherFocusReason)
+        self.thumbnail_list.viewport().setFocus(Qt.OtherFocusReason)
         return True
 
     def _current_scene(self: MainWindow) -> SceneGroup | None:

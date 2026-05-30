@@ -1,5 +1,18 @@
 # Change Log
 
+## [0.2.3] - 2026-05-30
+
+- Fixed
+  - Scene groups
+    - `Ctrl+Shift+M` now merges selected vertical scene stacks with a fully
+      selected horizontal scene strip instead of treating that full-strip
+      selection as a no-op
+    - Partial horizontal scene-strip selections remain blocked as attempted
+      scene splits, even when vertical scene stacks are also selected
+  - Vertical thumbnail-strip `Shift+Up` / `Shift+Down` range selection now
+    releases rows outside the current anchor-to-current range when reversing
+    direction
+
 ## [0.2.2] - 2026-05-29
 
 - Added

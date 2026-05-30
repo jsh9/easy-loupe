@@ -463,10 +463,18 @@ Mode-transition summary:
 - In scene mode, `Shift+Left` and `Shift+Right` extend the horizontal in-scene
   selection, while `Shift+Up` and `Shift+Down` extend across vertical
   scene-stack rows and preserve exact hidden in-scene selections.
+- `Shift+Up` and `Shift+Down` in the vertical thumbnail strip use anchored
+  range selection. Reversing direction releases rows outside the current
+  anchor-to-current range rather than leaving them stickily selected.
 - In browse mode, selecting a grid item updates the current photo and keeps the
   left strip and scene strip synchronized in the background.
 - Scene merges, breaks, and scene-edit undo/redo performed from browse mode
   keep keyboard focus on the browse grid after the lists are rebuilt.
+- Scene merges from the vertical thumbnail strip expand selected scene stacks
+  to all photos in those stacks. Scene merges from the horizontal scene strip
+  use exact in-scene photo selection: selecting only part of the current scene
+  is blocked as an attempted split, while selecting the full horizontal scene
+  can merge that whole scene with selected vertical scene stacks.
 - Double-clicking a browse-grid photo exits browse mode and opens that photo in
   normal view mode.
 - Double-clicking from browse mode always returns to single-pane fit view.
@@ -630,6 +638,7 @@ Current shortcut coverage in code includes:
 - `Ctrl+O`: open folder
 - `Ctrl+D`: detect scenes
 - `Ctrl+Shift+E`: open the organizer/XMP dialog
+- `Ctrl+Shift+M`: merge selected photos into a scene
 - `1`-`5`, `0`: rating changes
 - `6`-`9`: red/yellow/green/blue color labels
 - `` ` ``: clear color label
@@ -727,6 +736,12 @@ Additional assignment-menu behavior:
     but still exits browse mode back to fit view
   - verify metadata refreshes preserve scroll position when the user tags
     photos in the thumbnail strip or browse grid
+  - verify vertical thumbnail-strip Shift range selection releases rows outside
+    the anchor-to-current range when the user reverses direction
+  - verify scene merge selection resolution across the vertical thumbnail strip
+    and horizontal scene strip: full horizontal-scene selection may merge with
+    selected vertical stacks, but partial horizontal-scene selection remains
+    blocked as an attempted split
   - verify that tagging a single photo in the scene strip does not cause sticky
     selection: navigating away after tagging should show only the navigated-to
     photo as selected, and subsequent tagging should apply to only that photo

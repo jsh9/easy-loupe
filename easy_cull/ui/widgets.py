@@ -23,6 +23,12 @@ if TYPE_CHECKING:
     from easy_cull.ui.theme import ThemePalette
 
 
+class _ThumbnailNavigator(Protocol):
+    """Minimal interface required by ThumbnailListWidget."""
+
+    def extend_thumbnail_selection(self, direction: int) -> bool: ...
+
+
 class _SceneNavigator(Protocol):
     """Minimal interface required by SceneListWidget."""
 
@@ -389,6 +395,36 @@ class ThumbnailItemWidget(QWidget):
                     badge_frame.width() - self._badge.width() - 8, 8
                 )
                 self._badge.raise_()
+
+
+class ThumbnailListWidget(QListWidget):
+    """Vertical thumbnail list with app-owned Shift range selection."""
+
+    def __init__(self, owner: _ThumbnailNavigator) -> None:
+        super().__init__()
+        self._owner = owner
+
+    def keyPressEvent(self, event: object) -> None:  # noqa: N802 - Qt API
+        """Route Shift+Up/Down through MainWindow before Qt handles it."""
+        from PySide6.QtCore import Qt as _Qt  # noqa: PLC0415
+        from PySide6.QtGui import QKeyEvent  # noqa: PLC0415
+
+        if not isinstance(event, QKeyEvent):
+            super().keyPressEvent(event)  # type: ignore[arg-type]
+            return
+
+        extend_selection = bool(event.modifiers() & _Qt.ShiftModifier)
+        if extend_selection and event.key() in {_Qt.Key_Up, _Qt.Key_Down}:
+            # Qt's ExtendedSelection keeps toggled rows in some direction
+            # reversals. MainWindow owns this range so it can clear and
+            # rebuild exactly the rows between the original anchor and current
+            # row, matching file-browser style Shift navigation.
+            direction = -1 if event.key() == _Qt.Key_Up else 1
+            if self._owner.extend_thumbnail_selection(direction):
+                event.accept()
+                return
+
+        super().keyPressEvent(event)
 
 
 class SceneListWidget(QListWidget):

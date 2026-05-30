@@ -45,7 +45,7 @@ from easy_cull.ui.viewers.compare_photo_viewer import (
 )
 from easy_cull.ui.viewers.exif_overlay import ExifOverlayWidget
 from easy_cull.ui.viewers.main_photo_viewer import MainPhotoViewer
-from easy_cull.ui.widgets import SceneListWidget
+from easy_cull.ui.widgets import SceneListWidget, ThumbnailListWidget
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -187,7 +187,7 @@ class MainWindowBuildMixin:
         self.content_splitter = content_splitter
         root.addWidget(content_splitter, 1)
 
-        self.thumbnail_list = QListWidget()
+        self.thumbnail_list = ThumbnailListWidget(self)
         self.thumbnail_list.setMinimumWidth(300)
         self.thumbnail_list.setSpacing(8)
         self.thumbnail_list.setSelectionMode(

@@ -1044,6 +1044,112 @@ def test_scene_mode_shift_up_down_selects_only_scene_cover_rows(
     window.close()
 
 
+def test_thumbnail_shift_down_then_up_releases_rows_below_current(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify downward Shift range selection shrinks when reversing upward.
+
+    Qt's default extended selection can leave rows below the current item
+    selected after a direction reversal. The app-owned thumbnail range handler
+    should keep only the anchor-to-current rows selected.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7643', 'dimgray'),
+            ('IMG_7644', 'green'),
+            ('IMG_7645', 'blue'),
+            ('IMG_7646', 'yellow'),
+        ],
+        scene_groups=[
+            ['IMG_7643'],
+            ['IMG_7644'],
+            ['IMG_7645'],
+            ['IMG_7646'],
+        ],
+    )
+    window.thumbnail_list.setFocus(Qt.OtherFocusReason)
+    window.thumbnail_list.viewport().setFocus(Qt.OtherFocusReason)
+
+    QTest.keyClick(window.thumbnail_list, Qt.Key_Down, Qt.ShiftModifier)
+    app.processEvents()
+    QTest.keyClick(window.thumbnail_list, Qt.Key_Down, Qt.ShiftModifier)
+    app.processEvents()
+
+    assert _collect_photo_ids_from_selected_items(window.thumbnail_list) == [
+        'IMG_7643',
+        'IMG_7644',
+        'IMG_7645',
+    ]
+
+    QTest.keyClick(window.thumbnail_list, Qt.Key_Up, Qt.ShiftModifier)
+    app.processEvents()
+
+    assert window.current_photo_id == 'IMG_7644'
+    assert _collect_photo_ids_from_selected_items(window.thumbnail_list) == [
+        'IMG_7643',
+        'IMG_7644',
+    ]
+
+    window.close()
+
+
+def test_thumbnail_shift_up_then_down_releases_rows_above_current(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify upward Shift range selection shrinks when reversing downward.
+
+    This is the opposite traversal of the sticky-selection regression. It
+    guards the same anchor-to-current contract when the user starts from a
+    lower row, extends upward, then moves back down while still holding Shift.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7647', 'dimgray'),
+            ('IMG_7648', 'green'),
+            ('IMG_7649', 'blue'),
+            ('IMG_7650', 'yellow'),
+        ],
+        scene_groups=[
+            ['IMG_7647'],
+            ['IMG_7648'],
+            ['IMG_7649'],
+            ['IMG_7650'],
+        ],
+    )
+    window.thumbnail_list.setCurrentRow(3)
+    app.processEvents()
+    window.thumbnail_list.setFocus(Qt.OtherFocusReason)
+    window.thumbnail_list.viewport().setFocus(Qt.OtherFocusReason)
+
+    QTest.keyClick(window.thumbnail_list, Qt.Key_Up, Qt.ShiftModifier)
+    app.processEvents()
+    QTest.keyClick(window.thumbnail_list, Qt.Key_Up, Qt.ShiftModifier)
+    app.processEvents()
+
+    assert _collect_photo_ids_from_selected_items(window.thumbnail_list) == [
+        'IMG_7648',
+        'IMG_7649',
+        'IMG_7650',
+    ]
+
+    QTest.keyClick(window.thumbnail_list, Qt.Key_Down, Qt.ShiftModifier)
+    app.processEvents()
+
+    assert window.current_photo_id == 'IMG_7649'
+    assert _collect_photo_ids_from_selected_items(window.thumbnail_list) == [
+        'IMG_7649',
+        'IMG_7650',
+    ]
+
+    window.close()
+
+
 def test_scene_mode_shift_left_right_extends_selection_inside_scene(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
