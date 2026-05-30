@@ -371,6 +371,96 @@ def test_main_window_canceled_photo_viewer_access_opens_single_photo_only(
     window.close()
 
 
+def test_main_window_permission_error_regrant_reloads_full_folder(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    create_jpeg(tmp_path / 'B.JPG', 'blue')
+    stub_read_exif(monkeypatch, {})
+    app = QApplication.instance() or QApplication([])
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    window.show()
+    load_calls: list[bool] = []
+    original_load_viewer_folder = window.library.load_viewer_folder
+
+    def load_viewer_folder(path: Path, *, allow_folder_scan: bool) -> None:
+        load_calls.append(allow_folder_scan)
+        if len(load_calls) == 1:
+            raise PermissionError('blocked')
+
+        original_load_viewer_folder(path, allow_folder_scan=allow_folder_scan)
+
+    window.library.load_viewer_folder = load_viewer_folder
+    monkeypatch.setattr(
+        window.folder_access_manager,
+        'ensure_access_for_file',
+        lambda _path, _parent: True,
+    )
+    monkeypatch.setattr(
+        window,
+        '_retry_photo_viewer_folder_access',
+        lambda _path: True,
+    )
+    monkeypatch.setattr(window, '_start_viewer_prefetch', lambda: None)
+    monkeypatch.setattr(
+        window, '_start_folder_hydration', lambda _folder: None
+    )
+
+    window.open_file_from_system(tmp_path / 'B.JPG')
+    app.processEvents()
+
+    assert load_calls == [True, True]
+    assert window._photo_viewer_folder_access_granted is True
+    assert [photo.photo_id for photo in window.library.photos] == ['A', 'B']
+    window.close()
+
+
+def test_main_window_permission_error_cancel_regrant_opens_selected_photo_only(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    create_jpeg(tmp_path / 'B.JPG', 'blue')
+    stub_read_exif(monkeypatch, {})
+    app = QApplication.instance() or QApplication([])
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    window.show()
+    load_calls: list[bool] = []
+    original_load_viewer_folder = window.library.load_viewer_folder
+
+    def load_viewer_folder(path: Path, *, allow_folder_scan: bool) -> None:
+        load_calls.append(allow_folder_scan)
+        if len(load_calls) == 1:
+            raise PermissionError('blocked')
+
+        original_load_viewer_folder(path, allow_folder_scan=allow_folder_scan)
+
+    window.library.load_viewer_folder = load_viewer_folder
+    monkeypatch.setattr(
+        window.folder_access_manager,
+        'ensure_access_for_file',
+        lambda _path, _parent: True,
+    )
+    monkeypatch.setattr(
+        window,
+        '_retry_photo_viewer_folder_access',
+        lambda _path: False,
+    )
+    monkeypatch.setattr(window, '_start_viewer_prefetch', lambda: None)
+    monkeypatch.setattr(
+        window, '_start_folder_hydration', lambda _folder: None
+    )
+
+    window.open_file_from_system(tmp_path / 'B.JPG')
+    app.processEvents()
+
+    assert load_calls == [True, False]
+    assert window._photo_viewer_folder_access_granted is False
+    assert [photo.photo_id for photo in window.library.photos] == ['B']
+    window.close()
+
+
 def test_main_window_stops_photo_viewer_background_threads() -> None:
     window = main_window_module.MainWindow()
     window._initial_folder_prompt_pending = False

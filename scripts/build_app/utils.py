@@ -11,6 +11,7 @@ import urllib.request
 from pathlib import Path
 
 APP_NAME = 'EasyCull'
+BUNDLE_IDENTIFIER = 'com.easycull.EasyCull'
 EXIFTOOL_VERSION = '13.58'
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ENTRYPOINT = REPO_ROOT / 'easy_cull' / '__main__.py'

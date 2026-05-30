@@ -140,27 +140,12 @@ class MainWindowWorkflowMixin:
                 QMessageBox.critical(self, 'Failed to Open Photo', str(exc))
                 return
 
-            QMessageBox.warning(
-                self,
-                'Folder Access Blocked',
-                (
-                    'EasyCull has an app-level grant for this folder, but'
-                    ' macOS still blocked folder scanning. Check System'
-                    ' Settings > Privacy & Security > Files and Folders or'
-                    ' Full Disk Access, then try again.\n\n'
-                    'The selected photo will open by itself for now.'
-                ),
+            folder_access_granted = self._retry_photo_viewer_folder_access(
+                resolved_path
             )
-            folder_access_granted = False
-            try:
-                self.library.load_viewer_folder(
-                    resolved_path,
-                    allow_folder_scan=False,
-                )
-            except Exception as fallback_exc:  # noqa: BLE001 - surface file-open failures
-                QMessageBox.critical(
-                    self, 'Failed to Open Photo', str(fallback_exc)
-                )
+            if not self._load_photo_viewer_folder_after_access_retry(
+                resolved_path, allow_folder_scan=folder_access_granted
+            ):
                 return
         except Exception as exc:  # noqa: BLE001 - surface file-open failures
             QMessageBox.critical(self, 'Failed to Open Photo', str(exc))
@@ -178,6 +163,86 @@ class MainWindowWorkflowMixin:
         self._start_viewer_prefetch()
         if folder_access_granted and self.library.current_folder is not None:
             self._start_folder_hydration(self.library.current_folder)
+
+    def _retry_photo_viewer_folder_access(
+            self: MainWindow, file_path: Path
+    ) -> bool:
+        suggested_root = self.folder_access_manager.suggest_access_root(
+            file_path
+        )
+        uses_tcc_prompt = self.folder_access_manager.is_standard_tcc_root(
+            suggested_root
+        )
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle('Folder Access Blocked')
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        dialog.setText(
+            'macOS blocked EasyCull from scanning this photo folder.'
+        )
+        if uses_tcc_prompt:
+            dialog.setInformativeText(
+                'EasyCull can ask macOS for this protected-folder permission'
+                ' again. If macOS still blocks access, add EasyCull in System'
+                ' Settings > Privacy & Security > Full Disk Access.'
+            )
+            retry_label = 'Try macOS Permission Again'
+        else:
+            dialog.setInformativeText(
+                'EasyCull can reopen the native folder chooser to refresh'
+                ' access. If macOS still blocks access, add EasyCull in'
+                ' System Settings > Privacy & Security > Full Disk Access.'
+            )
+            retry_label = 'Choose Folder'
+
+        retry_button = dialog.addButton(
+            retry_label, QMessageBox.ButtonRole.AcceptRole
+        )
+        dialog.addButton(
+            'Open Selected Photo Only', QMessageBox.ButtonRole.RejectRole
+        )
+        dialog.setDefaultButton(retry_button)
+        dialog.exec()
+        if dialog.clickedButton() is not retry_button:
+            return False
+
+        return self.folder_access_manager.request_access_for_file(
+            file_path, self
+        )
+
+    def _load_photo_viewer_folder_after_access_retry(
+            self: MainWindow,
+            file_path: Path,
+            *,
+            allow_folder_scan: bool,
+    ) -> bool:
+        try:
+            self.library.load_viewer_folder(
+                file_path,
+                allow_folder_scan=allow_folder_scan,
+            )
+        except PermissionError as exc:
+            if allow_folder_scan:
+                QMessageBox.warning(
+                    self,
+                    'Folder Access Still Blocked',
+                    (
+                        'macOS still blocked folder scanning. Add EasyCull in'
+                        ' System Settings > Privacy & Security > Full Disk'
+                        ' Access, then try again.\n\n'
+                        'The selected photo will open by itself for now.'
+                    ),
+                )
+                return self._load_photo_viewer_folder_after_access_retry(
+                    file_path, allow_folder_scan=False
+                )
+
+            QMessageBox.critical(self, 'Failed to Open Photo', str(exc))
+            return False
+        except Exception as exc:  # noqa: BLE001 - surface file-open failures
+            QMessageBox.critical(self, 'Failed to Open Photo', str(exc))
+            return False
+        else:
+            return True
 
     def _photo_id_for_opened_file(
             self: MainWindow, file_path: Path

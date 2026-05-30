@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QSettings
-from PySide6.QtWidgets import QMessageBox, QWidget
+from PySide6.QtWidgets import QFileDialog, QMessageBox, QWidget
 
 from easy_cull.ui.identity import APP_NAME
 
@@ -18,6 +18,11 @@ COMMON_MAC_PARENT_NAMES = frozenset({
     'Dropbox',
     'Movies',
     'Pictures',
+})
+STANDARD_TCC_PARENT_NAMES = frozenset({
+    'Desktop',
+    'Documents',
+    'Downloads',
 })
 
 
@@ -46,11 +51,53 @@ class FolderAccessManager:
         if self.is_file_approved(resolved_file):
             return True
 
+        return self.request_access_for_file(resolved_file, parent)
+
+    def request_access_for_file(
+            self, file_path: Path, parent: QWidget | None = None
+    ) -> bool:
+        """Prompt for and persist folder access when macOS allows scanning."""
+        resolved_file = file_path.expanduser().resolve()
         suggested_root = self.suggest_access_root(resolved_file)
         if not self._confirm_access_root(parent, suggested_root):
             return False
 
-        self.add_approved_root(suggested_root)
+        if self.is_standard_tcc_root(suggested_root):
+            if not self._probe_folder_access(suggested_root):
+                return False
+
+            self.add_approved_root(suggested_root)
+            return True
+
+        return self._request_native_folder_access(
+            resolved_file,
+            suggested_root,
+            parent,
+        )
+
+    def _request_native_folder_access(
+            self,
+            file_path: Path,
+            suggested_root: Path,
+            parent: QWidget | None,
+    ) -> bool:
+        """Prompt for and persist a native folder-selection grant."""
+        selected_root = self._select_access_root(parent, suggested_root)
+        if selected_root is None:
+            return False
+
+        if not self._contains(selected_root, file_path.parent):
+            QMessageBox.warning(
+                parent,
+                'Folder Access Not Granted',
+                (
+                    'Choose the suggested folder or one of its parent folders'
+                    ' to enable adjacent-photo navigation.'
+                ),
+            )
+            return False
+
+        self.add_approved_root(selected_root)
         return True
 
     def is_file_approved(self, file_path: Path) -> bool:
@@ -108,17 +155,59 @@ class FolderAccessManager:
         dialog.setText(
             f'Allow EasyCull to browse photos under {self.display_path(root)}?'
         )
-        dialog.setInformativeText(
-            'This lets the photo viewer navigate adjacent photos in that'
-            ' folder tree without asking again.'
-        )
         allow_button = dialog.addButton(
             'Allow', QMessageBox.ButtonRole.AcceptRole
         )
         dialog.addButton(QMessageBox.StandardButton.Cancel)
         dialog.setDefaultButton(allow_button)
+        if self.is_standard_tcc_root(root):
+            dialog.setInformativeText(
+                'macOS may show a privacy prompt after you click Allow. This'
+                ' lets EasyCull navigate adjacent photos in that folder tree'
+                ' without asking again.'
+            )
+        else:
+            dialog.setInformativeText(
+                'macOS requires selecting this folder once. This lets'
+                ' EasyCull navigate adjacent photos in that folder tree'
+                ' without asking again.'
+            )
+
         dialog.exec()
         return dialog.clickedButton() is allow_button
+
+    @staticmethod
+    def _probe_folder_access(root: Path) -> bool:
+        """
+        Return True when macOS allows directory scanning for a root.
+
+        On Desktop/Documents/Downloads this read is what triggers the native
+        TCC prompt for unsigned or unsandboxed builds with a valid bundle ID.
+        """
+        try:
+            iterator = root.iterdir()
+            try:
+                next(iterator, None)
+            finally:
+                iterator.close()
+        except PermissionError:
+            return False
+
+        return True
+
+    @staticmethod
+    def _select_access_root(
+            parent: QWidget | None, suggested_root: Path
+    ) -> Path | None:
+        selected = QFileDialog.getExistingDirectory(
+            parent,
+            'Grant EasyCull Folder Access',
+            str(suggested_root),
+        )
+        if not selected:
+            return None
+
+        return Path(selected).expanduser().resolve()
 
     @staticmethod
     def suggest_access_root(file_path: Path) -> Path:
@@ -134,6 +223,20 @@ class FolderAccessManager:
             return home / relative.parts[0]
 
         return resolved_file.parent
+
+    @staticmethod
+    def is_standard_tcc_root(root: Path) -> bool:
+        """Return True for home Desktop/Documents/Downloads roots."""
+        resolved_root = root.expanduser().resolve()
+        home = Path.home().expanduser().resolve()
+        try:
+            relative = resolved_root.relative_to(home)
+        except ValueError:
+            return False
+
+        return len(relative.parts) == 1 and (
+            relative.parts[0] in STANDARD_TCC_PARENT_NAMES
+        )
 
     @staticmethod
     def display_path(path: Path) -> str:
