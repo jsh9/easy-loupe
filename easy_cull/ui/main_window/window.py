@@ -56,6 +56,13 @@ class MainWindow(
         self._compare_restore_selection_photo_ids: list[str] = []
         self._scene_selection_anchor_row: int | None = None
         self._extending_scene_selection = False
+
+        # Anchor state for app-owned Shift+Up/Down selection in the vertical
+        # thumbnail strip. This is separate from scene-strip Shift+Left/Right
+        # because the vertical strip selects scene covers/stacks while the
+        # horizontal strip selects exact photos within one scene.
+        self._thumbnail_selection_anchor_row: int | None = None
+        self._extending_thumbnail_selection = False
         self._scene_merge_selection_source: str | None = None
         self._info_overlay_enabled = False
         self._info_overlay_refresh_deferred = False

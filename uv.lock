@@ -71,7 +71,7 @@ wheels = [
 
 [[package]]
 name = "easy-cull"
-version = "0.2.0"
+version = "0.2.3"
 source = { editable = "." }
 dependencies = [
     { name = "imagehash" },

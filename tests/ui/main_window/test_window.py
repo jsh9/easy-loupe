@@ -197,19 +197,22 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:
         == '1'
     )
     assert (
-        window.rating_actions[None]
+        window
+        .rating_actions[None]
         .shortcut()
         .toString(QKeySequence.PortableText)
         == '0'
     )
     assert (
-        window.color_label_actions['red']
+        window
+        .color_label_actions['red']
         .shortcut()
         .toString(QKeySequence.PortableText)
         == '6'
     )
     assert (
-        window.color_label_actions['blue']
+        window
+        .color_label_actions['blue']
         .shortcut()
         .toString(QKeySequence.PortableText)
         == '9'
@@ -217,19 +220,22 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:
     assert window.color_label_actions[None].shortcut().isEmpty()
     assert window.color_label_actions[None].text().endswith('\t`')
     assert (
-        window.color_label_actions['purple']
+        window
+        .color_label_actions['purple']
         .shortcut()
         .toString(QKeySequence.PortableText)
         == ''
     )
     assert (
-        window.flag_actions['picked']
+        window
+        .flag_actions['picked']
         .shortcut()
         .toString(QKeySequence.PortableText)
         == 'P'
     )
     assert (
-        window.flag_actions[None]
+        window
+        .flag_actions[None]
         .shortcut()
         .toString(QKeySequence.PortableText)
         == 'U'

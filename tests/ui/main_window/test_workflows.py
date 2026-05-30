@@ -464,6 +464,14 @@ def test_merge_selected_photos_from_browse_saves_and_undoes(
 def test_merge_selected_scene_strip_subset_shows_notice_without_splitting(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """
+    Reject partial scene-strip merges even with vertical stacks selected.
+
+    Scene-strip selection is exact photo selection inside one existing scene.
+    Selecting only part of that strip would require splitting the current scene
+    before merging, so the action should show the split warning and avoid
+    saving metadata or creating undo history.
+    """
     _, app, window = create_main_window_with_library(
         tmp_path,
         monkeypatch,
@@ -475,6 +483,8 @@ def test_merge_selected_scene_strip_subset_shows_notice_without_splitting(
         ],
         scene_groups=[['IMG_7450', 'IMG_7451', 'IMG_7452'], ['IMG_7453']],
     )
+    _select_list_rows(window.thumbnail_list, [0, 1])
+    app.processEvents()
     _select_list_rows(window.scene_list, [1, 2])
     app.processEvents()
 
@@ -514,6 +524,66 @@ def test_merge_selected_scene_strip_subset_shows_notice_without_splitting(
     assert window._compare_mode is False
     assert window.transient_message_overlay.isHidden() is True
     assert window.exit_compare_shortcut.isEnabled() is False
+
+    window.close()
+    del app
+
+
+def test_merge_full_scene_strip_selection_combines_vertical_stacks(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Merge a full scene-strip selection together with vertical stacks.
+
+    This covers the manual workflow where the user selects other scene rows in
+    the vertical strip, selects every photo in the active horizontal scene, and
+    presses Ctrl+Shift+M. A full strip selection means "include this scene",
+    not "attempt to split this scene", so it must merge with the selected
+    vertical stacks.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7454', 'dimgray'),
+            ('IMG_7455', 'blue'),
+            ('IMG_7456', 'green'),
+            ('IMG_7457', 'white'),
+        ],
+        scene_groups=[
+            ['IMG_7454'],
+            ['IMG_7455', 'IMG_7456'],
+            ['IMG_7457'],
+        ],
+    )
+    _select_list_rows(window.thumbnail_list, [0, 1])
+    second_stack = window.thumbnail_list.item(1)
+    assert second_stack is not None
+    window.thumbnail_list.selectionModel().setCurrentIndex(
+        window.thumbnail_list.indexFromItem(second_stack),
+        QItemSelectionModel.SelectionFlag.NoUpdate,
+    )
+    app.processEvents()
+
+    _select_list_rows(window.scene_list, [0, 1])
+    app.processEvents()
+
+    assert window._scene_merge_selection_source == 'scene'
+    assert window._mergeable_scene_photo_ids() == [
+        'IMG_7454',
+        'IMG_7455',
+        'IMG_7456',
+    ]
+
+    window.merge_scene_action.trigger()
+    app.processEvents()
+
+    assert [scene.photo_ids for scene in window.library.scenes] == [
+        ['IMG_7454', 'IMG_7455', 'IMG_7456'],
+        ['IMG_7457'],
+    ]
+    assert window._metadata_undo_stack
+    assert (tmp_path / METADATA_FILENAME).exists()
 
     window.close()
     del app

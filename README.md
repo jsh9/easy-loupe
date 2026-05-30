@@ -194,6 +194,8 @@ build keeps a terminal attached so startup errors include a normal traceback.
   configured number of selected photos side by side.
 - Supports scene detection that rebuilds the left strip into scene stacks while
   keeping browse mode as a full per-photo grid.
+- Supports manual scene editing with `Ctrl+Shift+M`, including merging whole
+  selected scene stacks with a fully selected horizontal scene strip.
 - Supports multi-selection plus keyboard-based ratings, color labels,
   picked/reject flags, metadata undo/redo, and an `Assign to Photo` menu for
   the current selection.
@@ -285,6 +287,10 @@ Common transitions:
 - Metadata history: `Ctrl+Z` undoes the last metadata assignment batch,
   `Ctrl+Y` redoes it
 - Organizer: `Ctrl+Shift+E` opens the organizer/XMP dialog
+- Scene editing: `Ctrl+Shift+M` merges selected photos into a scene; selecting
+  only part of the horizontal scene strip is treated as an attempted split and
+  is blocked, while selecting the full strip can merge that scene with selected
+  vertical scene stacks
 - Browse, view, and compare mode: `G` enters browse mode, `C` enters compare
   mode, `Esc` exits compare mode or returns from selected-photo compare view to
   the grid, `Space` exits browse mode into fit-to-window view mode, promotes
@@ -295,7 +301,8 @@ Common transitions:
 - Selection: use normal extended-selection gestures in the thumbnail and browse
   lists; after scene detection, `Shift+Left` / `Shift+Right` extends the
   horizontal scene-strip selection and `Shift+Up` / `Shift+Down` extends across
-  scene-stack rows
+  scene-stack rows using an anchored range that releases rows outside the range
+  when you reverse direction
 - Zoom and pan: `\` toggles split view, `-` zooms out, `=` / `+` zoom in,
   `W/A/S/D` pan the active zoomed view or compare pane set, the strip thumbnail
   overlay tracks the current visible region while zoomed, left/right arrows

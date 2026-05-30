@@ -825,7 +825,7 @@ class MainWindowWorkflowMixin:
         if len(photo_ids) < MIN_SCENE_MERGE_PHOTO_COUNT:
             return
 
-        if self._is_scene_strip_subset_merge(photo_ids):
+        if self._is_scene_strip_subset_merge():
             self._show_transient_message(
                 'Cannot split an existing scene group.\n'
                 'Press Ctrl+Z to undo and group again.',
@@ -859,6 +859,14 @@ class MainWindowWorkflowMixin:
         self._refresh_metadata_history_actions()
 
     def _mergeable_scene_photo_ids(self: MainWindow) -> list[str]:
+        """
+        Return the photos that the scene merge action should operate on.
+
+        Scene mode has two live selection surfaces. The vertical thumbnail
+        strip selects whole scene stacks for merge, while the horizontal scene
+        strip selects exact in-scene photos so users can reject partial-scene
+        merges that would otherwise imply a split.
+        """
         if self._compare_mode:
             return []
 
@@ -870,9 +878,7 @@ class MainWindowWorkflowMixin:
             return self._selected_scene_stack_photo_ids()
 
         if selection_source == 'scene':
-            return self._photo_ids_in_library_order(
-                self._selected_photo_ids_from_list(self.scene_list)
-            )
+            return self._mergeable_scene_strip_photo_ids()
 
         focus_widget = QApplication.focusWidget()
         if focus_widget in {
@@ -885,9 +891,7 @@ class MainWindowWorkflowMixin:
             self.scene_list,
             self.scene_list.viewport(),
         }:
-            return self._photo_ids_in_library_order(
-                self._selected_photo_ids_from_list(self.scene_list)
-            )
+            return self._mergeable_scene_strip_photo_ids()
 
         thumbnail_selection_count = len(self.thumbnail_list.selectedItems())
         scene_selection_count = len(self.scene_list.selectedItems())
@@ -896,23 +900,49 @@ class MainWindowWorkflowMixin:
             return self._selected_scene_stack_photo_ids()
 
         if scene_selection_count >= MIN_SCENE_MERGE_PHOTO_COUNT:
-            return self._photo_ids_in_library_order(
-                self._selected_photo_ids_from_list(self.scene_list)
-            )
+            return self._mergeable_scene_strip_photo_ids()
 
         if thumbnail_selection_count > 0:
             return self._selected_scene_stack_photo_ids()
 
         if scene_selection_count > 0:
-            return self._photo_ids_in_library_order(
-                self._selected_photo_ids_from_list(self.scene_list)
-            )
+            return self._mergeable_scene_strip_photo_ids()
 
         return []
 
-    def _is_scene_strip_subset_merge(
-            self: MainWindow, photo_ids: list[str]
-    ) -> bool:
+    def _mergeable_scene_strip_photo_ids(self: MainWindow) -> list[str]:
+        """
+        Resolve merge ids when the horizontal scene strip was active.
+
+        A partial scene-strip selection is handled by
+        ``_is_scene_strip_subset_merge`` and blocked as an attempted split. A
+        full scene-strip selection means "include this whole scene"; in that
+        case we also include any selected vertical stacks so users can merge a
+        complete existing scene with other scene rows.
+        """
+        scene_photo_ids = self._photo_ids_in_library_order(
+            self._selected_photo_ids_from_list(self.scene_list)
+        )
+        current_scene = self._current_scene()
+        if current_scene is None:
+            return scene_photo_ids
+
+        if set(scene_photo_ids) != set(current_scene.photo_ids):
+            return scene_photo_ids
+
+        photo_ids = self._selected_scene_stack_photo_ids()
+        photo_ids.extend(scene_photo_ids)
+        return self._photo_ids_in_library_order(photo_ids)
+
+    def _is_scene_strip_subset_merge(self: MainWindow) -> bool:
+        """
+        Return True when a scene-strip merge would split a scene.
+
+        The check intentionally looks only at the horizontal strip selection.
+        Vertical selections may be present at the same time, but they should
+        not turn a partial in-scene selection into a valid merge because the
+        selected scene would have to be split first.
+        """
         if (
             self._browse_mode
             or not self.library.scene_detection_done
@@ -924,7 +954,7 @@ class MainWindowWorkflowMixin:
         if current_scene is None:
             return False
 
-        selected = set(photo_ids)
+        selected = set(self._selected_photo_ids_from_list(self.scene_list))
         scene_photo_ids = set(current_scene.photo_ids)
         return selected < scene_photo_ids
 
