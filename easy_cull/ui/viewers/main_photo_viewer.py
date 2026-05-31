@@ -28,6 +28,7 @@ class MainPhotoViewer(QWidget):
         self._manual_views: dict[str, tuple[float, tuple[float, float]]] = {}
         self._current_image_path: Path | None = None
         self._current_focus_point = (0.5, 0.5)
+        self._current_focus_point_pending = False
         self._focus_point_marker_enabled = True
         self._mode = 'single-fit'
 
@@ -86,18 +87,21 @@ class MainPhotoViewer(QWidget):
             image_path: Path,
             focus_point: tuple[float, float],
             *,
+            focus_point_pending: bool = False,
             preserve_zoom: bool = False,
             preserved_center: tuple[float, float] | None = None,
     ) -> None:
         """Display a photo in the active single-pane or split-view mode."""
         self._current_image_path = image_path
         self._current_focus_point = focus_point
+        self._current_focus_point_pending = focus_point_pending
         if self.is_split_view():
             self._show_split_photo()
         else:
             self.single_viewer.set_photo(
                 image_path,
                 focus_point,
+                focus_point_pending=focus_point_pending,
                 preserve_zoom=preserve_zoom,
                 preserved_center=preserved_center,
             )
@@ -108,6 +112,7 @@ class MainPhotoViewer(QWidget):
         """Clear both viewer layouts and reset to single fit view."""
         self._current_image_path = None
         self._current_focus_point = (0.5, 0.5)
+        self._current_focus_point_pending = False
         self.single_viewer.clear_photo()
         self.split_fit_viewer.clear_photo()
         self.split_zoom_viewer.clear_photo()
@@ -146,6 +151,21 @@ class MainPhotoViewer(QWidget):
         self.split_fit_viewer.set_focus_point_marker_visible(enabled=enabled)
         self.split_zoom_viewer.set_focus_point_marker_visible(enabled=enabled)
 
+    def set_focus_point(self, focus_point: tuple[float, float]) -> None:
+        """Update the active photo focus point without reloading the image."""
+        self._current_focus_point = focus_point
+        self._current_focus_point_pending = False
+        self.single_viewer.set_focus_point(focus_point)
+        self.split_fit_viewer.set_focus_point(focus_point)
+        self.split_zoom_viewer.set_focus_point(focus_point)
+
+    def set_focus_point_pending(self, *, pending: bool) -> None:
+        """Set whether the current focus point is still loading."""
+        self._current_focus_point_pending = pending
+        self.single_viewer.set_focus_point_pending(pending=pending)
+        self.split_fit_viewer.set_focus_point_pending(pending=pending)
+        self.split_zoom_viewer.set_focus_point_pending(pending=pending)
+
     def set_fit_view(self) -> None:
         """Switch the visible viewer back to single-pane fit mode."""
         if self._current_image_path is None:
@@ -158,6 +178,7 @@ class MainPhotoViewer(QWidget):
         self.single_viewer.set_photo(
             self._current_image_path,
             self._current_focus_point,
+            focus_point_pending=self._current_focus_point_pending,
             preserve_zoom=False,
         )
         self._mode = 'single-fit'
@@ -174,6 +195,7 @@ class MainPhotoViewer(QWidget):
             self.single_viewer.set_photo(
                 self._current_image_path,
                 self._current_focus_point,
+                focus_point_pending=self._current_focus_point_pending,
                 preserve_zoom=False,
             )
             if manual_view is not None:
@@ -198,6 +220,7 @@ class MainPhotoViewer(QWidget):
             self.single_viewer.set_photo(
                 self._current_image_path,
                 self._current_focus_point,
+                focus_point_pending=self._current_focus_point_pending,
                 preserve_zoom=False,
             )
             if manual_view is not None:
@@ -241,11 +264,13 @@ class MainPhotoViewer(QWidget):
         self.split_fit_viewer.set_photo(
             self._current_image_path,
             self._current_focus_point,
+            focus_point_pending=self._current_focus_point_pending,
             preserve_zoom=False,
         )
         self.split_zoom_viewer.set_photo(
             self._current_image_path,
             self._current_focus_point,
+            focus_point_pending=self._current_focus_point_pending,
             preserve_zoom=False,
         )
         self.split_zoom_viewer.restore_or_focus_manual_view()

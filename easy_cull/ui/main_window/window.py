@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from easy_cull.ui.workers import (
         FolderHydrationWorker,
         OperationWorker,
+        PhotoViewerExifWorker,
         SceneDetectionWorker,
         ViewerPrefetchWorker,
     )
@@ -92,6 +93,10 @@ class MainWindow(
         self._scene_worker: SceneDetectionWorker | None = None
         self._folder_hydration_thread: QThread | None = None
         self._folder_hydration_worker: FolderHydrationWorker | None = None
+        self._photo_viewer_exif_thread: QThread | None = None
+        self._photo_viewer_exif_worker: PhotoViewerExifWorker | None = None
+        self._photo_viewer_exif_request_id = 0
+        self._photo_viewer_exif_refresh_pending = False
         self._viewer_prefetch_thread: QThread | None = None
         self._viewer_prefetch_worker: ViewerPrefetchWorker | None = None
         self._operation_thread: QThread | None = None

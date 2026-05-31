@@ -305,6 +305,15 @@ the actual product behavior, not just the widget layout.
 
 Mode summary:
 
+- `Culling mode` is the full EasyCull workspace used for selecting, comparing,
+  assigning metadata, organizing, scene workflows, and browse-grid review. It
+  includes normal view mode, browse mode, compare mode, the thumbnail strips,
+  the top bar, and metadata/scene controls.
+- `Photo viewer mode` is the lightweight startup mode used when a specific file
+  is opened from Finder, Explorer, or argv. It shows only the opened photo
+  fit-to-window at first, supports adjacent-folder navigation, and keeps the
+  normal culling chrome and scene strips hidden until the user presses `G` or
+  `Enter` to enter culling mode.
 - `View mode` is the normal working mode. It shows the left thumbnail strip and
   the main viewer, plus the horizontal scene strip when scene detection is
   available for the current photo.

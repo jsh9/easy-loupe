@@ -120,6 +120,77 @@ def test_viewer_prefetch_worker_cancel_skips_remaining_previews() -> None:
     assert finished_events == ['finished']
 
 
+def test_photo_viewer_exif_worker_emits_current_photo_focus_point(
+        tmp_path: Path, monkeypatch: Any
+) -> None:
+    finished_events: list[tuple[int, str, object]] = []
+    failed_events: list[tuple[int, str]] = []
+    metadata_source = tmp_path / 'A.CR3'
+    preview_source = tmp_path / 'A.JPG'
+    metadata_source.write_bytes(b'raw')
+    preview_source.write_bytes(b'jpeg')
+    monkeypatch.setattr(
+        workers_module.exif_module,
+        'read_exif_metadata',
+        lambda _sources: {
+            'A.CR3': {
+                'ImageWidth': 1000,
+                'ImageHeight': 500,
+                'AFAreaXPosition': 250,
+                'AFAreaYPosition': 300,
+            }
+        },
+    )
+
+    worker = workers_module.PhotoViewerExifWorker(
+        3, 'A', metadata_source, preview_source
+    )
+    worker.finished.connect(
+        lambda request_id, photo_id, focus_point: finished_events.append((
+            request_id,
+            photo_id,
+            focus_point,
+        ))
+    )
+    worker.failed.connect(
+        lambda request_id, error: failed_events.append((request_id, error))
+    )
+    worker.run()
+
+    assert finished_events == [(3, 'A', (0.25, 0.6))]
+    assert failed_events == []
+
+
+def test_photo_viewer_exif_worker_cancel_suppresses_focus_result(
+        tmp_path: Path, monkeypatch: Any
+) -> None:
+    finished_events: list[tuple[int, str, object]] = []
+    metadata_source = tmp_path / 'A.CR3'
+    preview_source = tmp_path / 'A.JPG'
+    metadata_source.write_bytes(b'raw')
+    preview_source.write_bytes(b'jpeg')
+    monkeypatch.setattr(
+        workers_module.exif_module,
+        'read_exif_metadata',
+        lambda _sources: {'A.CR3': {'AFAreaXPosition': 250}},
+    )
+
+    worker = workers_module.PhotoViewerExifWorker(
+        4, 'A', metadata_source, preview_source
+    )
+    worker.finished.connect(
+        lambda request_id, photo_id, focus_point: finished_events.append((
+            request_id,
+            photo_id,
+            focus_point,
+        ))
+    )
+    worker.cancel()
+    worker.run()
+
+    assert finished_events == [(4, 'A', None)]
+
+
 def test_folder_hydration_worker_loads_and_warms_folder(
         tmp_path: Path, monkeypatch: Any
 ) -> None:

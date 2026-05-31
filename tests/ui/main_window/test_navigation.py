@@ -177,11 +177,13 @@ def test_main_window_uses_viewer_preview_for_central_image() -> None:
                 image_path: Path,
                 focus_point: tuple[float, float],
                 *,
+                focus_point_pending: bool,
                 preserve_zoom: bool,
                 preserved_center: tuple[float, float] | None,
         ) -> None:
             self.image_path = image_path
             self.focus_point = focus_point
+            self.focus_point_pending = focus_point_pending
             self.preserve_zoom = preserve_zoom
             self.preserved_center = preserved_center
 
@@ -206,6 +208,7 @@ def test_main_window_uses_viewer_preview_for_central_image() -> None:
     assert fake_window.library.preview_requests == [('IMG_7000', 'viewer')]
     assert fake_window.viewer.image_path == Path('/tmp/fake-preview.jpg')
     assert fake_window.viewer.focus_point == (0.25, 0.75)
+    assert fake_window.viewer.focus_point_pending is False
     assert fake_window.viewer.preserve_zoom is False
     assert fake_window.viewer.preserved_center is None
 
@@ -354,6 +357,121 @@ def test_main_window_photo_viewer_title_prefers_opened_file_extension(
     window.close()
 
 
+def test_main_window_photo_viewer_exif_result_updates_focus_point(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Apply a current-photo EXIF result without blocking first display.
+
+    Photo-viewer startup intentionally shows the image before EXIF is ready, so
+    this verifies the later result updates both the record and the active
+    viewer focus target while the AF marker checkbox remains presentation-only.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green', size=(2000, 1500))
+    stub_read_exif(monkeypatch, {})
+    app = QApplication.instance() or QApplication([])
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    window.resize(1000, 720)
+    window.show()
+    monkeypatch.setattr(
+        window.folder_access_manager,
+        'ensure_access_for_file',
+        lambda _path, _parent: True,
+    )
+    monkeypatch.setattr(
+        window, '_start_photo_viewer_exif_refresh', lambda: None
+    )
+    monkeypatch.setattr(window, '_start_viewer_prefetch', lambda: None)
+    monkeypatch.setattr(
+        window, '_start_folder_hydration', lambda _folder: None
+    )
+
+    window.open_file_from_system(tmp_path / 'A.JPG')
+    app.processEvents()
+
+    photo = window.library.get_photo('A')
+    assert photo.focus_point == (0.5, 0.5)
+    assert photo.focus_point_pending is True
+    assert window.viewer._current_focus_point == (0.5, 0.5)
+    assert window.viewer.single_viewer._focus_point_pending is True
+    assert window.viewer.single_viewer._focus_point_marker.isVisible() is False
+
+    window.space_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.viewer.single_viewer.normalized_viewport_center() == (
+        pytest.approx(0.5),
+        pytest.approx(0.5),
+    )
+    assert window.viewer.single_viewer._focus_point_marker.isVisible() is False
+
+    window.viewer.set_fit_view()
+    window._photo_viewer_exif_request_id = 12
+    window._handle_photo_viewer_exif_finished(12, 'A', (0.4, 0.6))
+    window.space_shortcut.activated.emit()
+    app.processEvents()
+
+    assert photo.focus_point == (0.4, 0.6)
+    assert photo.focus_point_pending is False
+    assert window.viewer._current_focus_point == (0.4, 0.6)
+    assert window.viewer.single_viewer._focus_point_pending is False
+    assert window.viewer.single_viewer._focus_point_marker.isVisible() is True
+    assert window.viewer.single_viewer.normalized_viewport_center() == (
+        pytest.approx(0.4),
+        pytest.approx(0.6),
+    )
+    window.close()
+
+
+def test_main_window_photo_viewer_ignores_stale_exif_result(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Ignore late EXIF results from superseded photo-viewer requests.
+
+    The active photo can change while ExifTool is still running; applying a
+    stale result would move the visible marker or focus zoom to the wrong
+    photo's autofocus point.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    create_jpeg(tmp_path / 'B.JPG', 'blue')
+    stub_read_exif(monkeypatch, {})
+    app = QApplication.instance() or QApplication([])
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    window.show()
+    monkeypatch.setattr(
+        window.folder_access_manager,
+        'ensure_access_for_file',
+        lambda _path, _parent: True,
+    )
+    monkeypatch.setattr(
+        window, '_start_photo_viewer_exif_refresh', lambda: None
+    )
+    monkeypatch.setattr(window, '_start_viewer_prefetch', lambda: None)
+    monkeypatch.setattr(
+        window, '_start_folder_hydration', lambda _folder: None
+    )
+
+    window.open_file_from_system(tmp_path / 'A.JPG')
+    app.processEvents()
+    window.current_photo_id = 'B'
+    window._display_current_photo(force_fit=True)
+    window._photo_viewer_exif_request_id = 2
+
+    window._handle_photo_viewer_exif_finished(1, 'A', (0.2, 0.3))
+
+    assert window.library.get_photo('A').focus_point == (0.5, 0.5)
+    assert window.library.get_photo('A').focus_point_pending is True
+    assert window.library.get_photo('B').focus_point == (0.5, 0.5)
+    assert window.library.get_photo('B').focus_point_pending is True
+    assert window.viewer._current_focus_point == (0.5, 0.5)
+    assert window.viewer.single_viewer._focus_point_pending is True
+    assert window.viewer.single_viewer._focus_point_marker.isVisible() is False
+    window.close()
+
+
 def test_main_window_photo_viewer_minimap_tracks_manual_zoom(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -499,6 +617,66 @@ def test_main_window_canceled_photo_viewer_access_opens_single_photo_only(
 
     window._handle_browse_mode_shortcut()
     assert window._browse_mode is False
+    window.close()
+
+
+def test_main_window_photo_viewer_hydration_keeps_scene_strip_hidden(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Keep culling chrome hidden when background hydration loads scenes.
+
+    Existing ``easy-cull.json`` scene groups can arrive after photo-viewer
+    startup; they should be ready for culling mode without revealing the
+    horizontal scene strip before the user presses ``G`` or ``Enter``.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    create_jpeg(tmp_path / 'B.JPG', 'blue')
+    stub_read_exif(monkeypatch, {})
+    hydrated_library = PhotoLibrary(cache_dir=tmp_path / '.hydrated-cache')
+    hydrated_library.load_folder(tmp_path)
+    hydrated_library.set_scene_group_photo_ids(
+        [['A', 'B']], scene_source='manual'
+    )
+    app = QApplication.instance() or QApplication([])
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    window.show()
+    monkeypatch.setattr(
+        window.folder_access_manager,
+        'ensure_access_for_file',
+        lambda _path, _parent: True,
+    )
+    monkeypatch.setattr(
+        window, '_start_photo_viewer_exif_refresh', lambda: None
+    )
+    monkeypatch.setattr(window, '_start_viewer_prefetch', lambda: None)
+    monkeypatch.setattr(
+        window, '_start_folder_hydration', lambda _folder: None
+    )
+
+    window.open_file_from_system(tmp_path / 'A.JPG')
+    app.processEvents()
+    window._handle_folder_hydration_finished(hydrated_library)
+    app.processEvents()
+
+    assert window._photo_viewer_mode is True
+    assert window.top_bar_widget.isHidden() is True
+    assert window.thumbnail_list.isHidden() is True
+    assert window.browse_list.isHidden() is True
+    assert window.scene_list.isHidden() is True
+    assert window.library.scene_detection_done is True
+    assert window.library.get_photo('A').focus_point_pending is False
+    assert window.viewer.single_viewer._focus_point_pending is False
+    assert window.viewer.single_viewer._focus_point_marker.isVisible() is True
+
+    window._handle_browse_mode_shortcut()
+    app.processEvents()
+
+    assert window._photo_viewer_mode is False
+    assert window._browse_mode is True
+    assert window.browse_list.isVisible() is True
+    assert window.browse_list.currentRow() == window._browse_photo_rows['A']
     window.close()
 
 
@@ -725,11 +903,25 @@ def test_main_window_stops_photo_viewer_background_threads() -> None:
     window._viewer_prefetch_thread = Thread()
     window._folder_hydration_worker = Worker()
     window._folder_hydration_thread = Thread()
+    window._photo_viewer_exif_worker = Worker()
+    window._photo_viewer_exif_thread = Thread()
     window._pending_browse_after_hydration = True
 
     window._stop_photo_viewer_background_tasks()
 
-    assert calls == ['cancel', 'quit', 'wait', 'cancel', 'quit', 'wait']
+    assert calls == [
+        'cancel',
+        'quit',
+        'wait',
+        'cancel',
+        'quit',
+        'wait',
+        'cancel',
+        'quit',
+        'wait',
+    ]
+    assert window._photo_viewer_exif_worker is None
+    assert window._photo_viewer_exif_thread is None
     assert window._viewer_prefetch_worker is None
     assert window._viewer_prefetch_thread is None
     assert window._folder_hydration_worker is None

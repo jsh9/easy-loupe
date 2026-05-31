@@ -145,6 +145,7 @@ def test_load_viewer_folder_uses_filename_order_and_can_open_single_file(
     library.load_viewer_folder(tmp_path / 'B.JPG')
 
     assert [photo.photo_id for photo in library.photos] == ['A', 'B', 'C']
+    assert all(photo.focus_point_pending for photo in library.photos)
 
     single_library = PhotoLibrary(cache_dir=tmp_path / '.single-cache')
     single_library.load_viewer_folder(
@@ -152,6 +153,7 @@ def test_load_viewer_folder_uses_filename_order_and_can_open_single_file(
     )
 
     assert [photo.photo_id for photo in single_library.photos] == ['B']
+    assert single_library.get_photo('B').focus_point_pending is True
 
 
 def test_load_folder_rejects_missing_directory(tmp_path: Path) -> None:

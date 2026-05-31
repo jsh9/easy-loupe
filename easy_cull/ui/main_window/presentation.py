@@ -359,7 +359,9 @@ class MainWindowPresentationMixin:
 
         self.scene_list.blockSignals(False)
         self.scene_list.setVisible(
-            not self._browse_mode and not self._compare_mode
+            not self._photo_viewer_mode
+            and not self._browse_mode
+            and not self._compare_mode
         )
 
     def _toggle_theme_checked(

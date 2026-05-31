@@ -77,6 +77,7 @@ class PhotoRecord:
     preview_source: Path
     metadata_source: Path
     focus_point: tuple[float, float]
+    focus_point_pending: bool = False
     capture_at: datetime | None = None
     rating: int | None = None
     color_label: str | None = None

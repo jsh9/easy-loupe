@@ -399,6 +399,7 @@ class MainWindowNavigationMixin:
         self.viewer.set_photo(
             image_path,
             photo.focus_point,
+            focus_point_pending=getattr(photo, 'focus_point_pending', False),
             preserve_zoom=preserve_zoom,
             preserved_center=preserved_center,
         )
@@ -429,6 +430,7 @@ class MainWindowNavigationMixin:
         self._display_current_photo(force_fit=True)
         self._refresh_selection_labels()
         self._refresh_ui()
+        self._start_photo_viewer_exif_refresh()
         self._start_viewer_prefetch()
 
     def _set_browse_mode(self: MainWindow, *, active: bool) -> None:

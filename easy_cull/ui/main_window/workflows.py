@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from PySide6.QtCore import QPoint, QThread
 from PySide6.QtWidgets import (
@@ -40,6 +40,7 @@ from easy_cull.ui.theme import (
 from easy_cull.ui.workers import (
     FolderHydrationWorker,
     OperationWorker,
+    PhotoViewerExifWorker,
     SceneDetectionWorker,
     ViewerPrefetchWorker,
 )
@@ -49,6 +50,7 @@ if TYPE_CHECKING:
     from easy_cull.ui.main_window.window import MainWindow
 
 ProgressCallback = Callable[[str, int], None]
+FOCUS_POINT_COORDINATE_COUNT = 2
 
 
 @dataclass(frozen=True)
@@ -161,6 +163,7 @@ class MainWindowWorkflowMixin:
         self._set_photo_viewer_mode(active=True)
         self._display_current_photo(force_fit=True)
         self._refresh_ui()
+        self._start_photo_viewer_exif_refresh()
         self._start_viewer_prefetch()
         if folder_access_granted and self.library.current_folder is not None:
             self._start_folder_hydration(self.library.current_folder)
@@ -255,6 +258,127 @@ class MainWindowWorkflowMixin:
 
         return None
 
+    def _start_photo_viewer_exif_refresh(self: MainWindow) -> None:
+        if (
+            not self._photo_viewer_mode
+            or self.current_photo_id is None
+            or not self.library.photos
+        ):
+            return
+
+        if self._photo_viewer_exif_thread is not None:
+            self._photo_viewer_exif_request_id += 1
+            self._photo_viewer_exif_refresh_pending = True
+            if self._photo_viewer_exif_worker is not None:
+                self._photo_viewer_exif_worker.cancel()
+
+            self._photo_viewer_exif_thread.quit()
+            return
+
+        try:
+            photo = self.library.get_photo(self.current_photo_id)
+        except KeyError:
+            return
+
+        self._photo_viewer_exif_request_id += 1
+        request_id = self._photo_viewer_exif_request_id
+        self._photo_viewer_exif_thread = QThread(self)
+        self._photo_viewer_exif_worker = PhotoViewerExifWorker(
+            request_id,
+            photo.photo_id,
+            photo.metadata_source,
+            photo.preview_source,
+        )
+        self._photo_viewer_exif_worker.moveToThread(
+            self._photo_viewer_exif_thread
+        )
+        self._photo_viewer_exif_thread.started.connect(
+            self._photo_viewer_exif_worker.run
+        )
+        self._photo_viewer_exif_worker.finished.connect(
+            self._handle_photo_viewer_exif_finished
+        )
+        self._photo_viewer_exif_worker.failed.connect(
+            self._handle_photo_viewer_exif_failed
+        )
+        self._photo_viewer_exif_worker.finished.connect(
+            self._photo_viewer_exif_thread.quit
+        )
+        self._photo_viewer_exif_worker.failed.connect(
+            self._photo_viewer_exif_thread.quit
+        )
+        self._photo_viewer_exif_worker.finished.connect(
+            self._photo_viewer_exif_worker.deleteLater
+        )
+        self._photo_viewer_exif_worker.failed.connect(
+            self._photo_viewer_exif_worker.deleteLater
+        )
+        self._photo_viewer_exif_thread.finished.connect(
+            self._photo_viewer_exif_thread.deleteLater
+        )
+        finished_thread = self._photo_viewer_exif_thread
+        finished_worker = self._photo_viewer_exif_worker
+        self._photo_viewer_exif_thread.finished.connect(
+            lambda: self._clear_photo_viewer_exif_worker(
+                finished_thread, finished_worker
+            )
+        )
+        self._photo_viewer_exif_thread.start()
+
+    def _handle_photo_viewer_exif_finished(
+            self: MainWindow,
+            request_id: int,
+            photo_id: str,
+            focus_point: object,
+    ) -> None:
+        if (
+            self._closing
+            or not self._photo_viewer_mode
+            or request_id != self._photo_viewer_exif_request_id
+            or focus_point is None
+        ):
+            return
+
+        if (
+            not isinstance(focus_point, tuple)
+            or len(focus_point) != FOCUS_POINT_COORDINATE_COUNT
+        ):
+            return
+
+        try:
+            photo = self.library.get_photo(photo_id)
+        except KeyError:
+            return
+
+        point = cast('tuple[float, float]', focus_point)
+        photo.focus_point = (float(point[0]), float(point[1]))
+        photo.focus_point_pending = False
+        if self.current_photo_id == photo_id:
+            self.viewer.set_focus_point(photo.focus_point)
+
+    def _handle_photo_viewer_exif_failed(
+            self: MainWindow, request_id: int, _error: str
+    ) -> None:
+        if request_id == self._photo_viewer_exif_request_id:
+            self._photo_viewer_exif_request_id += 1
+
+    def _clear_photo_viewer_exif_worker(
+            self: MainWindow, finished_thread: object, finished_worker: object
+    ) -> None:
+        if self._closing:
+            return
+
+        if (
+            self._photo_viewer_exif_thread is finished_thread
+            and self._photo_viewer_exif_worker is finished_worker
+        ):
+            self._photo_viewer_exif_thread = None
+            self._photo_viewer_exif_worker = None
+
+        if self._photo_viewer_exif_refresh_pending:
+            self._photo_viewer_exif_refresh_pending = False
+            self._start_photo_viewer_exif_refresh()
+
     def _start_viewer_prefetch(self: MainWindow) -> None:
         if (
             self._viewer_prefetch_thread is not None
@@ -310,6 +434,12 @@ class MainWindowWorkflowMixin:
     def _stop_photo_viewer_background_tasks(self: MainWindow) -> None:
         """Cancel and wait for photo-viewer background work to finish."""
         self._pending_browse_after_hydration = False
+        self._photo_viewer_exif_refresh_pending = False
+        self._photo_viewer_exif_request_id += 1
+        self._stop_background_thread(
+            thread_attr='_photo_viewer_exif_thread',
+            worker_attr='_photo_viewer_exif_worker',
+        )
         self._stop_background_thread(
             thread_attr='_viewer_prefetch_thread',
             worker_attr='_viewer_prefetch_worker',

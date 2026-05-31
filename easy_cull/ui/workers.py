@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Signal
 
+import easy_cull.core.exif as exif_module
 from easy_cull.core.photo_library import PhotoLibrary
 
 if TYPE_CHECKING:
@@ -95,6 +96,66 @@ class ViewerPrefetchWorker(QObject):
             return
 
         self.finished.emit()
+
+
+class PhotoViewerExifWorker(QObject):
+    """Read focus metadata for the active photo-viewer photo."""
+
+    finished = Signal(int, str, object)
+    failed = Signal(int, str)
+
+    def __init__(
+            self,
+            request_id: int,
+            photo_id: str,
+            metadata_source: Path,
+            preview_source: Path,
+    ) -> None:
+        super().__init__()
+        self._request_id = request_id
+        self._photo_id = photo_id
+        self._metadata_source = metadata_source
+        self._preview_source = preview_source
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        """Request that a completed read does not update the UI."""
+        self._cancelled = True
+
+    def run(self) -> None:
+        """Read one photo's EXIF and emit its normalized focus point."""
+        try:
+            sources = list(
+                dict.fromkeys([
+                    self._metadata_source,
+                    self._preview_source,
+                ])
+            )
+            exif_map = exif_module.read_exif_metadata(sources)
+            if self._cancelled:
+                self.finished.emit(self._request_id, self._photo_id, None)
+                return
+
+            metadata = (
+                exif_map.get(self._metadata_source.name)
+                or exif_map.get(self._preview_source.name)
+                or {}
+            )
+            image_width, image_height = exif_module.resolve_image_size(
+                metadata
+            )
+            focus_point = exif_module.extract_focus_point(
+                metadata, image_width, image_height
+            )
+        except Exception as exc:  # noqa: BLE001  # pragma: no cover - thread safety path
+            self.failed.emit(self._request_id, str(exc))
+            return
+
+        if self._cancelled:
+            self.finished.emit(self._request_id, self._photo_id, None)
+            return
+
+        self.finished.emit(self._request_id, self._photo_id, focus_point)
 
 
 class FolderHydrationWorker(QObject):

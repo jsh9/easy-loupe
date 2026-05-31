@@ -164,7 +164,12 @@ def load_viewer_folder_state(
         metadata_entries or {}
     )
     records = [
-        _build_photo_record(grouped_files, {}, normalized_metadata)
+        _build_photo_record(
+            grouped_files,
+            {},
+            normalized_metadata,
+            focus_point_pending=True,
+        )
         for _, grouped_files in sorted(
             groups.items(), key=operator.itemgetter(0)
         )
@@ -189,6 +194,8 @@ def _build_photo_record(
         grouped_files: list[Path],
         exif_map: dict[str, dict[str, Any]],
         normalized_metadata: dict[str, dict[str, Any]],
+        *,
+        focus_point_pending: bool = False,
 ) -> PhotoRecord:
     sorted_group_files = sorted(
         grouped_files, key=lambda path: path.name.lower()
@@ -241,6 +248,7 @@ def _build_photo_record(
         preview_source=preview_source,
         metadata_source=metadata_source,
         focus_point=focus_point,
+        focus_point_pending=focus_point_pending,
         capture_at=capture_at,
         rating=rating
         if isinstance(rating, int) and MIN_RATING <= rating <= MAX_RATING

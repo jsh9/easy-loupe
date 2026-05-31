@@ -103,6 +103,7 @@ class PhotoViewer(QGraphicsView):
         self._manual_views = {} if manual_views is None else manual_views
         self._mode = 'fit'
         self._focus_point_marker_enabled = False
+        self._focus_point_pending = False
         self._hold_zoom_enabled = hold_zoom_enabled
         self._hold_zoom_active = False
         self._actual_size_zoom_active = False
@@ -116,6 +117,7 @@ class PhotoViewer(QGraphicsView):
             image_path: Path,
             focus_point: tuple[float, float],
             *,
+            focus_point_pending: bool = False,
             preserve_zoom: bool = False,
             preserved_center: tuple[float, float] | None = None,
     ) -> None:
@@ -129,6 +131,7 @@ class PhotoViewer(QGraphicsView):
         self._scene.setSceneRect(pixmap.rect())
         self._image_size = pixmap.size()
         self._focus_point = QPointF(focus_point[0], focus_point[1])
+        self._focus_point_pending = focus_point_pending
         self._position_focus_point_marker()
         if preserve_zoom and not self._image_size.isEmpty():
             self._fit_scale = self._compute_fit_scale()
@@ -163,6 +166,7 @@ class PhotoViewer(QGraphicsView):
         self._center_point = QPointF(0.0, 0.0)
         self._current_image_key = None
         self._mode = 'fit'
+        self._focus_point_pending = False
         self._hold_zoom_active = False
         self._actual_size_zoom_active = False
         self.resetTransform()
@@ -185,6 +189,21 @@ class PhotoViewer(QGraphicsView):
     def set_focus_point_marker_visible(self, *, enabled: bool) -> None:
         """Set whether loaded photos show the current focus point marker."""
         self._focus_point_marker_enabled = enabled
+        self._update_focus_point_marker()
+
+    def set_focus_point(self, focus_point: tuple[float, float]) -> None:
+        """Update the active focus point without changing the view."""
+        was_pending = self._focus_point_pending
+        self._focus_point = QPointF(focus_point[0], focus_point[1])
+        self._focus_point_pending = False
+        if was_pending and self._current_image_key is not None:
+            self._manual_views.pop(self._current_image_key, None)
+
+        self._update_focus_point_marker()
+
+    def set_focus_point_pending(self, *, pending: bool) -> None:
+        """Set whether the current focus point is still loading."""
+        self._focus_point_pending = pending
         self._update_focus_point_marker()
 
     def normalized_viewport_center(self) -> tuple[float, float] | None:
@@ -651,7 +670,9 @@ class PhotoViewer(QGraphicsView):
     def _update_focus_point_marker(self) -> None:
         self._position_focus_point_marker()
         self._focus_point_marker.setVisible(
-            self._focus_point_marker_enabled and not self._image_size.isEmpty()
+            self._focus_point_marker_enabled
+            and not self._focus_point_pending
+            and not self._image_size.isEmpty()
         )
 
     def _max_scale(self) -> float:

@@ -129,6 +129,52 @@ def test_photo_viewer_focus_point_marker_tracks_loaded_photo(
     viewer.close()
 
 
+def test_photo_viewer_hides_focus_marker_while_focus_point_pending(
+        tmp_path: Path,
+) -> None:
+    create_jpeg(tmp_path / 'IMG_7014.JPG', 'white')
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(320, 240)
+    viewer.show()
+    app.processEvents()
+
+    marker = viewer._focus_point_marker
+    viewer.set_focus_point_marker_visible(enabled=True)
+    viewer.set_photo(
+        tmp_path / 'IMG_7014.JPG',
+        (0.5, 0.5),
+        focus_point_pending=True,
+    )
+
+    assert marker.isVisible() is False
+
+    viewer.toggle_focus_zoom()
+
+    assert viewer.normalized_viewport_center() == (
+        pytest.approx(0.5),
+        pytest.approx(0.5),
+    )
+    assert marker.isVisible() is False
+
+    viewer.set_focus_point((0.25, 0.75))
+
+    assert marker.isVisible() is True
+    assert marker.pos().x() == pytest.approx(160)
+    assert marker.pos().y() == pytest.approx(360)
+
+    viewer.set_fit_view()
+    viewer.toggle_focus_zoom()
+
+    assert viewer.normalized_viewport_center() == (
+        pytest.approx(0.25),
+        pytest.approx(0.75),
+    )
+
+    viewer.close()
+
+
 def test_photo_viewer_focus_point_marker_can_be_disabled_and_stays_screen_sized(
         tmp_path: Path,
 ) -> None:
