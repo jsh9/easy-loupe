@@ -65,8 +65,9 @@ PHOTO_VIEWER_MINIMAP_MARGIN = 14
 INFO_OVERLAY_MARGIN = 14
 FOLDER_ACCESS_RECOVERY_MESSAGE = (
     'Browsing photos in this folder and adjacent-photo navigation need folder'
-    ' access. Grant EasyCull access in System Settings -> Privacy & Security'
-    ' -> Files & Folders.'
+    ' access. EasyCull remembers denied access for this folder tree; grant'
+    ' access in System Settings -> Privacy & Security -> Files & Folders or'
+    ' equivalent folder permissions.'
 )
 FOLDER_ACCESS_RECOVERY_TIMEOUT_MS = TRANSIENT_MESSAGE_TIMEOUT_MS * 5
 PHOTO_VIEWER_OVERLAY_BACKGROUND = '#d8dde2'
@@ -1171,9 +1172,17 @@ class PhotoViewerWindow(QMainWindow):
             return
 
         if self._minimap_photo_id != self.current_photo_id:
-            thumb_path = self.library.get_preview_path(
-                self.current_photo_id, 'thumb'
-            )
+            try:
+                thumb_path = self.library.get_preview_path(
+                    self.current_photo_id, 'thumb'
+                )
+            except (OSError, RuntimeError, ValueError):
+                # Visible-region updates are secondary to inspection. If the
+                # thumbnail cannot render, hide only the minimap and keep the
+                # already displayed viewer image stable.
+                self._hide_minimap()
+                return
+
             self.minimap.set_pixmap(QPixmap(str(thumb_path)))
             self._minimap_photo_id = self.current_photo_id
 

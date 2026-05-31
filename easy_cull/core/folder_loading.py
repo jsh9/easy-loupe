@@ -228,7 +228,16 @@ def _build_photo_record(
         if path.suffix.lower() in RAW_EXTENSIONS
     ]
 
-    preview_source = raster_files[0] if raster_files else raw_files[0]
+    # Preserve alphabetical file listing, but choose previews by format
+    # priority. JPEG is the safest raster source; HEIF is still preferred over
+    # RAW because it avoids the slower RAW render path.
+    if jpeg_files:
+        preview_source = jpeg_files[0]
+    elif heif_files:
+        preview_source = heif_files[0]
+    else:
+        preview_source = raw_files[0]
+
     metadata_source = raw_files[0] if raw_files else preview_source
     shared_stem = preview_source.stem
 

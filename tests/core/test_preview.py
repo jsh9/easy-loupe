@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import gc
 import os
+import weakref
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Never, Self
 
@@ -24,6 +26,26 @@ if TYPE_CHECKING:
 
 def test_preview_module_exports_get_preview_path() -> None:
     assert hasattr(core_preview_module, 'get_preview_path')
+
+
+def test_preview_locks_are_released_after_render_scope() -> None:
+    """
+    Verify per-preview locks do not stay strongly retained forever.
+
+    Long viewer sessions can touch many cache keys, so the lock registry should
+    keep only locks that are still in active use.
+    """
+    cache_key = 'test-preview-lock-release'
+    lock = core_preview_module._preview_lock(cache_key)
+    lock_ref = weakref.ref(lock)
+
+    assert core_preview_module._PREVIEW_LOCKS[cache_key] is lock
+
+    del lock
+    gc.collect()
+
+    assert lock_ref() is None
+    assert cache_key not in core_preview_module._PREVIEW_LOCKS
 
 
 @pytest.mark.parametrize(

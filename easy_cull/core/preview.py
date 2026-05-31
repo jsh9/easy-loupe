@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import tempfile
 import threading
+import weakref
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
@@ -33,7 +34,12 @@ else:
 
 
 _PREVIEW_LOCKS_GUARD = threading.Lock()
-_PREVIEW_LOCKS: dict[str, threading.Lock] = {}
+# Keep one lock per cache key only while a render is in flight. The guard
+# protects registry mutation; the weak values prevent long sessions from
+# retaining locks for every preview key ever visited.
+_PREVIEW_LOCKS: weakref.WeakValueDictionary[str, threading.Lock] = (
+    weakref.WeakValueDictionary()
+)
 
 
 def _preview_lock(cache_key: str) -> threading.Lock:

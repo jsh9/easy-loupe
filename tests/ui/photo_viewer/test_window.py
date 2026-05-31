@@ -145,6 +145,41 @@ def test_photo_viewer_navigation_preview_failure_preserves_current_photo(
     window.close()
 
 
+def test_photo_viewer_minimap_thumb_failure_hides_minimap(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify thumbnail failure during minimap refresh stays non-fatal.
+
+    Manual zoom emits visible-region updates after the main preview is already
+    displayed; a bad thumbnail should hide only the minimap, not disrupt the
+    active viewer state.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green', size=(2400, 1600))
+    app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+    window.resize(1200, 800)
+    app.processEvents()
+    window.space_shortcut.activated.emit()
+    app.processEvents()
+    original_get_preview_path = window.library.get_preview_path
+
+    def get_preview_path(photo_id: str, kind: str) -> Path:
+        if kind == 'thumb':
+            raise RuntimeError('corrupt thumb')
+
+        return original_get_preview_path(photo_id, kind)
+
+    monkeypatch.setattr(window.library, 'get_preview_path', get_preview_path)
+    window._minimap_photo_id = None
+
+    window._refresh_visible_region_overlay()
+
+    assert window.current_photo_id == 'A'
+    assert window.minimap.isHidden() is True
+    window.close()
+
+
 def test_photo_viewer_startup_preview_failure_closes_viewer(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -618,7 +653,8 @@ def test_photo_viewer_denied_access_blocks_navigation_and_handoff(
 
     Navigation and culling handoff require a full folder scan, so both paths
     must stop with the recovery message. Initial single-photo viewing should
-    stay quiet and usable because it does not require folder access.
+    stay quiet and usable because it does not require folder access. The
+    message should also explain that remembered denials need manual recovery.
     """
     create_jpeg(tmp_path / 'A.JPG', 'green')
     create_jpeg(tmp_path / 'B.JPG', 'blue')
@@ -651,6 +687,8 @@ def test_photo_viewer_denied_access_blocks_navigation_and_handoff(
     assert requests == []
     assert len(messages) == 2
     assert 'Browsing photos in this folder' in messages[0][0]
+    assert 'remembers denied access' in messages[0][0]
+    assert 'equivalent folder permissions' in messages[0][0]
     assert (
         messages[0][1]
         == photo_viewer_window_module.FOLDER_ACCESS_RECOVERY_TIMEOUT_MS

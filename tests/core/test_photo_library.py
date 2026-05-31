@@ -137,6 +137,41 @@ def test_load_folder_prefers_heic_preview_over_raw_with_shared_stem(
     assert photo.exif_display == {'File Size': 'HEIF: 1 KB, RAW: 1 KB'}
 
 
+def test_load_folder_prefers_jpeg_preview_over_heif_with_shared_stem(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify JPEG wins when a shared-stem group has multiple raster sources.
+
+    HEIF still contributes source flags and EXIF display data, but JPEG is the
+    safer preview source when both raster formats are available.
+    """
+    create_jpeg(tmp_path / 'IMG_0101.JPG', 'blue')
+    (tmp_path / 'IMG_0101.HEIC').write_bytes(b'heic')
+    (tmp_path / 'IMG_0101.ARW').write_bytes(b'raw')
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+
+    assert [photo.photo_id for photo in library.photos] == ['IMG_0101']
+    photo = library.photos[0]
+    assert photo.files == [
+        'IMG_0101.ARW',
+        'IMG_0101.HEIC',
+        'IMG_0101.JPG',
+    ]
+    assert photo.preview_source == tmp_path / 'IMG_0101.JPG'
+    assert photo.metadata_source == tmp_path / 'IMG_0101.ARW'
+    assert photo.has_jpeg is True
+    assert photo.has_heif is True
+    assert photo.has_raster is True
+    assert photo.has_raw is True
+    assert photo.exif_display == {
+        'File Size': 'JPG: 5 KB, HEIF: 1 KB, RAW: 1 KB'
+    }
+
+
 def test_load_viewer_folder_uses_filename_order_and_can_open_single_file(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
