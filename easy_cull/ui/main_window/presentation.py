@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QSize
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QListWidget, QListWidgetItem
 
 from easy_cull.ui.identity import APP_NAME
@@ -763,6 +764,13 @@ class MainWindowPresentationMixin:
             if self._browse_mode or self._compare_mode
             else self.viewer.visible_region_rect()
         )
+        if self._photo_viewer_mode:
+            self._refresh_photo_viewer_minimap(visible_region)
+            self._thumbnail_overlay_photo_id = None
+            self._scene_overlay_photo_id = None
+            return
+
+        self._hide_photo_viewer_minimap()
         thumb_photo_id = (
             None
             if (
@@ -823,6 +831,49 @@ class MainWindowPresentationMixin:
 
         self._thumbnail_overlay_photo_id = thumb_photo_id
         self._scene_overlay_photo_id = scene_photo_id
+
+    def _refresh_photo_viewer_minimap(
+            self: MainWindow,
+            visible_region: tuple[float, float, float, float] | None,
+    ) -> None:
+        """
+        Update the floating photo-viewer minimap from the active viewer.
+
+        The minimap is separate from the normal strip overlays because
+        photo-viewer mode hides those strips.  It still uses the same thumbnail
+        widget so the red box and mask stay visually identical.
+        """
+        if (
+            not hasattr(self, 'photo_viewer_minimap')
+            or visible_region is None
+            or self.current_photo_id is None
+            or not self.library.photos
+        ):
+            self._hide_photo_viewer_minimap()
+            return
+
+        if self._photo_viewer_minimap_photo_id != self.current_photo_id:
+            thumb_path = self.library.get_preview_path(
+                self.current_photo_id, 'thumb'
+            )
+            self.photo_viewer_minimap.set_pixmap(QPixmap(str(thumb_path)))
+            self._photo_viewer_minimap_photo_id = self.current_photo_id
+
+        self.photo_viewer_minimap.set_visible_region_overlay(visible_region)
+        if not self._update_photo_viewer_minimap_geometry():
+            return
+
+        self.photo_viewer_minimap.show()
+        self.photo_viewer_minimap.raise_()
+
+    def _hide_photo_viewer_minimap(self: MainWindow) -> None:
+        if not hasattr(self, 'photo_viewer_minimap'):
+            return
+
+        self.photo_viewer_minimap.set_visible_region_overlay(None)
+        self.photo_viewer_minimap.set_pixmap(QPixmap())
+        self.photo_viewer_minimap.hide()
+        self._photo_viewer_minimap_photo_id = None
 
     @staticmethod
     def _apply_visible_region_overlay(

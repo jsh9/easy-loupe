@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QEvent, QSettings, Qt, QTimer
+from PySide6.QtCore import QEvent, QSettings, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -46,7 +46,11 @@ from easy_cull.ui.viewers.compare_photo_viewer import (
 )
 from easy_cull.ui.viewers.exif_overlay import ExifOverlayWidget
 from easy_cull.ui.viewers.main_photo_viewer import MainPhotoViewer
-from easy_cull.ui.widgets import SceneListWidget, ThumbnailListWidget
+from easy_cull.ui.widgets import (
+    SceneListWidget,
+    ThumbnailListWidget,
+    ThumbnailPreviewWidget,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -64,6 +68,9 @@ TRANSIENT_MESSAGE_FONT_SIZE_PX = 28
 TRANSIENT_MESSAGE_FONT_WEIGHT = 600
 TRANSIENT_MESSAGE_TIMEOUT_MS = 1600
 INITIAL_FOLDER_PROMPT_GRACE_MS = 250
+PHOTO_VIEWER_MINIMAP_WIDTH = 180
+PHOTO_VIEWER_MINIMAP_HEIGHT = 120
+PHOTO_VIEWER_MINIMAP_MARGIN = 14
 
 
 class MainWindowBuildMixin:
@@ -287,6 +294,12 @@ class MainWindowBuildMixin:
         self.viewer_stack.addWidget(self.viewer)
         self.viewer_stack.addWidget(self.compare_viewer)
         content_splitter.addWidget(self.viewer_stack_widget)
+        self.photo_viewer_minimap = ThumbnailPreviewWidget(
+            QSize(PHOTO_VIEWER_MINIMAP_WIDTH, PHOTO_VIEWER_MINIMAP_HEIGHT),
+            self.viewer_stack_widget,
+        )
+        self.photo_viewer_minimap.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.photo_viewer_minimap.hide()
         self.exif_overlay = ExifOverlayWidget(self.viewer_stack_widget)
         self.exif_overlay.hide()
         self.viewer_stack_widget.installEventFilter(self)
@@ -1057,6 +1070,29 @@ class MainWindowBuildMixin:
         x = max(margin, parent_rect.width() - width - margin)
         self.exif_overlay.setGeometry(x, margin, width, height)
 
+    def _update_photo_viewer_minimap_geometry(self: MainWindow) -> bool:
+        """Anchor the photo-viewer minimap at the lower left."""
+        if not hasattr(self, 'photo_viewer_minimap'):
+            return False
+
+        margin = PHOTO_VIEWER_MINIMAP_MARGIN
+        parent_rect = self.viewer_stack_widget.rect()
+        width = PHOTO_VIEWER_MINIMAP_WIDTH
+        height = PHOTO_VIEWER_MINIMAP_HEIGHT
+        if parent_rect.width() < width + (margin * 2) or (
+            parent_rect.height() < height + (margin * 2)
+        ):
+            self.photo_viewer_minimap.hide()
+            return False
+
+        self.photo_viewer_minimap.setGeometry(
+            margin,
+            parent_rect.height() - height - margin,
+            width,
+            height,
+        )
+        return True
+
     def _create_assignment_action(
             self: MainWindow,
             menu: QMenu,
@@ -1118,6 +1154,9 @@ class MainWindowBuildMixin:
 
         if hasattr(self, 'exif_overlay'):
             self._update_info_overlay_geometry()
+
+        if hasattr(self, 'photo_viewer_minimap'):
+            self._update_photo_viewer_minimap_geometry()
 
         if (
             getattr(self, '_browse_mode', False)
@@ -1196,5 +1235,6 @@ class MainWindowBuildMixin:
             and event.type() == QEvent.Resize
         ):
             self._update_info_overlay_geometry()
+            self._update_photo_viewer_minimap_geometry()
 
         return super().eventFilter(watched, event)

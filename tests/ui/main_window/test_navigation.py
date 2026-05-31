@@ -354,6 +354,78 @@ def test_main_window_photo_viewer_title_prefers_opened_file_extension(
     window.close()
 
 
+def test_main_window_photo_viewer_minimap_tracks_manual_zoom(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Show a floating minimap only while photo-viewer mode is zoomed.
+
+    Photo-viewer mode hides the normal thumbnail strip, so this regression test
+    verifies the replacement overlay tracks zoom/pan state and clears when the
+    viewer returns to fit or leaves photo-viewer mode.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green', size=(2000, 1500))
+    stub_read_exif(monkeypatch, {})
+    app = QApplication.instance() or QApplication([])
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    window.resize(1000, 720)
+    window.show()
+    monkeypatch.setattr(
+        window.folder_access_manager,
+        'ensure_access_for_file',
+        lambda _path, _parent: True,
+    )
+    monkeypatch.setattr(window, '_start_viewer_prefetch', lambda: None)
+    monkeypatch.setattr(
+        window, '_start_folder_hydration', lambda _folder: None
+    )
+
+    window.open_file_from_system(tmp_path / 'A.JPG')
+    app.processEvents()
+
+    assert window._photo_viewer_mode is True
+    assert window.photo_viewer_minimap.isHidden() is True
+    assert window.photo_viewer_minimap.visible_region_overlay() is None
+
+    window.space_shortcut.activated.emit()
+    app.processEvents()
+
+    zoom_overlay = window.photo_viewer_minimap.visible_region_overlay()
+
+    assert window.photo_viewer_minimap.isVisible() is True
+    assert zoom_overlay is not None
+    assert zoom_overlay == pytest.approx(window.viewer.visible_region_rect())
+
+    window.viewer.pan_by(80, -40)
+    app.processEvents()
+
+    pan_overlay = window.photo_viewer_minimap.visible_region_overlay()
+
+    assert pan_overlay is not None
+    assert pan_overlay != pytest.approx(zoom_overlay)
+    assert pan_overlay == pytest.approx(window.viewer.visible_region_rect())
+
+    window.space_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.viewer.visible_region_rect() is None
+    assert window.photo_viewer_minimap.isHidden() is True
+    assert window.photo_viewer_minimap.visible_region_overlay() is None
+
+    window.space_shortcut.activated.emit()
+    app.processEvents()
+    assert window.photo_viewer_minimap.isVisible() is True
+
+    window._handle_browse_mode_shortcut()
+    app.processEvents()
+
+    assert window._photo_viewer_mode is False
+    assert window.photo_viewer_minimap.isHidden() is True
+    assert window.photo_viewer_minimap.visible_region_overlay() is None
+    window.close()
+
+
 def test_main_window_late_file_open_cancels_initial_folder_prompt(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
