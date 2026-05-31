@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QEvent, QSettings, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -49,7 +49,6 @@ from easy_cull.ui.viewers.main_photo_viewer import MainPhotoViewer
 from easy_cull.ui.widgets import (
     SceneListWidget,
     ThumbnailListWidget,
-    ThumbnailPreviewWidget,
 )
 
 if TYPE_CHECKING:
@@ -68,9 +67,6 @@ TRANSIENT_MESSAGE_FONT_SIZE_PX = 28
 TRANSIENT_MESSAGE_FONT_WEIGHT = 600
 TRANSIENT_MESSAGE_TIMEOUT_MS = 1600
 INITIAL_FOLDER_PROMPT_GRACE_MS = 250
-PHOTO_VIEWER_MINIMAP_WIDTH = 180
-PHOTO_VIEWER_MINIMAP_HEIGHT = 120
-PHOTO_VIEWER_MINIMAP_MARGIN = 14
 
 
 class MainWindowBuildMixin:
@@ -294,12 +290,6 @@ class MainWindowBuildMixin:
         self.viewer_stack.addWidget(self.viewer)
         self.viewer_stack.addWidget(self.compare_viewer)
         content_splitter.addWidget(self.viewer_stack_widget)
-        self.photo_viewer_minimap = ThumbnailPreviewWidget(
-            QSize(PHOTO_VIEWER_MINIMAP_WIDTH, PHOTO_VIEWER_MINIMAP_HEIGHT),
-            self.viewer_stack_widget,
-        )
-        self.photo_viewer_minimap.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self.photo_viewer_minimap.hide()
         self.exif_overlay = ExifOverlayWidget(self.viewer_stack_widget)
         self.exif_overlay.hide()
         self.viewer_stack_widget.installEventFilter(self)
@@ -757,13 +747,7 @@ class MainWindowBuildMixin:
             'Z', self._handle_zoom_toggle_shortcut
         )
         self.browse_mode_shortcut = self._make_shortcut(
-            'G', self._handle_browse_mode_shortcut
-        )
-        self.enter_browse_mode_shortcut = self._make_shortcut(
-            Qt.Key_Return, self._handle_browse_mode_shortcut
-        )
-        self.keypad_enter_browse_mode_shortcut = self._make_shortcut(
-            Qt.Key_Enter, self._handle_browse_mode_shortcut
+            'G', self._enter_browse_mode
         )
         self.split_mode_shortcut = self._make_shortcut(
             Qt.Key_Backslash, self._handle_split_shortcut
@@ -804,20 +788,6 @@ class MainWindowBuildMixin:
                 'Shift+Right', lambda: self._extend_scene_selection(1)
             ),
         ]
-        self._photo_viewer_nav_shortcuts = [
-            self._make_shortcut(
-                Qt.Key_Left, lambda: self._navigate_photo_viewer(-1)
-            ),
-            self._make_shortcut(
-                Qt.Key_Up, lambda: self._navigate_photo_viewer(-1)
-            ),
-            self._make_shortcut(
-                Qt.Key_Right, lambda: self._navigate_photo_viewer(1)
-            ),
-            self._make_shortcut(
-                Qt.Key_Down, lambda: self._navigate_photo_viewer(1)
-            ),
-        ]
         self._compare_nav_shortcuts = [
             self._make_shortcut(
                 Qt.Key_Left, lambda: self._move_compare_selection(0, -1)
@@ -846,32 +816,16 @@ class MainWindowBuildMixin:
 
     def _update_mode_shortcuts(self: MainWindow) -> None:
         normal_view_shortcuts_enabled = (
-            not self._photo_viewer_mode
-            and not self._browse_mode
-            and not self._compare_mode
+            not self._browse_mode and not self._compare_mode
         )
-        viewer_shortcuts_enabled = (
-            self._photo_viewer_mode
-            or not self._browse_mode
-            or self._compare_mode
-        )
+        viewer_shortcuts_enabled = not self._browse_mode or self._compare_mode
         self.split_mode_shortcut.setEnabled(
-            self._photo_viewer_mode
-            or normal_view_shortcuts_enabled
-            or self._compare_mode
+            normal_view_shortcuts_enabled or self._compare_mode
         )
         can_enter_browse = bool(self.library.photos)
         self.browse_mode_shortcut.setEnabled(can_enter_browse)
-        self.enter_browse_mode_shortcut.setEnabled(
-            self._photo_viewer_mode and can_enter_browse
-        )
-        self.keypad_enter_browse_mode_shortcut.setEnabled(
-            self._photo_viewer_mode and can_enter_browse
-        )
         self.compare_mode_shortcut.setEnabled(
-            not self._photo_viewer_mode
-            and not self._compare_mode
-            and bool(self.library.photos)
+            not self._compare_mode and bool(self.library.photos)
         )
         self.info_overlay_shortcut.setEnabled(bool(self.library.photos))
         self.exit_compare_shortcut.setEnabled(
@@ -883,20 +837,10 @@ class MainWindowBuildMixin:
         for shortcut in self._scene_nav_shortcuts:
             shortcut.setEnabled(normal_view_shortcuts_enabled)
 
-        for shortcut in self._photo_viewer_nav_shortcuts:
-            shortcut.setEnabled(self._photo_viewer_mode)
-
         for shortcut in self._compare_nav_shortcuts:
             shortcut.setEnabled(self._compare_mode)
 
         self._refresh_assignment_controls()
-
-    def _handle_browse_mode_shortcut(self: MainWindow) -> None:
-        if self._photo_viewer_mode:
-            self._enter_browse_mode_from_photo_viewer()
-            return
-
-        self._enter_browse_mode()
 
     def _handle_space_shortcut(self: MainWindow) -> None:
         if self._compare_mode:
@@ -1069,29 +1013,6 @@ class MainWindowBuildMixin:
         x = max(margin, parent_rect.width() - width - margin)
         self.exif_overlay.setGeometry(x, margin, width, height)
 
-    def _update_photo_viewer_minimap_geometry(self: MainWindow) -> bool:
-        """Anchor the photo-viewer minimap at the lower left."""
-        if not hasattr(self, 'photo_viewer_minimap'):
-            return False
-
-        margin = PHOTO_VIEWER_MINIMAP_MARGIN
-        parent_rect = self.viewer_stack_widget.rect()
-        width = PHOTO_VIEWER_MINIMAP_WIDTH
-        height = PHOTO_VIEWER_MINIMAP_HEIGHT
-        if parent_rect.width() < width + (margin * 2) or (
-            parent_rect.height() < height + (margin * 2)
-        ):
-            self.photo_viewer_minimap.hide()
-            return False
-
-        self.photo_viewer_minimap.setGeometry(
-            margin,
-            parent_rect.height() - height - margin,
-            width,
-            height,
-        )
-        return True
-
     def _create_assignment_action(
             self: MainWindow,
             menu: QMenu,
@@ -1116,7 +1037,7 @@ class MainWindowBuildMixin:
 
     def _refresh_assignment_controls(self: MainWindow) -> None:
         """Enable assignment controls only in culling-capable modes."""
-        enabled = not self._busy and not self._photo_viewer_mode
+        enabled = not self._busy
         for action in self._assignment_actions:
             action.setEnabled(enabled)
 
@@ -1163,9 +1084,6 @@ class MainWindowBuildMixin:
         if hasattr(self, 'exif_overlay'):
             self._update_info_overlay_geometry()
 
-        if hasattr(self, 'photo_viewer_minimap'):
-            self._update_photo_viewer_minimap_geometry()
-
         if (
             getattr(self, '_browse_mode', False)
             and hasattr(self, 'browse_list')
@@ -1176,16 +1094,6 @@ class MainWindowBuildMixin:
     def showEvent(self: MainWindow, event: QShowEvent) -> None:  # noqa: N802 - Qt API
         """Trigger the initial folder prompt when the window first shows."""
         super().showEvent(event)
-        if getattr(self, '_startup_file', None) is not None:
-            startup_file = self._startup_file
-            self._startup_file = None
-            self._initial_folder_prompt_pending = False
-            self._initial_folder_prompt_timer.stop()
-            QTimer.singleShot(
-                0, lambda: self.open_file_from_system(startup_file)
-            )
-            return
-
         if (
             self._initial_folder_prompt_pending
             and self.library.current_folder is None
@@ -1202,29 +1110,14 @@ class MainWindowBuildMixin:
         if (
             self._initial_folder_prompt_pending
             and self.library.current_folder is None
-            and getattr(self, '_startup_file', None) is None
         ):
             self._initial_folder_prompt_pending = False
             self.choose_folder()
 
     def closeEvent(self: MainWindow, event: QCloseEvent) -> None:  # noqa: N802 - Qt API
-        """Stop viewer background threads before the window is destroyed."""
+        """Stop pending initial folder prompt before closing."""
         self._initial_folder_prompt_pending = False
         self._initial_folder_prompt_timer.stop()
-        if self._photo_viewer_background_tasks_active():
-            # Close requests cannot interrupt a worker that is already inside
-            # synchronous EXIF or folder loading, so keep Qt alive and retry
-            # close when the thread cleanup slots report that work is gone.
-            event.ignore()
-            self._closing = True
-            self._close_after_background_tasks = True
-            self._show_progress('Closing...', 0)
-            self.overlay_progress_bar.setRange(0, 0)
-            self._stop_photo_viewer_background_tasks()
-            return
-
-        self._closing = True
-        self._close_after_background_tasks = False
         super().closeEvent(event)
 
     def changeEvent(self: MainWindow, event: QEvent) -> None:  # noqa: N802 - Qt API
@@ -1255,6 +1148,5 @@ class MainWindowBuildMixin:
             and event.type() == QEvent.Resize
         ):
             self._update_info_overlay_geometry()
-            self._update_photo_viewer_minimap_geometry()
 
         return super().eventFilter(watched, event)

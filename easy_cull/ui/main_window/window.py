@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QTimer
@@ -10,7 +9,6 @@ from PySide6.QtGui import QAction, QKeySequence, QShortcut
 from PySide6.QtWidgets import QMainWindow
 
 from easy_cull.core.photo_library import PhotoLibrary
-from easy_cull.ui.folder_access import FolderAccessManager
 from easy_cull.ui.identity import APP_NAME, easy_cull_icon
 from easy_cull.ui.main_window.build import MainWindowBuildMixin
 from easy_cull.ui.main_window.compare import MainWindowCompareMixin
@@ -27,14 +25,12 @@ from easy_cull.ui.theme import THEMES
 if TYPE_CHECKING:
     from PySide6.QtCore import QThread
 
+    from easy_cull.ui.launch import CullingLaunchRequest
     from easy_cull.ui.main_window.dialogs import OrganizerDialogResult
     from easy_cull.ui.main_window.workflows import MetadataEdit, SceneEdit
     from easy_cull.ui.workers import (
-        FolderHydrationWorker,
         OperationWorker,
-        PhotoViewerExifWorker,
         SceneDetectionWorker,
-        ViewerPrefetchWorker,
     )
 
 
@@ -49,24 +45,14 @@ class MainWindow(
 ):
     """Desktop photo-culling main window and view-state controller."""
 
-    def __init__(self, startup_file: Path | None = None) -> None:  # noqa: PLR0915
+    def __init__(
+            self, launch_request: CullingLaunchRequest | None = None
+    ) -> None:
         super().__init__()
         self.library = PhotoLibrary()
-        self.folder_access_manager = FolderAccessManager()
         self.current_photo_id: str | None = None
         self.current_theme = THEMES['light']
         self._busy = False
-        self._photo_viewer_mode = False
-        self._photo_viewer_folder_access_granted = True
-        # Preserve the file type the user opened so the viewer title can show
-        # RAW vs raster intent even when a grouped JPEG is the preview source.
-        self._photo_viewer_title_suffix: str | None = None
-        self._pending_browse_after_hydration = False
-        self._folder_hydration_message = ''
-        self._folder_hydration_progress = 0
-        self._folder_hydration_request_id = 0
-        self._folder_hydration_folder: Path | None = None
-        self._queued_folder_hydration_folder: Path | None = None
         self._browse_mode = False
         self._compare_mode = False
         self._compare_restore_browse_mode = False
@@ -91,18 +77,9 @@ class MainWindow(
         # rebuilds the strip and would otherwise drop those exact selections.
         self._preserved_scene_selection_photo_ids: set[str] = set()
 
-        self._initial_folder_prompt_pending = True
+        self._initial_folder_prompt_pending = launch_request is None
         self._scene_thread: QThread | None = None
         self._scene_worker: SceneDetectionWorker | None = None
-        self._folder_hydration_thread: QThread | None = None
-        self._folder_hydration_worker: FolderHydrationWorker | None = None
-        self._folder_hydration_bridge: object | None = None
-        self._photo_viewer_exif_thread: QThread | None = None
-        self._photo_viewer_exif_worker: PhotoViewerExifWorker | None = None
-        self._photo_viewer_exif_request_id = 0
-        self._photo_viewer_exif_refresh_pending = False
-        self._viewer_prefetch_thread: QThread | None = None
-        self._viewer_prefetch_worker: ViewerPrefetchWorker | None = None
         self._operation_thread: QThread | None = None
         self._operation_worker: OperationWorker | None = None
         self._operation_kind: str | None = None
@@ -111,7 +88,6 @@ class MainWindow(
         self._assignment_shortcuts: list[QShortcut] = []
         self._viewer_shortcuts: list[QShortcut] = []
         self._scene_nav_shortcuts: list[QShortcut] = []
-        self._photo_viewer_nav_shortcuts: list[QShortcut] = []
         self._compare_nav_shortcuts: list[QShortcut] = []
         self._browse_photo_rows: dict[str, int] = {}
         self._thumbnail_photo_rows: dict[str, int] = {}
@@ -123,11 +99,8 @@ class MainWindow(
         self._scene_list_scene_id: str | None = None
         self._thumbnail_overlay_photo_id: str | None = None
         self._scene_overlay_photo_id: str | None = None
-        self._photo_viewer_minimap_photo_id: str | None = None
         self._metadata_undo_stack: list[MetadataEdit | SceneEdit] = []
         self._metadata_redo_stack: list[MetadataEdit | SceneEdit] = []
-        self._closing = False
-        self._close_after_background_tasks = False
         self._initial_folder_prompt_timer = QTimer(self)
         self._initial_folder_prompt_timer.setSingleShot(True)
         self._initial_folder_prompt_timer.timeout.connect(
@@ -141,13 +114,9 @@ class MainWindow(
         self._build_ui()
         self._build_menu()
         self._build_shortcuts()
-        if startup_file is not None:
-            self._initial_folder_prompt_pending = False
-            self._startup_file = Path(startup_file)
-        else:
-            self._startup_file = None
-
         self._refresh_ui()
+        if launch_request is not None:
+            self.load_culling_launch_request(launch_request)
 
     @staticmethod
     def _shortcut_tooltip(label: str, shortcut: str) -> str:
@@ -160,6 +129,5 @@ class MainWindow(
         """Return True while any background operation thread is active."""
         return (
             self._scene_thread is not None
-            or self._folder_hydration_thread is not None
             or self._operation_thread is not None
         )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import tempfile
+import threading
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
@@ -31,6 +32,20 @@ else:
     register_heif_opener()
 
 
+_PREVIEW_LOCKS_GUARD = threading.Lock()
+_PREVIEW_LOCKS: dict[str, threading.Lock] = {}
+
+
+def _preview_lock(cache_key: str) -> threading.Lock:
+    with _PREVIEW_LOCKS_GUARD:
+        lock = _PREVIEW_LOCKS.get(cache_key)
+        if lock is None:
+            lock = threading.Lock()
+            _PREVIEW_LOCKS[cache_key] = lock
+
+        return lock
+
+
 def _default_cache_dir() -> Path:
     """Return the platform-appropriate default preview cache directory."""
     if (home := Path.home()) and (home / 'Library').exists():
@@ -56,10 +71,28 @@ def get_preview_path(
     if target.exists():
         return target
 
-    image = render_source_image(photo.preview_source, kind)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    image.save(target, format='JPEG', quality=92, optimize=True)
-    image.close()
+    with _preview_lock(key):
+        if target.exists():
+            return target
+
+        image = render_source_image(photo.preview_source, kind)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            dir=target.parent,
+            prefix=f'.{key}.',
+            suffix='.tmp',
+            delete=False,
+        ) as temp_file:
+            temp_path = Path(temp_file.name)
+
+        try:
+            image.save(temp_path, format='JPEG', quality=92, optimize=True)
+            temp_path.replace(target)
+        finally:
+            image.close()
+            if temp_path.exists():
+                temp_path.unlink()
+
     return target
 
 

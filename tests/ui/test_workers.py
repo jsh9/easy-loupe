@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Never
 
+import easy_cull.ui.photo_viewer.workers as photo_viewer_workers_module
 import easy_cull.ui.workers as workers_module
 from easy_cull.operations.common import OperationSummary
 
@@ -89,7 +90,7 @@ def test_viewer_prefetch_worker_warms_requested_viewer_previews() -> None:
 
             return '/tmp/preview.jpg'
 
-    worker = workers_module.ViewerPrefetchWorker(
+    worker = photo_viewer_workers_module.ViewerPrefetchWorker(
         Library(), ['A', 'missing', 'B']
     )
     worker.finished.connect(lambda: finished_events.append('finished'))
@@ -111,7 +112,7 @@ def test_viewer_prefetch_worker_cancel_skips_remaining_previews() -> None:
             calls.append((photo_id, kind))
             return '/tmp/preview.jpg'
 
-    worker = workers_module.ViewerPrefetchWorker(Library(), ['A'])
+    worker = photo_viewer_workers_module.ViewerPrefetchWorker(Library(), ['A'])
     worker.finished.connect(lambda: finished_events.append('finished'))
     worker.cancel()
     worker.run()
@@ -130,7 +131,7 @@ def test_photo_viewer_exif_worker_emits_current_photo_focus_point(
     metadata_source.write_bytes(b'raw')
     preview_source.write_bytes(b'jpeg')
     monkeypatch.setattr(
-        workers_module.exif_module,
+        photo_viewer_workers_module.exif_module,
         'read_exif_metadata',
         lambda _sources: {
             'A.CR3': {
@@ -142,7 +143,7 @@ def test_photo_viewer_exif_worker_emits_current_photo_focus_point(
         },
     )
 
-    worker = workers_module.PhotoViewerExifWorker(
+    worker = photo_viewer_workers_module.PhotoViewerExifWorker(
         3, 'A', metadata_source, preview_source
     )
     worker.finished.connect(
@@ -170,12 +171,12 @@ def test_photo_viewer_exif_worker_cancel_suppresses_focus_result(
     metadata_source.write_bytes(b'raw')
     preview_source.write_bytes(b'jpeg')
     monkeypatch.setattr(
-        workers_module.exif_module,
+        photo_viewer_workers_module.exif_module,
         'read_exif_metadata',
         lambda _sources: {'A.CR3': {'AFAreaXPosition': 250}},
     )
 
-    worker = workers_module.PhotoViewerExifWorker(
+    worker = photo_viewer_workers_module.PhotoViewerExifWorker(
         4, 'A', metadata_source, preview_source
     )
     worker.finished.connect(
@@ -228,8 +229,8 @@ def test_folder_hydration_worker_loads_and_warms_folder(
             self.preview_calls.append((photo_id, kind))
             return '/tmp/preview.jpg'
 
-    monkeypatch.setattr(workers_module, 'PhotoLibrary', Library)
-    worker = workers_module.FolderHydrationWorker(
+    monkeypatch.setattr(photo_viewer_workers_module, 'PhotoLibrary', Library)
+    worker = photo_viewer_workers_module.FolderHydrationWorker(
         12,
         tmp_path,
         cache_dir=tmp_path / '.cache',
@@ -291,8 +292,8 @@ def test_folder_hydration_worker_cancel_skips_preview_warming(
             self.preview_calls.append((photo_id, kind))
             return '/tmp/preview.jpg'
 
-    monkeypatch.setattr(workers_module, 'PhotoLibrary', Library)
-    worker = workers_module.FolderHydrationWorker(
+    monkeypatch.setattr(photo_viewer_workers_module, 'PhotoLibrary', Library)
+    worker = photo_viewer_workers_module.FolderHydrationWorker(
         12,
         tmp_path,
         cache_dir=tmp_path / '.cache',

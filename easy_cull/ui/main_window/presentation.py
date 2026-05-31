@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QSize
-from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QListWidget, QListWidgetItem
 
 from easy_cull.ui.identity import APP_NAME
@@ -140,44 +138,8 @@ class MainWindowPresentationMixin:
             )
 
     def _refresh_window_title(self: MainWindow) -> None:
-        """
-        Keep the native title bar aligned with photo-viewer navigation.
-
-        Photo records group same-stem files, so the title prefers the suffix
-        originally opened by Finder/Explorer and falls back to the preview file
-        when the navigated-to group does not contain that suffix.
-        """
-        if (
-            not self._photo_viewer_mode
-            or self.current_photo_id is None
-            or not self.library.photos
-        ):
-            self.setWindowTitle(APP_NAME)
-            return
-
-        photos = self.library.get_photos()
-        photo_ids = [photo.photo_id for photo in photos]
-        try:
-            photo_index = photo_ids.index(self.current_photo_id)
-        except ValueError:
-            self.setWindowTitle(APP_NAME)
-            return
-
-        photo = photos[photo_index]
-        preferred_suffix = self._photo_viewer_title_suffix
-        title_filename = next(
-            (
-                filename
-                for filename in photo.files
-                if preferred_suffix is not None
-                and Path(filename).suffix.casefold() == preferred_suffix
-            ),
-            photo.preview_source.name,
-        )
-        self.setWindowTitle(
-            f'{APP_NAME} - {title_filename} ({photo_index + 1} /'
-            f' {len(photos)})'
-        )
+        """Keep the native title bar aligned with culling mode."""
+        self.setWindowTitle(APP_NAME)
 
     def _refresh_compare_metadata_labels(self: MainWindow) -> None:
         if not self._compare_mode:
@@ -359,9 +321,7 @@ class MainWindowPresentationMixin:
 
         self.scene_list.blockSignals(False)
         self.scene_list.setVisible(
-            not self._photo_viewer_mode
-            and not self._browse_mode
-            and not self._compare_mode
+            not self._browse_mode and not self._compare_mode
         )
 
     def _toggle_theme_checked(
@@ -766,13 +726,6 @@ class MainWindowPresentationMixin:
             if self._browse_mode or self._compare_mode
             else self.viewer.visible_region_rect()
         )
-        if self._photo_viewer_mode:
-            self._refresh_photo_viewer_minimap(visible_region)
-            self._thumbnail_overlay_photo_id = None
-            self._scene_overlay_photo_id = None
-            return
-
-        self._hide_photo_viewer_minimap()
         thumb_photo_id = (
             None
             if (
@@ -833,49 +786,6 @@ class MainWindowPresentationMixin:
 
         self._thumbnail_overlay_photo_id = thumb_photo_id
         self._scene_overlay_photo_id = scene_photo_id
-
-    def _refresh_photo_viewer_minimap(
-            self: MainWindow,
-            visible_region: tuple[float, float, float, float] | None,
-    ) -> None:
-        """
-        Update the floating photo-viewer minimap from the active viewer.
-
-        The minimap is separate from the normal strip overlays because
-        photo-viewer mode hides those strips.  It still uses the same thumbnail
-        widget so the red box and mask stay visually identical.
-        """
-        if (
-            not hasattr(self, 'photo_viewer_minimap')
-            or visible_region is None
-            or self.current_photo_id is None
-            or not self.library.photos
-        ):
-            self._hide_photo_viewer_minimap()
-            return
-
-        if self._photo_viewer_minimap_photo_id != self.current_photo_id:
-            thumb_path = self.library.get_preview_path(
-                self.current_photo_id, 'thumb'
-            )
-            self.photo_viewer_minimap.set_pixmap(QPixmap(str(thumb_path)))
-            self._photo_viewer_minimap_photo_id = self.current_photo_id
-
-        self.photo_viewer_minimap.set_visible_region_overlay(visible_region)
-        if not self._update_photo_viewer_minimap_geometry():
-            return
-
-        self.photo_viewer_minimap.show()
-        self.photo_viewer_minimap.raise_()
-
-    def _hide_photo_viewer_minimap(self: MainWindow) -> None:
-        if not hasattr(self, 'photo_viewer_minimap'):
-            return
-
-        self.photo_viewer_minimap.set_visible_region_overlay(None)
-        self.photo_viewer_minimap.set_pixmap(QPixmap())
-        self.photo_viewer_minimap.hide()
-        self._photo_viewer_minimap_photo_id = None
 
     @staticmethod
     def _apply_visible_region_overlay(

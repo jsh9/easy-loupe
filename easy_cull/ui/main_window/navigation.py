@@ -6,15 +6,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QItemSelectionModel, Qt, QTimer
 
-from easy_cull.ui.main_window.build import TRANSIENT_MESSAGE_TIMEOUT_MS
 from easy_cull.ui.theme import PHOTO_ID_ROLE
-
-FOLDER_ACCESS_RECOVERY_MESSAGE = (
-    'Browsing photos in this folder and adjacent-photo navigation need folder'
-    ' access. Grant EasyCull access in System Settings -> Privacy & Security'
-    ' -> Files & Folders.'
-)
-FOLDER_ACCESS_RECOVERY_TIMEOUT_MS = TRANSIENT_MESSAGE_TIMEOUT_MS * 5
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QListWidget, QListWidgetItem
@@ -29,9 +21,6 @@ class MainWindowNavigationMixin:
     def _active_navigation_widget(self: MainWindow) -> QListWidget | None:
         """Return the list widget that should own keyboard navigation."""
         if self._compare_mode:
-            return None
-
-        if self._photo_viewer_mode:
             return None
 
         if (
@@ -109,7 +98,6 @@ class MainWindowNavigationMixin:
             not self.isActiveWindow()
             or self._busy
             or self._background_task_active()
-            or self._photo_viewer_mode
             or self._compare_mode
             or self._browse_mode
             or not self.library.photos
@@ -414,40 +402,6 @@ class MainWindowNavigationMixin:
         if hasattr(self, '_refresh_info_overlay'):
             self._refresh_info_overlay()
 
-    def _navigate_photo_viewer(self: MainWindow, direction: int) -> None:
-        """Move to an adjacent photo while in system photo-viewer mode."""
-        if (
-            not self._photo_viewer_mode
-            or self.current_photo_id is None
-            or not self.library.photos
-        ):
-            return
-
-        if not self._photo_viewer_folder_access_granted:
-            self._show_transient_message(
-                FOLDER_ACCESS_RECOVERY_MESSAGE,
-                timeout_ms=FOLDER_ACCESS_RECOVERY_TIMEOUT_MS,
-            )
-            return
-
-        photo_ids = [photo.photo_id for photo in self.library.get_photos()]
-        try:
-            current_index = photo_ids.index(self.current_photo_id)
-        except ValueError:
-            return
-
-        next_index = current_index + direction
-        if next_index < 0 or next_index >= len(photo_ids):
-            return
-
-        self.current_photo_id = photo_ids[next_index]
-        self.viewer.set_fit_view()
-        self._display_current_photo(force_fit=True)
-        self._refresh_selection_labels()
-        self._refresh_ui()
-        self._start_photo_viewer_exif_refresh()
-        self._start_viewer_prefetch()
-
     def _set_browse_mode(self: MainWindow, *, active: bool) -> None:
         self._browse_mode = active
         self.content_splitter.setVisible(not active)
@@ -457,26 +411,6 @@ class MainWindowNavigationMixin:
 
         if active:
             self.scene_list.setVisible(False)
-
-        self._update_mode_shortcuts()
-        self._refresh_info_overlay()
-
-    def _set_photo_viewer_mode(self: MainWindow, *, active: bool) -> None:
-        self._photo_viewer_mode = active
-        if active:
-            self._browse_mode = False
-            self._compare_mode = False
-            self.viewer_stack.setCurrentWidget(self.viewer)
-            self.top_bar_widget.setVisible(False)
-            self.content_splitter.setVisible(True)
-            self.thumbnail_list.setVisible(False)
-            self.scene_list.setVisible(False)
-            self.browse_list.setVisible(False)
-            self.viewer.set_fit_view()
-        else:
-            self._photo_viewer_title_suffix = None
-            self.top_bar_widget.setVisible(True)
-            self.thumbnail_list.setVisible(not self._compare_mode)
 
         self._update_mode_shortcuts()
         self._refresh_info_overlay()
@@ -506,9 +440,6 @@ class MainWindowNavigationMixin:
         if self._browse_mode or not self.library.photos:
             return
 
-        if self._photo_viewer_mode:
-            self._set_photo_viewer_mode(active=False)
-
         self._populate_browse_list()
         self._set_browse_mode(active=True)
         self._refresh_browse_layout()
@@ -516,24 +447,6 @@ class MainWindowNavigationMixin:
         self._select_browse_item_for_current_photo()
         self._refresh_ui()
         self.browse_list.setFocus(Qt.OtherFocusReason)
-
-    def _enter_browse_mode_from_photo_viewer(self: MainWindow) -> None:
-        if not self._photo_viewer_folder_access_granted:
-            self._show_transient_message(
-                FOLDER_ACCESS_RECOVERY_MESSAGE,
-                timeout_ms=FOLDER_ACCESS_RECOVERY_TIMEOUT_MS,
-            )
-            return
-
-        if self._folder_hydration_thread is not None:
-            self._pending_browse_after_hydration = True
-            self._show_progress(
-                self._folder_hydration_message or 'Loading folder...',
-                self._folder_hydration_progress,
-            )
-            return
-
-        self._enter_browse_mode()
 
     def _enter_browse_mode_from_compare(self: MainWindow) -> None:
         compared_photo_ids = self.compare_viewer.photo_ids()

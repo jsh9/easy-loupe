@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QFileOpenEvent
@@ -16,8 +16,10 @@ from easy_cull.ui.identity import (
     branded_argv,
     prepare_app_identity,
 )
+from easy_cull.ui.launch import CullingLaunchRequest
 from easy_cull.ui.main_window.build import INITIAL_FOLDER_PROMPT_GRACE_MS
 from easy_cull.ui.main_window.window import MainWindow
+from easy_cull.ui.photo_viewer.window import PhotoViewerWindow
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -58,31 +60,44 @@ class WindowManager:
 
     def __init__(
             self,
-            window_factory: type[MainWindow] = MainWindow,
+            culling_window_factory: type[MainWindow] = MainWindow,
+            photo_window_factory: type[PhotoViewerWindow] = PhotoViewerWindow,
     ) -> None:
-        self._window_factory = window_factory
-        self._windows: list[MainWindow] = []
+        self._culling_window_factory = culling_window_factory
+        self._photo_window_factory = photo_window_factory
+        self._windows: list[Any] = []
 
-    def windows(self) -> list[MainWindow]:
+    def windows(self) -> list[Any]:
         """Return the currently managed live windows."""
         return list(self._windows)
 
-    def open_culling_window(self) -> MainWindow:
+    def open_culling_window(
+            self,
+            launch_request: CullingLaunchRequest | None = None,
+    ) -> MainWindow:
         """Create and show the normal no-file culling window."""
-        return self.open_window()
+        window = self._culling_window_factory(launch_request=launch_request)
+        self._retain_and_show(window)
+        return window
 
-    def open_photo_window(self, startup_file: Path) -> MainWindow:
+    def open_photo_window(self, startup_file: Path) -> PhotoViewerWindow:
         """Create and show a photo-viewer window for one opened photo."""
-        return self.open_window(startup_file=startup_file)
+        window = self._photo_window_factory(startup_file=startup_file)
+        window.culling_requested.connect(
+            lambda request, viewer=window: self._handle_culling_request(
+                viewer, request
+            )
+        )
+        self._retain_and_show(window)
+        return window
 
     def open_photo_windows(self, startup_files: list[Path]) -> None:
         """Create one photo-viewer window for each opened startup file."""
         for startup_file in startup_files:
             self.open_photo_window(startup_file)
 
-    def open_window(self, startup_file: Path | None = None) -> MainWindow:
-        """Create, retain, and show an EasyCull main window."""
-        window = self._window_factory(startup_file=startup_file)
+    def _retain_and_show(self, window: Any) -> None:
+        """Retain and show an EasyCull window."""
         window.setAttribute(Qt.WA_DeleteOnClose, True)
         self._windows.append(window)
         window.destroyed.connect(
@@ -91,9 +106,18 @@ class WindowManager:
             )
         )
         window.showMaximized()
-        return window
 
-    def _remove_window(self, window: MainWindow) -> None:
+    def _handle_culling_request(self, viewer: Any, request: object) -> None:
+        """Open culling UI for a viewer handoff and close the viewer."""
+        if not isinstance(request, CullingLaunchRequest):
+            return
+
+        self.open_culling_window(launch_request=request)
+        close = getattr(viewer, 'close', None)
+        if callable(close):
+            close()
+
+    def _remove_window(self, window: Any) -> None:
         """Forget a destroyed window so Qt can quit after the last close."""
         try:
             self._windows.remove(window)

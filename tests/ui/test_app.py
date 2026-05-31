@@ -220,13 +220,12 @@ class _FakeTimer:
         self.timeout.emit()
 
 
-class _FakeWindow:
-    def __init__(self, startup_file: object = None) -> None:
-        self.startup_file = startup_file
+class _FakeCullingWindow:
+    def __init__(self, launch_request: object = None) -> None:
+        self.launch_request = launch_request
         self.attributes: list[tuple[object, bool]] = []
         self.destroyed = _FakeSignal()
         self.show_maximized_calls = 0
-        self.opened_files: list[object] = []
 
     def setAttribute(  # noqa: N802 - Qt naming in fake
             self, attribute: object, enabled: bool
@@ -236,11 +235,40 @@ class _FakeWindow:
     def showMaximized(self) -> None:  # noqa: N802 - Qt naming in fake
         self.show_maximized_calls += 1
 
-    def open_file_from_system(self, file_path: object) -> None:
-        self.opened_files.append(file_path)
+    def destroy(self) -> None:
+        self.destroyed.emit()
+
+
+class _FakePhotoWindow:
+    def __init__(self, startup_file: object = None) -> None:
+        self.startup_file = startup_file
+        self.attributes: list[tuple[object, bool]] = []
+        self.destroyed = _FakeSignal()
+        self.culling_requested = _FakeSignal()
+        self.show_maximized_calls = 0
+        self.closed = False
+
+    def setAttribute(  # noqa: N802 - Qt naming in fake
+            self, attribute: object, enabled: bool
+    ) -> None:
+        self.attributes.append((attribute, enabled))
+
+    def showMaximized(self) -> None:  # noqa: N802 - Qt naming in fake
+        self.show_maximized_calls += 1
+
+    def close(self) -> None:
+        self.closed = True
+        self.destroyed.emit()
 
     def destroy(self) -> None:
         self.destroyed.emit()
+
+
+def _fake_window_manager() -> app_module.WindowManager:
+    return app_module.WindowManager(
+        culling_window_factory=_FakeCullingWindow,
+        photo_window_factory=_FakePhotoWindow,
+    )
 
 
 def test_startup_coordinator_opens_plain_window_without_startup_files() -> (
@@ -252,14 +280,14 @@ def test_startup_coordinator_opens_plain_window_without_startup_files() -> (
     This preserves the no-file launch path that should still prompt for a
     folder instead of creating a photo-viewer window.
     """
-    manager = app_module.WindowManager(window_factory=_FakeWindow)
+    manager = _fake_window_manager()
     coordinator = app_module.StartupCoordinator(manager, platform='win32')
 
     coordinator.start([], [])
 
     windows = manager.windows()
     assert len(windows) == 1
-    assert windows[0].startup_file is None
+    assert windows[0].launch_request is None
     assert windows[0].show_maximized_calls == 1
 
 
@@ -272,7 +300,7 @@ def test_startup_coordinator_delays_plain_macos_launch() -> None:
     the real photo-viewer window.
     """
     _FakeTimer.instances = []
-    manager = app_module.WindowManager(window_factory=_FakeWindow)
+    manager = _fake_window_manager()
     coordinator = app_module.StartupCoordinator(
         manager,
         platform='darwin',
@@ -292,7 +320,7 @@ def test_startup_coordinator_delays_plain_macos_launch() -> None:
 
     windows = manager.windows()
     assert len(windows) == 1
-    assert windows[0].startup_file is None
+    assert windows[0].launch_request is None
 
 
 def test_startup_coordinator_macos_file_open_resolves_launch(
@@ -306,7 +334,7 @@ def test_startup_coordinator_macos_file_open_resolves_launch(
     """
     _FakeTimer.instances = []
     photo = tmp_path / 'IMG_1000.JPG'
-    manager = app_module.WindowManager(window_factory=_FakeWindow)
+    manager = _fake_window_manager()
     coordinator = app_module.StartupCoordinator(
         manager,
         platform='darwin',
@@ -334,7 +362,7 @@ def test_startup_coordinator_unsupported_macos_open_keeps_plain_launch(
     """
     _FakeTimer.instances = []
     notes = tmp_path / 'notes.txt'
-    manager = app_module.WindowManager(window_factory=_FakeWindow)
+    manager = _fake_window_manager()
     coordinator = app_module.StartupCoordinator(
         manager,
         platform='darwin',
@@ -347,7 +375,7 @@ def test_startup_coordinator_unsupported_macos_open_keeps_plain_launch(
 
     windows = manager.windows()
     assert len(windows) == 1
-    assert windows[0].startup_file is None
+    assert windows[0].launch_request is None
 
 
 def test_startup_coordinator_opens_one_window_per_startup_file(
@@ -361,7 +389,7 @@ def test_startup_coordinator_opens_one_window_per_startup_file(
     """
     first_photo = tmp_path / 'IMG_1000.ARW'
     second_photo = tmp_path / 'IMG_1001.JPG'
-    manager = app_module.WindowManager(window_factory=_FakeWindow)
+    manager = _fake_window_manager()
     coordinator = app_module.StartupCoordinator(manager)
 
     coordinator.start([first_photo, second_photo], [])
@@ -385,7 +413,7 @@ def test_startup_coordinator_opens_pending_file_events(
     second_photo = tmp_path / 'IMG_1001.HEIC'
     notes = tmp_path / 'notes.txt'
     _FakeTimer.instances = []
-    manager = app_module.WindowManager(window_factory=_FakeWindow)
+    manager = _fake_window_manager()
     coordinator = app_module.StartupCoordinator(manager, platform='darwin')
 
     coordinator.start([], [first_photo, notes, second_photo])
@@ -471,14 +499,14 @@ def test_startup_coordinator_system_open_creates_new_window(
     """
     first_photo = tmp_path / 'IMG_1000.JPG'
     second_photo = tmp_path / 'IMG_1001.JPG'
-    manager = app_module.WindowManager(window_factory=_FakeWindow)
+    manager = _fake_window_manager()
     coordinator = app_module.StartupCoordinator(manager)
     coordinator.start([first_photo], [])
     first_window = manager.windows()[0]
 
     coordinator.open_file_from_system(second_photo)
 
-    assert first_window.opened_files == []
+    assert first_window.startup_file == first_photo
     assert [window.startup_file for window in manager.windows()] == [
         first_photo,
         second_photo,
@@ -496,7 +524,7 @@ def test_startup_coordinator_ignores_unsupported_system_open(
     """
     first_photo = tmp_path / 'IMG_1000.JPG'
     notes = tmp_path / 'notes.txt'
-    manager = app_module.WindowManager(window_factory=_FakeWindow)
+    manager = _fake_window_manager()
     coordinator = app_module.StartupCoordinator(manager)
     coordinator.start([first_photo], [])
 
@@ -516,7 +544,7 @@ def test_window_manager_forgets_destroyed_windows(tmp_path: Path) -> None:
     """
     first_photo = tmp_path / 'IMG_1000.JPG'
     second_photo = tmp_path / 'IMG_1001.JPG'
-    manager = app_module.WindowManager(window_factory=_FakeWindow)
+    manager = _fake_window_manager()
     manager.open_photo_windows([first_photo, second_photo])
     first_window = manager.windows()[0]
 
@@ -525,6 +553,27 @@ def test_window_manager_forgets_destroyed_windows(tmp_path: Path) -> None:
     assert [window.startup_file for window in manager.windows()] == [
         second_photo
     ]
+
+
+def test_window_manager_hands_viewer_off_to_culling_window(
+        tmp_path: Path,
+) -> None:
+    """Open a culling window from a viewer request and close the viewer."""
+    startup_photo = tmp_path / 'IMG_1000.JPG'
+    manager = _fake_window_manager()
+    viewer = manager.open_photo_window(startup_photo)
+    request = app_module.CullingLaunchRequest(
+        folder=tmp_path,
+        selected_photo_id='IMG_1000',
+        enter_browse=True,
+    )
+
+    viewer.culling_requested.emit(request)
+
+    windows = manager.windows()
+    assert viewer.closed is True
+    assert len(windows) == 1
+    assert windows[0].launch_request is request
 
 
 def test_apply_app_identity_sets_qt_name_and_icon() -> None:

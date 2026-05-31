@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QObject, QPoint, QThread, Slot
+from PySide6.QtCore import QPoint, QThread
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -37,20 +37,14 @@ from easy_cull.ui.theme import (
     LOAD_PROGRESS_MAX,
     PHOTO_ID_ROLE,
 )
-from easy_cull.ui.workers import (
-    FolderHydrationWorker,
-    OperationWorker,
-    PhotoViewerExifWorker,
-    SceneDetectionWorker,
-    ViewerPrefetchWorker,
-)
+from easy_cull.ui.workers import OperationWorker, SceneDetectionWorker
 
 if TYPE_CHECKING:
     from easy_cull.core.records import SceneGroup
+    from easy_cull.ui.launch import CullingLaunchRequest
     from easy_cull.ui.main_window.window import MainWindow
 
 ProgressCallback = Callable[[str, int], None]
-FOCUS_POINT_COORDINATE_COUNT = 2
 
 
 @dataclass(frozen=True)
@@ -80,90 +74,6 @@ class ThumbnailScrollAnchor:
     visible_top: int | None
 
 
-class FolderHydrationSignalBridge(QObject):
-    """
-    Relay folder-hydration worker signals on the main-window GUI thread.
-
-    ``FolderHydrationWorker`` lives in a background ``QThread`` because full
-    folder loading and preview warming can be slow. Its results eventually
-    rebuild Qt list widgets and item widgets, and Qt widgets must only be
-    touched from the GUI thread. This bridge is a ``QObject`` parented to the
-    ``MainWindow``, so Qt's queued cross-thread signal delivery invokes these
-    handlers in the same thread as the window.
-    """
-
-    def __init__(self, window: MainWindow) -> None:
-        """
-        Create a GUI-thread bridge owned by ``window``.
-
-        Parenting the bridge to the window gives it the window's thread
-        affinity and lifetime. The worker can be deleted with its background
-        thread while the bridge remains safe to receive queued completion
-        signals until the window clears it.
-        """
-        super().__init__(window)
-        self._window = window
-
-    # ``@Slot`` registers this Python method as a typed Qt slot. Combined with
-    # this bridge object's GUI-thread affinity, PySide queues cross-thread
-    # worker emissions here instead of running the callback in the worker
-    # thread. That matters because even progress handling can update overlays.
-    @Slot(int, object, str, int)
-    def handle_progress(
-            self,
-            request_id: int,
-            expected_folder: Path,
-            message: str,
-            progress: int,
-    ) -> None:
-        """
-        Apply hydration progress after Qt queues it to the GUI thread.
-
-        The request id and expected folder are preserved in the signal payload
-        so the window can ignore progress from an older hydration request after
-        a newer photo-open has replaced it.
-        """
-        self._window._handle_folder_hydration_progress(  # noqa: SLF001
-            request_id, expected_folder, message, progress
-        )
-
-    @Slot(int, object, object)
-    def handle_finished(
-            self,
-            request_id: int,
-            expected_folder: Path,
-            library: object,
-    ) -> None:
-        """
-        Apply hydration results after Qt queues them to the GUI thread.
-
-        The finished path swaps in the fully hydrated library and rebuilds list
-        widgets. Keeping this work on the GUI thread prevents the macOS abort
-        caused by creating item widgets from the worker thread.
-        """
-        self._window._handle_folder_hydration_finished(  # noqa: SLF001
-            request_id, expected_folder, library
-        )
-
-    @Slot(int, object, str)
-    def handle_failed(
-            self,
-            request_id: int,
-            expected_folder: Path,
-            error: str,
-    ) -> None:
-        """
-        Apply hydration failures on the GUI thread for safe UI updates.
-
-        Failure handling may show a dialog, hide an overlay, or show a
-        transient message. Those UI operations follow the same thread rule as
-        successful hydration results.
-        """
-        self._window._handle_folder_hydration_failed(  # noqa: SLF001
-            request_id, expected_folder, error
-        )
-
-
 class MainWindowWorkflowMixin:
     """Workflow handlers for folder loading, scene detection, and metadata."""
 
@@ -179,7 +89,6 @@ class MainWindowWorkflowMixin:
             return
 
         try:
-            self._set_photo_viewer_mode(active=False)
             self._show_progress('Scanning folder', 0)
             self.open_button.setEnabled(False)
             self.detect_button.setEnabled(False)
@@ -200,409 +109,31 @@ class MainWindowWorkflowMixin:
         self._refresh_ui()
         self._restore_active_navigation_focus(defer=True)
 
-    def open_file_from_system(self: MainWindow, file_path: object) -> None:
-        """Open a photo file passed by Finder, Explorer, or argv."""
-        if self._busy:
-            return
-
-        self._initial_folder_prompt_timer.stop()
-        self._initial_folder_prompt_pending = False
-        self._startup_file = None
-        path = Path(str(file_path)).expanduser()
-        folder_access_granted = False
-        try:
-            resolved_path = path.resolve()
-            self._cancel_photo_viewer_background_tasks_for_replacement()
-            folder_access_granted = (
-                self.folder_access_manager.ensure_access_for_file(
-                    resolved_path, self
-                )
-            )
-            self.library.load_viewer_folder(
-                resolved_path,
-                allow_folder_scan=folder_access_granted,
-            )
-        except PermissionError as exc:
-            if not folder_access_granted:
-                QMessageBox.critical(self, 'Failed to Open Photo', str(exc))
-                return
-
-            folder_access_granted = False
-            if not self._load_photo_viewer_folder(
-                resolved_path, allow_folder_scan=False
-            ):
-                return
-        except Exception as exc:  # noqa: BLE001 - surface file-open failures
-            QMessageBox.critical(self, 'Failed to Open Photo', str(exc))
-            return
-
-        self._clear_metadata_history()
-        self._photo_viewer_folder_access_granted = folder_access_granted
-        self._photo_viewer_title_suffix = resolved_path.suffix.casefold()
-        self.current_photo_id = self._photo_id_for_opened_file(resolved_path)
-        if self.current_photo_id is None and self.library.photos:
-            self.current_photo_id = self.library.photos[0].photo_id
-
-        self._set_photo_viewer_mode(active=True)
-        self._display_current_photo(force_fit=True)
-        self._refresh_ui()
-        self._start_photo_viewer_exif_refresh()
-        self._start_viewer_prefetch()
-        if folder_access_granted and self.library.current_folder is not None:
-            self._start_folder_hydration(self.library.current_folder)
-
-    def _load_photo_viewer_folder(
-            self: MainWindow,
-            file_path: Path,
-            *,
-            allow_folder_scan: bool,
-    ) -> bool:
-        try:
-            self.library.load_viewer_folder(
-                file_path,
-                allow_folder_scan=allow_folder_scan,
-            )
-        except PermissionError as exc:
-            QMessageBox.critical(self, 'Failed to Open Photo', str(exc))
-            return False
-        except Exception as exc:  # noqa: BLE001 - surface file-open failures
-            QMessageBox.critical(self, 'Failed to Open Photo', str(exc))
-            return False
+    def load_culling_launch_request(
+            self: MainWindow, request: CullingLaunchRequest
+    ) -> None:
+        """Load a culling workspace requested by a photo-viewer handoff."""
+        if request.preloaded_library is not None:
+            self.library = request.preloaded_library
         else:
-            return True
+            self.library.load_folder(request.folder)
 
-    def _photo_id_for_opened_file(
-            self: MainWindow, file_path: Path
-    ) -> str | None:
-        """Return the loaded photo id that contains the opened filename."""
-        target_name = file_path.name.casefold()
-        for photo in self.library.get_photos():
-            if any(name.casefold() == target_name for name in photo.files):
-                return photo.photo_id
+        loaded_photo_ids = {photo.photo_id for photo in self.library.photos}
+        self.current_photo_id = (
+            request.selected_photo_id
+            if request.selected_photo_id in loaded_photo_ids
+            else self.library.photos[0].photo_id
+            if self.library.photos
+            else None
+        )
+        self._initial_folder_prompt_pending = False
+        self._initial_folder_prompt_timer.stop()
+        self._rebuild_loaded_views(preserve_current_photo=True)
+        self._clear_metadata_history()
+        if request.enter_browse and self.library.photos:
+            self._enter_browse_mode()
 
-        return None
-
-    def _start_photo_viewer_exif_refresh(self: MainWindow) -> None:
-        """Start or queue a focus-point refresh for the active viewer photo."""
-        if (
-            not self._photo_viewer_mode
-            or self.current_photo_id is None
-            or not self.library.photos
-        ):
-            return
-
-        if self._photo_viewer_exif_thread is not None:
-            self._photo_viewer_exif_request_id += 1
-            self._photo_viewer_exif_refresh_pending = True
-            if self._photo_viewer_exif_worker is not None:
-                self._photo_viewer_exif_worker.cancel()
-
-            self._photo_viewer_exif_thread.quit()
-            return
-
-        try:
-            photo = self.library.get_photo(self.current_photo_id)
-        except KeyError:
-            return
-
-        self._photo_viewer_exif_request_id += 1
-        request_id = self._photo_viewer_exif_request_id
-        self._photo_viewer_exif_thread = QThread(self)
-        self._photo_viewer_exif_worker = PhotoViewerExifWorker(
-            request_id,
-            photo.photo_id,
-            photo.metadata_source,
-            photo.preview_source,
-        )
-        self._photo_viewer_exif_worker.moveToThread(
-            self._photo_viewer_exif_thread
-        )
-        self._photo_viewer_exif_thread.started.connect(
-            self._photo_viewer_exif_worker.run
-        )
-        self._photo_viewer_exif_worker.finished.connect(
-            self._handle_photo_viewer_exif_finished
-        )
-        self._photo_viewer_exif_worker.failed.connect(
-            self._handle_photo_viewer_exif_failed
-        )
-        self._photo_viewer_exif_worker.finished.connect(
-            self._photo_viewer_exif_thread.quit
-        )
-        self._photo_viewer_exif_worker.failed.connect(
-            self._photo_viewer_exif_thread.quit
-        )
-        self._photo_viewer_exif_worker.finished.connect(
-            self._photo_viewer_exif_worker.deleteLater
-        )
-        self._photo_viewer_exif_worker.failed.connect(
-            self._photo_viewer_exif_worker.deleteLater
-        )
-        self._photo_viewer_exif_thread.finished.connect(
-            self._photo_viewer_exif_thread.deleteLater
-        )
-        finished_thread = self._photo_viewer_exif_thread
-        finished_worker = self._photo_viewer_exif_worker
-        self._photo_viewer_exif_thread.finished.connect(
-            lambda: self._clear_photo_viewer_exif_worker(
-                finished_thread, finished_worker
-            )
-        )
-        self._photo_viewer_exif_thread.start()
-
-    def _handle_photo_viewer_exif_finished(
-            self: MainWindow,
-            request_id: int,
-            photo_id: str,
-            focus_point: object,
-    ) -> None:
-        """Apply a current EXIF focus result to the loaded viewer photo."""
-        if (
-            self._closing
-            or not self._photo_viewer_mode
-            or request_id != self._photo_viewer_exif_request_id
-            or focus_point is None
-        ):
-            return
-
-        if (
-            not isinstance(focus_point, tuple)
-            or len(focus_point) != FOCUS_POINT_COORDINATE_COUNT
-        ):
-            return
-
-        try:
-            photo = self.library.get_photo(photo_id)
-        except KeyError:
-            return
-
-        point = cast('tuple[float, float]', focus_point)
-        photo.focus_point = (float(point[0]), float(point[1]))
-        photo.focus_point_pending = False
-        if self.current_photo_id == photo_id:
-            self.viewer.set_focus_point(photo.focus_point)
-
-    def _handle_photo_viewer_exif_failed(
-            self: MainWindow, request_id: int, _error: str
-    ) -> None:
-        """Invalidate the active EXIF request after a worker failure."""
-        if request_id == self._photo_viewer_exif_request_id:
-            self._photo_viewer_exif_request_id += 1
-
-    def _clear_photo_viewer_exif_worker(
-            self: MainWindow, finished_thread: object, finished_worker: object
-    ) -> None:
-        """Clear the finished EXIF worker and run any queued refresh."""
-        if (
-            self._photo_viewer_exif_thread is finished_thread
-            and self._photo_viewer_exif_worker is finished_worker
-        ):
-            self._photo_viewer_exif_thread = None
-            self._photo_viewer_exif_worker = None
-
-        if self._photo_viewer_exif_refresh_pending and not self._closing:
-            self._photo_viewer_exif_refresh_pending = False
-            self._start_photo_viewer_exif_refresh()
-
-        self._finish_deferred_close_if_ready()
-
-    def _start_viewer_prefetch(self: MainWindow) -> None:
-        """Warm nearby viewer previews for photo-viewer navigation."""
-        if (
-            self._viewer_prefetch_thread is not None
-            or self.current_photo_id is None
-            or not self.library.photos
-        ):
-            return
-
-        photo_ids = [photo.photo_id for photo in self.library.get_photos()]
-        try:
-            current_index = photo_ids.index(self.current_photo_id)
-        except ValueError:
-            return
-
-        first_index = max(0, current_index - 5)
-        last_index = min(len(photo_ids), current_index + 6)
-        prefetch_ids = photo_ids[first_index:last_index]
-        self._viewer_prefetch_thread = QThread(self)
-        self._viewer_prefetch_worker = ViewerPrefetchWorker(
-            self.library, prefetch_ids
-        )
-        self._viewer_prefetch_worker.moveToThread(self._viewer_prefetch_thread)
-        self._viewer_prefetch_thread.started.connect(
-            self._viewer_prefetch_worker.run
-        )
-        self._viewer_prefetch_worker.finished.connect(
-            self._viewer_prefetch_thread.quit
-        )
-        self._viewer_prefetch_worker.failed.connect(
-            self._viewer_prefetch_thread.quit
-        )
-        self._viewer_prefetch_worker.finished.connect(
-            self._viewer_prefetch_worker.deleteLater
-        )
-        self._viewer_prefetch_worker.failed.connect(
-            self._viewer_prefetch_worker.deleteLater
-        )
-        self._viewer_prefetch_thread.finished.connect(
-            self._viewer_prefetch_thread.deleteLater
-        )
-        self._viewer_prefetch_thread.finished.connect(
-            self._clear_viewer_prefetch_worker
-        )
-        self._viewer_prefetch_thread.start()
-
-    def _clear_viewer_prefetch_worker(self: MainWindow) -> None:
-        """Clear the finished preview-prefetch worker slot."""
-        self._viewer_prefetch_thread = None
-        self._viewer_prefetch_worker = None
-        self._finish_deferred_close_if_ready()
-
-    def _stop_photo_viewer_background_tasks(self: MainWindow) -> None:
-        """Request cancellation for photo-viewer background work."""
-        self._pending_browse_after_hydration = False
-        self._queued_folder_hydration_folder = None
-        self._photo_viewer_exif_refresh_pending = False
-        self._photo_viewer_exif_request_id += 1
-        self._folder_hydration_request_id += 1
-        self._folder_hydration_folder = None
-        self._stop_background_thread(
-            thread_attr='_photo_viewer_exif_thread',
-            worker_attr='_photo_viewer_exif_worker',
-        )
-        self._stop_background_thread(
-            thread_attr='_viewer_prefetch_thread',
-            worker_attr='_viewer_prefetch_worker',
-        )
-        self._stop_background_thread(
-            thread_attr='_folder_hydration_thread',
-            worker_attr='_folder_hydration_worker',
-        )
-        if self._folder_hydration_thread is None:
-            self._clear_folder_hydration_bridge()
-
-        self._folder_hydration_message = ''
-        self._folder_hydration_progress = 0
-
-    def _cancel_photo_viewer_background_tasks_for_replacement(
-            self: MainWindow,
-    ) -> None:
-        """Cancel stale background work before opening another system file."""
-        self._pending_browse_after_hydration = False
-        self._queued_folder_hydration_folder = None
-        self._photo_viewer_exif_refresh_pending = False
-        self._photo_viewer_exif_request_id += 1
-        self._folder_hydration_request_id += 1
-        self._folder_hydration_folder = None
-        self._folder_hydration_message = ''
-        self._folder_hydration_progress = 0
-        self._stop_background_thread(
-            thread_attr='_photo_viewer_exif_thread',
-            worker_attr='_photo_viewer_exif_worker',
-        )
-        self._stop_background_thread(
-            thread_attr='_viewer_prefetch_thread',
-            worker_attr='_viewer_prefetch_worker',
-        )
-        self._stop_background_thread(
-            thread_attr='_folder_hydration_thread',
-            worker_attr='_folder_hydration_worker',
-        )
-        if self._folder_hydration_thread is None:
-            self._clear_folder_hydration_bridge()
-
-    def _stop_background_thread(
-            self: MainWindow,
-            *,
-            thread_attr: str,
-            worker_attr: str,
-    ) -> None:
-        """Request cancellation and clear already-stopped worker slots."""
-        thread = getattr(self, thread_attr)
-        worker = getattr(self, worker_attr)
-        if worker is not None and hasattr(worker, 'cancel'):
-            worker.cancel()
-
-        if thread is not None:
-            thread.quit()
-            is_running = getattr(thread, 'isRunning', None)
-            if callable(is_running) and not is_running():
-                # Qt may have emitted finished before the queued cleanup slot
-                # runs. Clear stopped slots now so closeEvent does not defer
-                # on a thread object that can no longer do work.
-                setattr(self, thread_attr, None)
-                setattr(self, worker_attr, None)
-
-            return
-
-        setattr(self, thread_attr, None)
-        setattr(self, worker_attr, None)
-
-    def _start_folder_hydration(self: MainWindow, folder: Path) -> None:
-        """Start full folder loading for photo-viewer handoff to culling UI."""
-        if self._folder_hydration_thread is not None:
-            # Folder hydration is a background convenience, so when multiple
-            # opens arrive quickly only the newest folder should run after the
-            # current worker winds down.
-            self._queued_folder_hydration_folder = folder
-            if self._folder_hydration_worker is not None:
-                self._folder_hydration_worker.cancel()
-
-            self._folder_hydration_thread.quit()
-            return
-
-        expected_folder = folder.expanduser().resolve()
-        self._folder_hydration_request_id += 1
-        request_id = self._folder_hydration_request_id
-        self._folder_hydration_folder = expected_folder
-        self._queued_folder_hydration_folder = None
-        self._folder_hydration_message = 'Loading folder...'
-        self._folder_hydration_progress = 0
-        self._folder_hydration_thread = QThread(self)
-        self._folder_hydration_worker = FolderHydrationWorker(
-            request_id,
-            expected_folder,
-            cache_dir=self.library.cache_dir,
-            sort_mode=self.library.sort_mode,
-            sort_reversed=self.library.sort_reversed,
-        )
-        bridge = FolderHydrationSignalBridge(self)
-        self._folder_hydration_bridge = bridge
-        self._folder_hydration_worker.moveToThread(
-            self._folder_hydration_thread
-        )
-        self._folder_hydration_thread.started.connect(
-            self._folder_hydration_worker.run
-        )
-        self._folder_hydration_worker.progress.connect(bridge.handle_progress)
-        self._folder_hydration_worker.finished.connect(bridge.handle_finished)
-        self._folder_hydration_worker.failed.connect(bridge.handle_failed)
-        self._folder_hydration_worker.finished.connect(
-            self._folder_hydration_thread.quit
-        )
-        self._folder_hydration_worker.failed.connect(
-            self._folder_hydration_thread.quit
-        )
-        self._folder_hydration_worker.finished.connect(
-            self._folder_hydration_worker.deleteLater
-        )
-        self._folder_hydration_worker.failed.connect(
-            self._folder_hydration_worker.deleteLater
-        )
-        self._folder_hydration_thread.finished.connect(
-            self._folder_hydration_thread.deleteLater
-        )
-        finished_thread = self._folder_hydration_thread
-        finished_worker = self._folder_hydration_worker
-        self._folder_hydration_thread.finished.connect(
-            lambda: self._clear_folder_hydration_worker(
-                request_id,
-                expected_folder,
-                finished_thread,
-                finished_worker,
-            )
-        )
-        self._folder_hydration_thread.start()
+        self._restore_active_navigation_focus(defer=True)
 
     def detect_scenes(self: MainWindow) -> None:
         """Start asynchronous scene detection for the loaded photo set."""
@@ -776,175 +307,6 @@ class MainWindowWorkflowMixin:
             self: MainWindow, message: str, progress: int
     ) -> None:
         self._show_progress(message, progress)
-
-    @Slot(int, object, str, int)
-    def _handle_folder_hydration_progress(
-            self: MainWindow,
-            request_id: int,
-            expected_folder: Path,
-            message: str,
-            progress: int,
-    ) -> None:
-        """Record progress for the current folder-hydration request."""
-        if not self._folder_hydration_request_matches(
-            request_id, expected_folder
-        ):
-            return
-
-        self._folder_hydration_message = message
-        self._folder_hydration_progress = progress
-        if self._pending_browse_after_hydration and self._busy:
-            self._show_progress(message, progress)
-
-    @Slot(int, object, object)
-    def _handle_folder_hydration_finished(
-            self: MainWindow,
-            request_id: int,
-            expected_folder: Path,
-            library: object,
-    ) -> None:
-        """Apply the current folder-hydration result to the window state."""
-        # Hydration finishes after the fast viewer state is already visible.
-        # Match the captured request before swapping libraries so an older
-        # folder cannot replace a newer system-opened photo.
-        if not self._folder_hydration_request_matches(
-            request_id, expected_folder
-        ):
-            return
-
-        if not hasattr(library, 'photos'):
-            self._handle_folder_hydration_failed(
-                request_id,
-                expected_folder,
-                'Folder loading returned an invalid result.',
-            )
-            return
-
-        hydrated_folder = getattr(library, 'current_folder', None)
-        if hydrated_folder != expected_folder:
-            self._handle_folder_hydration_failed(
-                request_id,
-                expected_folder,
-                'Folder loading returned a stale result.',
-            )
-            return
-
-        self.library = library
-        self._photo_viewer_folder_access_granted = True
-        self._rebuild_loaded_views(preserve_current_photo=True)
-        if self._pending_browse_after_hydration:
-            self._pending_browse_after_hydration = False
-            self._hide_progress()
-            self._enter_browse_mode()
-
-    @Slot(int, object, str)
-    def _handle_folder_hydration_failed(
-            self: MainWindow,
-            request_id: int,
-            expected_folder: Path,
-            error: str,
-    ) -> None:
-        """Show a failure only for the current folder-hydration request."""
-        if not self._folder_hydration_request_matches(
-            request_id, expected_folder
-        ):
-            return
-
-        if self._pending_browse_after_hydration:
-            self._pending_browse_after_hydration = False
-            self._hide_progress()
-            QMessageBox.critical(self, 'Failed to Open Folder', error)
-            return
-
-        self._show_transient_message('Folder loading failed in the background')
-
-    def _clear_folder_hydration_worker(
-            self: MainWindow,
-            request_id: int,
-            expected_folder: Path,
-            finished_thread: object,
-            finished_worker: object,
-    ) -> None:
-        """Clear a finished hydration worker and start queued replacement."""
-        if (
-            self._folder_hydration_thread is finished_thread
-            and self._folder_hydration_worker is finished_worker
-        ):
-            self._folder_hydration_thread = None
-            self._folder_hydration_worker = None
-            self._clear_folder_hydration_bridge()
-            if self._folder_hydration_request_matches(
-                request_id, expected_folder
-            ):
-                self._folder_hydration_folder = None
-                self._folder_hydration_message = ''
-                self._folder_hydration_progress = 0
-
-        queued_folder = self._queued_folder_hydration_folder
-        if queued_folder is not None and not self._closing:
-            # A newer file-open may have arrived while the old hydration was
-            # uninterruptible. Start only that latest queued folder now that
-            # the old thread slot is clear.
-            self._queued_folder_hydration_folder = None
-            self._start_folder_hydration(queued_folder)
-
-        if not self._closing:
-            self._refresh_ui()
-            self._update_mode_shortcuts()
-
-        self._finish_deferred_close_if_ready()
-
-    def _clear_folder_hydration_bridge(self: MainWindow) -> None:
-        """Release the GUI-thread bridge for finished hydration signals."""
-        bridge = self._folder_hydration_bridge
-        self._folder_hydration_bridge = None
-        if isinstance(bridge, QObject):
-            bridge.deleteLater()
-
-    def _folder_hydration_request_matches(
-            self: MainWindow, request_id: int, expected_folder: Path
-    ) -> bool:
-        """Return whether a hydration signal belongs to the latest request."""
-        return (
-            self._folder_hydration_request_id == request_id
-            and self._folder_hydration_folder == expected_folder
-        )
-
-    def _photo_viewer_background_tasks_active(self: MainWindow) -> bool:
-        """Return whether a photo-viewer background thread is still running."""
-        return (
-            self._background_thread_slot_active(self._photo_viewer_exif_thread)
-            or self._background_thread_slot_active(
-                self._viewer_prefetch_thread
-            )
-            or self._background_thread_slot_active(
-                self._folder_hydration_thread
-            )
-        )
-
-    @staticmethod
-    def _background_thread_slot_active(thread: object) -> bool:
-        """Return whether a stored thread slot represents active work."""
-        if thread is None:
-            return False
-
-        is_running = getattr(thread, 'isRunning', None)
-        if callable(is_running):
-            return bool(is_running())
-
-        return True
-
-    def _finish_deferred_close_if_ready(self: MainWindow) -> None:
-        """Retry a deferred close once photo-viewer workers are inactive."""
-        if (
-            self._close_after_background_tasks
-            and not self._photo_viewer_background_tasks_active()
-        ):
-            # The original close event was ignored to avoid blocking Qt while
-            # workers stopped. Re-issue close after cleanup so normal window
-            # teardown runs once the background slots are inactive.
-            self._close_after_background_tasks = False
-            self.close()
 
     def _handle_scene_finished(self: MainWindow) -> None:
         was_browse_mode = self._browse_mode
@@ -1215,9 +577,6 @@ class MainWindowWorkflowMixin:
         self._show_progress(message, progress)
 
     def _set_rating(self: MainWindow, rating: int | None) -> None:
-        if getattr(self, '_photo_viewer_mode', False):
-            return
-
         if hasattr(self, '_apply_metadata_to_selection'):
             self._apply_metadata_to_selection('rating', rating)
             return
@@ -1229,9 +588,6 @@ class MainWindowWorkflowMixin:
         self._after_metadata_change()
 
     def _set_color_label(self: MainWindow, color_label: str | None) -> None:
-        if getattr(self, '_photo_viewer_mode', False):
-            return
-
         if hasattr(self, '_apply_metadata_to_selection'):
             self._apply_metadata_to_selection('color_label', color_label)
             return
@@ -1245,9 +601,6 @@ class MainWindowWorkflowMixin:
         self._after_metadata_change()
 
     def _set_flag(self: MainWindow, flag: str | None) -> None:
-        if getattr(self, '_photo_viewer_mode', False):
-            return
-
         if hasattr(self, '_apply_metadata_to_selection'):
             self._apply_metadata_to_selection('flag', flag)
             return
@@ -1780,10 +1133,10 @@ class MainWindowWorkflowMixin:
             )
 
         for action in self._assignment_actions:
-            action.setEnabled(enabled and not self._photo_viewer_mode)
+            action.setEnabled(enabled)
 
         for shortcut in self._assignment_shortcuts:
-            shortcut.setEnabled(enabled and not self._photo_viewer_mode)
+            shortcut.setEnabled(enabled)
 
         self._refresh_metadata_history_actions()
 
