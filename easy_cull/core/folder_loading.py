@@ -10,6 +10,7 @@ import easy_cull.core.exif as exif_module
 import easy_cull.core.metadata as metadata_module
 from easy_cull.core.records import (
     COLOR_LABELS,
+    HEIF_EXTENSIONS,
     JPEG_EXTENSIONS,
     MAX_RATING,
     MIN_RATING,
@@ -218,6 +219,9 @@ def _build_photo_record(
     jpeg_files = [
         path for path in raster_files if path.suffix.lower() in JPEG_EXTENSIONS
     ]
+    heif_files = [
+        path for path in raster_files if path.suffix.lower() in HEIF_EXTENSIONS
+    ]
     raw_files = [
         path
         for path in sorted_group_files
@@ -234,7 +238,10 @@ def _build_photo_record(
         or {}
     )
     exif_display = build_photo_exif_display(
-        source_metadata, jpeg_files=jpeg_files, raw_files=raw_files
+        source_metadata,
+        jpeg_files=jpeg_files,
+        heif_files=heif_files,
+        raw_files=raw_files,
     )
     focus_point = exif_module.extract_focus_point(
         source_metadata, exif_display.image_width, exif_display.image_height
@@ -254,6 +261,8 @@ def _build_photo_record(
         preview_source=preview_source,
         metadata_source=metadata_source,
         focus_point=focus_point,
+        has_heif=bool(heif_files),
+        has_raster=bool(raster_files),
         focus_point_pending=focus_point_pending,
         capture_at=exif_display.capture_at,
         rating=rating
@@ -272,6 +281,7 @@ def build_photo_exif_display(
         source_metadata: dict[str, Any],
         *,
         jpeg_files: list[Path],
+        heif_files: list[Path] | None = None,
         raw_files: list[Path],
 ) -> PhotoExifDisplay:
     """Build culling-compatible formatted EXIF rows for one photo group."""
@@ -281,7 +291,12 @@ def build_photo_exif_display(
     _add_capture_time_display(exif_display, capture_at)
     exif_display.update(exif_module.format_exif_display(source_metadata))
     _add_resolution_display(exif_display, image_width, image_height)
-    _add_file_size_display(exif_display, jpeg_files, raw_files)
+    _add_file_size_display(
+        exif_display,
+        jpeg_files,
+        heif_files or [],
+        raw_files,
+    )
     return PhotoExifDisplay(
         capture_at=capture_at,
         image_width=image_width,
@@ -318,13 +333,18 @@ def _add_resolution_display(
 def _add_file_size_display(
         exif_display: dict[str, str],
         jpeg_files: list[Path],
+        heif_files: list[Path],
         raw_files: list[Path],
 ) -> None:
     parts: list[str] = []
     jpeg_size = sum(path.stat().st_size for path in jpeg_files)
+    heif_size = sum(path.stat().st_size for path in heif_files)
     raw_size = sum(path.stat().st_size for path in raw_files)
     if jpeg_size:
         parts.append(f'JPG: {_format_file_size(jpeg_size)}')
+
+    if heif_size:
+        parts.append(f'HEIF: {_format_file_size(heif_size)}')
 
     if raw_size:
         parts.append(f'RAW: {_format_file_size(raw_size)}')

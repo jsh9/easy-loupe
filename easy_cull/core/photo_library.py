@@ -10,6 +10,7 @@ import easy_cull.core.preview as _preview_module
 from easy_cull.core.folder_loading import (
     DEFAULT_PHOTO_SORT_MODE,
     DEFAULT_PHOTO_SORT_REVERSED,
+    PHOTO_SORT_MODE_FILENAME,
 )
 from easy_cull.core.folder_loading import (
     load_folder_state as _load_folder_state,
@@ -112,6 +113,10 @@ class PhotoLibrary:
             allow_folder_scan: bool = True,
     ) -> None:
         """Load a fast filename-sorted state for photo-viewer startup."""
+        # The standalone viewer has its own ordering contract: adjacent-photo
+        # navigation follows filenames, regardless of persisted culling prefs.
+        self.sort_mode = PHOTO_SORT_MODE_FILENAME
+        self.sort_reversed = DEFAULT_PHOTO_SORT_REVERSED
         loaded_state = _load_viewer_folder_state(
             opened_file, allow_folder_scan=allow_folder_scan
         )

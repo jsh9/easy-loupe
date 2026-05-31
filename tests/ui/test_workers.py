@@ -124,12 +124,21 @@ def test_viewer_prefetch_worker_cancel_skips_remaining_previews() -> None:
 def test_photo_viewer_exif_worker_emits_current_photo_focus_point(
         tmp_path: Path, monkeypatch: Any
 ) -> None:
+    """
+    Verify the viewer EXIF worker emits focus and full file-size display data.
+
+    The standalone viewer loads metadata asynchronously, so this protects the
+    worker path that fills in focus points plus JPEG, HEIF, and RAW size rows
+    after the initial lightweight record has already been shown.
+    """
     finished_events: list[tuple[int, str, object]] = []
     failed_events: list[tuple[int, str]] = []
     metadata_source = tmp_path / 'A.CR3'
     preview_source = tmp_path / 'A.JPG'
+    heif_source = tmp_path / 'A.HEIC'
     metadata_source.write_bytes(b'raw')
     preview_source.write_bytes(b'jpeg')
+    heif_source.write_bytes(b'heif')
     monkeypatch.setattr(
         photo_viewer_workers_module.exif_module,
         'read_exif_metadata',
@@ -155,7 +164,7 @@ def test_photo_viewer_exif_worker_emits_current_photo_focus_point(
         'A',
         metadata_source,
         preview_source,
-        [metadata_source, preview_source],
+        [metadata_source, preview_source, heif_source],
     )
     worker.finished.connect(
         lambda request_id, photo_id, focus_point: finished_events.append((
@@ -189,7 +198,7 @@ def test_photo_viewer_exif_worker_emits_current_photo_focus_point(
         'Shutter Speed': '1/250\u00a0s',
         'ISO': '800',
         'Resolution': '1000 x 500 pixels (0.5 MP)',
-        'File Size': 'JPG: 1 KB, RAW: 1 KB',
+        'File Size': 'JPG: 1 KB, HEIF: 1 KB, RAW: 1 KB',
     }
 
 

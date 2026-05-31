@@ -16,6 +16,7 @@ from easy_cull.core.folder_loading import (
     normalize_sort_reversed,
 )
 from easy_cull.core.photo_library import PhotoLibrary
+from easy_cull.ui.launch import CullingLaunchRequest
 from easy_cull.ui.viewers.compare_photo_viewer import (
     COMPARE_PHOTO_LIMIT_OPTIONS,
     DEFAULT_COMPARE_PHOTO_LIMIT,
@@ -547,6 +548,59 @@ def test_main_window_invalid_stored_photo_sort_uses_default() -> None:
     assert window.photo_sort_buttons[PHOTO_SORT_MODE_CAPTURE_TIME].isChecked()
     assert not window.photo_sort_reverse_checkbox.isChecked()
 
+    window.close()
+    del app
+
+
+def test_main_window_handoff_reapplies_persisted_culling_sort(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify culling handoff reapplies persisted sort to a preloaded library.
+
+    The photo viewer deliberately hydrates folders in filename order, but
+    culling mode must restore its own saved sort before building the UI lists.
+    """
+    app = QApplication.instance() or QApplication([])
+    settings = QSettings(identity_module.APP_NAME, identity_module.APP_NAME)
+    settings.setValue(
+        build_module.PHOTO_SORT_MODE_SETTINGS_KEY,
+        PHOTO_SORT_MODE_CAPTURE_TIME,
+    )
+    settings.setValue(build_module.PHOTO_SORT_REVERSED_SETTINGS_KEY, True)
+    settings.sync()
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    create_jpeg(tmp_path / 'B.JPG', 'blue')
+    stub_read_exif(
+        monkeypatch,
+        {
+            'A.JPG': {'DateTimeOriginal': '2024:05:01 10:00:00'},
+            'B.JPG': {'DateTimeOriginal': '2024:05:01 10:00:10'},
+        },
+    )
+    preloaded_library = PhotoLibrary(
+        cache_dir=tmp_path / '.cache',
+        sort_mode=PHOTO_SORT_MODE_FILENAME,
+    )
+    preloaded_library.load_folder(tmp_path)
+
+    window = main_window_module.MainWindow(
+        launch_request=CullingLaunchRequest(
+            folder=tmp_path,
+            selected_photo_id='A',
+            enter_browse=True,
+            preloaded_library=preloaded_library,
+        )
+    )
+
+    assert [photo.photo_id for photo in window.library.photos] == ['B', 'A']
+    assert window.current_photo_id == 'A'
+    assert window.library.sort_mode == PHOTO_SORT_MODE_CAPTURE_TIME
+    assert window.library.sort_reversed is True
+    assert window.photo_sort_buttons[PHOTO_SORT_MODE_CAPTURE_TIME].isChecked()
+    assert window.photo_sort_reverse_checkbox.isChecked()
+    assert window._browse_mode is True
     window.close()
     del app
 

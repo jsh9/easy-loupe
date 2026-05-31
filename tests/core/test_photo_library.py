@@ -113,6 +113,12 @@ def test_supported_extensions_include_major_viewer_formats() -> None:
 def test_load_folder_prefers_heic_preview_over_raw_with_shared_stem(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """
+    Verify HEIF files participate in shared-stem photo records as rasters.
+
+    RAW should remain the metadata source when present, but HEIF must be a
+    usable preview source and appear in the EXIF file-size summary.
+    """
     (tmp_path / 'IMG_0100.HEIC').write_bytes(b'heic')
     (tmp_path / 'IMG_0100.ARW').write_bytes(b'raw')
     stub_read_exif(monkeypatch, {})
@@ -124,12 +130,22 @@ def test_load_folder_prefers_heic_preview_over_raw_with_shared_stem(
     photo = library.photos[0]
     assert photo.preview_source == tmp_path / 'IMG_0100.HEIC'
     assert photo.metadata_source == tmp_path / 'IMG_0100.ARW'
+    assert photo.has_jpeg is False
+    assert photo.has_heif is True
+    assert photo.has_raster is True
     assert photo.has_raw is True
+    assert photo.exif_display == {'File Size': 'HEIF: 1 KB, RAW: 1 KB'}
 
 
 def test_load_viewer_folder_uses_filename_order_and_can_open_single_file(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """
+    Verify viewer folder loads always use ascending filename order.
+
+    The photo viewer should ignore culling sort preferences, including a
+    persisted capture-time reverse order, so adjacent navigation is stable.
+    """
     create_jpeg(tmp_path / 'B.JPG', 'blue')
     create_jpeg(tmp_path / 'A.JPG', 'green')
     create_jpeg(tmp_path / 'C.JPG', 'purple')
@@ -141,10 +157,16 @@ def test_load_viewer_folder_uses_filename_order_and_can_open_single_file(
         },
     )
 
-    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library = PhotoLibrary(
+        cache_dir=tmp_path / '.cache',
+        sort_mode=PHOTO_SORT_MODE_CAPTURE_TIME,
+        sort_reversed=True,
+    )
     library.load_viewer_folder(tmp_path / 'B.JPG')
 
     assert [photo.photo_id for photo in library.photos] == ['A', 'B', 'C']
+    assert library.sort_mode == PHOTO_SORT_MODE_FILENAME
+    assert library.sort_reversed is False
     assert all(photo.focus_point_pending for photo in library.photos)
 
     single_library = PhotoLibrary(cache_dir=tmp_path / '.single-cache')

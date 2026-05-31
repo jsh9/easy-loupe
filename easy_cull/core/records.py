@@ -77,6 +77,8 @@ class PhotoRecord:
     preview_source: Path
     metadata_source: Path
     focus_point: tuple[float, float]
+    has_heif: bool = False
+    has_raster: bool = False
     focus_point_pending: bool = False
     capture_at: datetime | None = None
     rating: int | None = None
@@ -94,6 +96,8 @@ class PhotoRecord:
             'display_name': self.display_name,
             'files': self.files,
             'has_jpeg': self.has_jpeg,
+            'has_heif': self.has_heif,
+            'has_raster': self.has_raster,
             'has_raw': self.has_raw,
             'rating': self.rating,
             'color_label': self.color_label,

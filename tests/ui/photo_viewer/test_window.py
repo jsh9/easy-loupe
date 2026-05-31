@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PySide6.QtGui import QKeySequence
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 import easy_cull.ui.photo_viewer.window as photo_viewer_window_module
 from easy_cull.core.photo_library import PhotoLibrary
@@ -104,6 +104,89 @@ def test_photo_viewer_window_opens_file_and_navigates_adjacent_photos(
     assert window.current_photo_id == 'B'
     assert window.windowTitle() == 'EasyCull - B.JPG (2 / 3)'
     window.close()
+
+
+def test_photo_viewer_navigation_preview_failure_preserves_current_photo(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify a bad adjacent preview preserves the current photo.
+
+    Navigation updates the current id before rendering the next preview; this
+    guards the rollback path so title, state, and handoff stay on the last
+    successfully displayed photo.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    create_jpeg(tmp_path / 'B.JPG', 'blue')
+    create_jpeg(tmp_path / 'C.JPG', 'purple')
+    _app, window = _open_viewer(tmp_path, monkeypatch)
+    original_get_preview_path = window.library.get_preview_path
+    messages: list[str] = []
+    monkeypatch.setattr(
+        window,
+        '_show_transient_message',
+        lambda message, **_kwargs: messages.append(message),
+    )
+
+    def get_preview_path(photo_id: str, kind: str) -> Path:
+        if photo_id == 'C':
+            raise RuntimeError('corrupt preview')
+
+        return original_get_preview_path(photo_id, kind)
+
+    monkeypatch.setattr(window.library, 'get_preview_path', get_preview_path)
+
+    window.navigate(1)
+
+    assert window.current_photo_id == 'B'
+    assert window.windowTitle() == 'EasyCull - B.JPG (2 / 3)'
+    assert messages == ['Failed to open photo: corrupt preview']
+    window.close()
+
+
+def test_photo_viewer_startup_preview_failure_closes_viewer(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify startup preview render errors close through the open-failure UI.
+
+    Metadata scanning can succeed before image decoding fails, so startup needs
+    a controlled error path instead of leaving a blank viewer window.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    stub_read_exif(monkeypatch, {})
+    _disable_background_startup(monkeypatch)
+    monkeypatch.setattr(
+        photo_viewer_window_module.FolderAccessManager,
+        'ensure_access_for_file',
+        lambda _manager, _path, _parent: True,
+    )
+
+    def fail_preview(
+            _library: PhotoLibrary, _photo_id: str, _kind: str
+    ) -> Path:
+        raise RuntimeError('decode failed')
+
+    monkeypatch.setattr(PhotoLibrary, 'get_preview_path', fail_preview)
+    critical_calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        'critical',
+        lambda _parent, title, message: critical_calls.append((
+            title,
+            message,
+        )),
+    )
+    app = QApplication.instance() or QApplication([])
+    window = PhotoViewerWindow(tmp_path / 'A.JPG')
+    window.show()
+
+    app.processEvents()
+
+    assert critical_calls == [('Failed to Open Photo', 'decode failed')]
+    assert window._closing is True
 
 
 def test_photo_viewer_message_overlays_are_framed_and_readable(
@@ -650,4 +733,38 @@ def test_photo_viewer_culling_handoff_waits_for_hydration(
     assert request.enter_browse is True
     assert request.preloaded_library is hydrated_library
     window._folder_hydration_thread = None
+    window.close()
+
+
+def test_photo_viewer_handoff_blocks_after_hydration_failure(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify hydration failure blocks culling handoff and shows the load error.
+
+    The initial viewer library is intentionally lightweight. Culling should
+    never receive it after full-folder hydration fails, because that would hide
+    the real folder-load problem and start with incomplete metadata.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    create_jpeg(tmp_path / 'B.JPG', 'blue')
+    _app, window = _open_viewer(tmp_path, monkeypatch)
+    requests: list[object] = []
+    critical_calls: list[tuple[str, str]] = []
+    window.culling_requested.connect(requests.append)
+    monkeypatch.setattr(
+        QMessageBox,
+        'critical',
+        lambda _parent, title, message: critical_calls.append((
+            title,
+            message,
+        )),
+    )
+    window._folder_hydration_error = 'bad metadata'
+
+    window._request_culling_handoff()
+
+    assert requests == []
+    assert critical_calls == [('Failed to Open Folder', 'bad metadata')]
     window.close()

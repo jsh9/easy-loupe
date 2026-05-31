@@ -46,6 +46,11 @@ from easy_cull.ui.viewers.compare_photo_viewer import (
 )
 from easy_cull.ui.viewers.exif_overlay import ExifOverlayWidget
 from easy_cull.ui.viewers.main_photo_viewer import MainPhotoViewer
+from easy_cull.ui.viewers.shell import (
+    exif_overlay_geometry_ready,
+    make_window_shortcut,
+    update_exif_overlay_geometry,
+)
 from easy_cull.ui.widgets import (
     SceneListWidget,
     ThumbnailListWidget,
@@ -809,10 +814,12 @@ class MainWindowBuildMixin:
             key: str | int,
             callback: Callable[[], None],
     ) -> QShortcut:
-        shortcut = QShortcut(QKeySequence(key), self)
-        shortcut.setContext(Qt.WindowShortcut)
-        shortcut.activated.connect(lambda: None if self._busy else callback())
-        return shortcut
+        return make_window_shortcut(
+            self,
+            key,
+            callback,
+            blocked=lambda: self._busy,
+        )
 
     def _update_mode_shortcuts(self: MainWindow) -> None:
         normal_view_shortcuts_enabled = (
@@ -973,12 +980,8 @@ class MainWindowBuildMixin:
 
     def _info_overlay_geometry_ready(self: MainWindow) -> bool:
         """Return whether the viewer stack is large enough for the overlay."""
-        parent_rect = self.viewer_stack_widget.rect()
-        margin = 14
-        return parent_rect.width() >= self.exif_overlay.width() + (
-            margin * 2
-        ) and parent_rect.height() >= self.exif_overlay.minimumHeight() + (
-            margin * 2
+        return exif_overlay_geometry_ready(
+            self.viewer_stack_widget, self.exif_overlay
         )
 
     def _defer_info_overlay_refresh(self: MainWindow) -> None:
@@ -998,20 +1001,9 @@ class MainWindowBuildMixin:
         if not hasattr(self, 'exif_overlay'):
             return
 
-        margin = 14
-        parent_rect = self.viewer_stack_widget.rect()
-        size_hint = self.exif_overlay.sizeHint()
-        width = self.exif_overlay.width()
-        minimum_height = self.exif_overlay.minimumSizeHint().height()
-        height = min(
-            max(size_hint.height(), minimum_height),
-            max(parent_rect.height() - (margin * 2), 0),
+        update_exif_overlay_geometry(
+            self.viewer_stack_widget, self.exif_overlay
         )
-        if height < minimum_height:
-            return
-
-        x = max(margin, parent_rect.width() - width - margin)
-        self.exif_overlay.setGeometry(x, margin, width, height)
 
     def _create_assignment_action(
             self: MainWindow,

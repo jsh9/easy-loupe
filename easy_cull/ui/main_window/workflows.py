@@ -118,6 +118,15 @@ class MainWindowWorkflowMixin:
         else:
             self.library.load_folder(request.folder)
 
+        # Handoff may reuse a hydrated photo-viewer library, whose order is
+        # filename-only. Culling mode owns the persisted sort controls, so
+        # reapply them before rebuilding any lists from the handed-off state.
+        self.library.set_sort_order(
+            sort_mode=self._load_photo_sort_mode(),
+            sort_reversed=self._load_photo_sort_reversed(),
+        )
+        self._check_photo_sort_control(self.library.sort_mode)
+        self._check_photo_sort_reverse_control(self.library.sort_reversed)
         loaded_photo_ids = {photo.photo_id for photo in self.library.photos}
         self.current_photo_id = (
             request.selected_photo_id

@@ -10,7 +10,11 @@ from PySide6.QtCore import QObject, Signal
 import easy_cull.core.exif as exif_module
 from easy_cull.core.folder_loading import build_photo_exif_display
 from easy_cull.core.photo_library import PhotoLibrary
-from easy_cull.core.records import JPEG_EXTENSIONS, RAW_EXTENSIONS
+from easy_cull.core.records import (
+    HEIF_EXTENSIONS,
+    JPEG_EXTENSIONS,
+    RAW_EXTENSIONS,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -121,13 +125,21 @@ class PhotoViewerExifWorker(QObject):
                 for path in self._photo_files
                 if path.suffix.lower() in JPEG_EXTENSIONS
             ]
+            heif_files = [
+                path
+                for path in self._photo_files
+                if path.suffix.lower() in HEIF_EXTENSIONS
+            ]
             raw_files = [
                 path
                 for path in self._photo_files
                 if path.suffix.lower() in RAW_EXTENSIONS
             ]
             exif_display = build_photo_exif_display(
-                metadata, jpeg_files=jpeg_files, raw_files=raw_files
+                metadata,
+                jpeg_files=jpeg_files,
+                heif_files=heif_files,
+                raw_files=raw_files,
             )
             result = PhotoViewerExifResult(
                 focus_point=focus_point,

@@ -16,7 +16,7 @@ from PySide6.QtCore import (
     Signal,
     Slot,
 )
-from PySide6.QtGui import QCloseEvent, QKeySequence, QPixmap, QShortcut
+from PySide6.QtGui import QCloseEvent, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -28,6 +28,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from easy_cull.core.folder_loading import (
+    DEFAULT_PHOTO_SORT_REVERSED,
+    PHOTO_SORT_MODE_FILENAME,
+)
 from easy_cull.core.histogram import compute_rgb_histogram
 from easy_cull.core.photo_library import PhotoLibrary
 from easy_cull.ui.folder_access import FolderAccessManager
@@ -42,6 +46,11 @@ from easy_cull.ui.photo_viewer.workers import (
 )
 from easy_cull.ui.viewers.exif_overlay import ExifOverlayWidget
 from easy_cull.ui.viewers.main_photo_viewer import MainPhotoViewer
+from easy_cull.ui.viewers.shell import (
+    exif_overlay_geometry_ready,
+    make_window_shortcut,
+    update_exif_overlay_geometry,
+)
 from easy_cull.ui.widgets import ThumbnailPreviewWidget
 
 if TYPE_CHECKING:
@@ -152,6 +161,7 @@ class PhotoViewerWindow(QMainWindow):
         self._folder_hydration_progress = 0
         self._folder_hydration_request_id = 0
         self._folder_hydration_folder: Path | None = None
+        self._folder_hydration_error: str | None = None
         self._folder_hydration_thread: QThread | None = None
         self._folder_hydration_worker: FolderHydrationWorker | None = None
         self._folder_hydration_bridge: object | None = None
@@ -368,14 +378,14 @@ class PhotoViewerWindow(QMainWindow):
     def _make_shortcut(
             self, key: str | int, callback: Callable[[], None]
     ) -> QShortcut:
-        shortcut = QShortcut(QKeySequence(key), self)
-        shortcut.setContext(Qt.WindowShortcut)
         # Treat the progress overlay as modal: background hydration/close
         # states should not accept navigation or viewer mutations.
-        shortcut.activated.connect(
-            lambda: None if self.progress_overlay.isVisible() else callback()
+        return make_window_shortcut(
+            self,
+            key,
+            callback,
+            blocked=self.progress_overlay.isVisible,
         )
-        return shortcut
 
     def _keyboard_pan_by(self, x_direction: int, y_direction: int) -> None:
         """Pan using the same screen-feeling step as culling view."""
@@ -422,11 +432,20 @@ class PhotoViewerWindow(QMainWindow):
         self._folder_access_granted = folder_access_granted
         self._title_suffix = resolved_path.suffix.casefold()
         self._hydrated_library = None
+        self._folder_hydration_error = None
         self.current_photo_id = self._photo_id_for_opened_file(resolved_path)
         if self.current_photo_id is None and self.library.photos:
             self.current_photo_id = self.library.photos[0].photo_id
 
-        self._display_current_photo(force_fit=True)
+        try:
+            # Metadata loading can succeed even when preview rendering fails.
+            # Treat that as an open failure instead of showing an empty shell.
+            self._display_current_photo(force_fit=True)
+        except (OSError, RuntimeError, ValueError) as exc:
+            QMessageBox.critical(self, 'Failed to Open Photo', str(exc))
+            self.close()
+            return
+
         self._refresh_window_title()
         self._start_photo_viewer_exif_refresh()
         self._start_viewer_prefetch()
@@ -460,9 +479,19 @@ class PhotoViewerWindow(QMainWindow):
         if next_index < 0 or next_index >= len(photo_ids):
             return
 
+        previous_photo_id = self.current_photo_id
         inspection_state = self._capture_inspection_state()
         self.current_photo_id = photo_ids[next_index]
-        self._display_current_photo(inspection_state=inspection_state)
+        try:
+            # Rendering needs the tentative current id. If it fails, restore
+            # the old id so title, overlay, and handoff state remain coherent.
+            self._display_current_photo(inspection_state=inspection_state)
+        except (OSError, RuntimeError, ValueError) as exc:
+            self.current_photo_id = previous_photo_id
+            self._display_current_photo(inspection_state=inspection_state)
+            self._show_transient_message(f'Failed to open photo: {exc}')
+            return
+
         self._refresh_window_title()
         self._start_photo_viewer_exif_refresh()
         self._start_viewer_prefetch()
@@ -557,6 +586,17 @@ class PhotoViewerWindow(QMainWindow):
         ):
             return
 
+        if self._folder_hydration_error is not None:
+            # The fast viewer library is intentionally incomplete. After a
+            # full hydration failure, culling must show the load error instead
+            # of receiving the lightweight viewer state.
+            QMessageBox.critical(
+                self,
+                'Failed to Open Folder',
+                self._folder_hydration_error,
+            )
+            return
+
         if (
             self._folder_hydration_thread is not None
             and self._hydrated_library is None
@@ -571,7 +611,10 @@ class PhotoViewerWindow(QMainWindow):
             )
             return
 
-        library = self._hydrated_library or self.library
+        if self._hydrated_library is None:
+            return
+
+        library = self._hydrated_library
         request = CullingLaunchRequest(
             folder=library.current_folder or self.library.current_folder,
             selected_photo_id=self.current_photo_id,
@@ -642,11 +685,10 @@ class PhotoViewerWindow(QMainWindow):
 
     def _info_overlay_geometry_ready(self) -> bool:
         """Return whether the viewer stack can fit the EXIF overlay."""
-        parent_rect = self.viewer_stack_widget.rect()
-        return parent_rect.width() >= self.exif_overlay.width() + (
-            INFO_OVERLAY_MARGIN * 2
-        ) and parent_rect.height() >= self.exif_overlay.minimumHeight() + (
-            INFO_OVERLAY_MARGIN * 2
+        return exif_overlay_geometry_ready(
+            self.viewer_stack_widget,
+            self.exif_overlay,
+            margin=INFO_OVERLAY_MARGIN,
         )
 
     def _defer_info_overlay_refresh(self) -> None:
@@ -663,20 +705,11 @@ class PhotoViewerWindow(QMainWindow):
 
     def _update_info_overlay_geometry(self) -> None:
         """Anchor the EXIF overlay at the top right of the viewer stack."""
-        margin = INFO_OVERLAY_MARGIN
-        parent_rect = self.viewer_stack_widget.rect()
-        size_hint = self.exif_overlay.sizeHint()
-        width = self.exif_overlay.width()
-        minimum_height = self.exif_overlay.minimumSizeHint().height()
-        height = min(
-            max(size_hint.height(), minimum_height),
-            max(parent_rect.height() - (margin * 2), 0),
+        update_exif_overlay_geometry(
+            self.viewer_stack_widget,
+            self.exif_overlay,
+            margin=INFO_OVERLAY_MARGIN,
         )
-        if height < minimum_height:
-            return
-
-        x = max(margin, parent_rect.width() - width - margin)
-        self.exif_overlay.setGeometry(x, margin, width, height)
 
     def _start_photo_viewer_exif_refresh(self) -> None:
         if self.current_photo_id is None or not self.library.photos:
@@ -868,6 +901,7 @@ class PhotoViewerWindow(QMainWindow):
         self._folder_hydration_request_id += 1
         request_id = self._folder_hydration_request_id
         self._folder_hydration_folder = expected_folder
+        self._folder_hydration_error = None
         self._folder_hydration_message = 'Loading folder...'
         self._folder_hydration_progress = 0
         self._folder_hydration_thread = QThread(self)
@@ -875,8 +909,8 @@ class PhotoViewerWindow(QMainWindow):
             request_id,
             expected_folder,
             cache_dir=self.library.cache_dir,
-            sort_mode=self.library.sort_mode,
-            sort_reversed=self.library.sort_reversed,
+            sort_mode=PHOTO_SORT_MODE_FILENAME,
+            sort_reversed=DEFAULT_PHOTO_SORT_REVERSED,
         )
         bridge = FolderHydrationSignalBridge(self)
         self._folder_hydration_bridge = bridge
@@ -970,7 +1004,16 @@ class PhotoViewerWindow(QMainWindow):
         else:
             self.current_photo_id = None
 
-        self._display_current_photo(inspection_state=inspection_state)
+        try:
+            self._display_current_photo(inspection_state=inspection_state)
+        except (OSError, RuntimeError, ValueError) as exc:
+            self._handle_folder_hydration_failed(
+                request_id,
+                expected_folder,
+                str(exc),
+            )
+            return
+
         self._refresh_window_title()
         if self._pending_culling_handoff:
             self._pending_culling_handoff = False
@@ -992,9 +1035,11 @@ class PhotoViewerWindow(QMainWindow):
         if self._pending_culling_handoff:
             self._pending_culling_handoff = False
             self._hide_progress()
+            self._folder_hydration_error = error
             QMessageBox.critical(self, 'Failed to Open Folder', error)
             return
 
+        self._folder_hydration_error = error
         self._show_transient_message('Folder loading failed in the background')
 
     def _clear_folder_hydration_worker(
@@ -1040,6 +1085,7 @@ class PhotoViewerWindow(QMainWindow):
         self._photo_viewer_exif_request_id += 1
         self._folder_hydration_request_id += 1
         self._folder_hydration_folder = None
+        self._folder_hydration_error = None
         self._hydrated_library = None
         self._stop_background_thread(
             thread_attr='_photo_viewer_exif_thread',
