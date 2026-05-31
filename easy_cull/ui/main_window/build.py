@@ -1201,10 +1201,22 @@ class MainWindowBuildMixin:
 
     def closeEvent(self: MainWindow, event: QCloseEvent) -> None:  # noqa: N802 - Qt API
         """Stop viewer background threads before the window is destroyed."""
-        self._closing = True
         self._initial_folder_prompt_pending = False
         self._initial_folder_prompt_timer.stop()
-        self._stop_photo_viewer_background_tasks()
+        if self._photo_viewer_background_tasks_active():
+            # Close requests cannot interrupt a worker that is already inside
+            # synchronous EXIF or folder loading, so keep Qt alive and retry
+            # close when the thread cleanup slots report that work is gone.
+            event.ignore()
+            self._closing = True
+            self._close_after_background_tasks = True
+            self._show_progress('Closing...', 0)
+            self.overlay_progress_bar.setRange(0, 0)
+            self._stop_photo_viewer_background_tasks()
+            return
+
+        self._closing = True
+        self._close_after_background_tasks = False
         super().closeEvent(event)
 
     def changeEvent(self: MainWindow, event: QEvent) -> None:  # noqa: N802 - Qt API

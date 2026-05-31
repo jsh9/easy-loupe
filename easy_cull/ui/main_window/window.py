@@ -64,6 +64,9 @@ class MainWindow(
         self._pending_browse_after_hydration = False
         self._folder_hydration_message = ''
         self._folder_hydration_progress = 0
+        self._folder_hydration_request_id = 0
+        self._folder_hydration_folder: Path | None = None
+        self._queued_folder_hydration_folder: Path | None = None
         self._browse_mode = False
         self._compare_mode = False
         self._compare_restore_browse_mode = False
@@ -123,6 +126,7 @@ class MainWindow(
         self._metadata_undo_stack: list[MetadataEdit | SceneEdit] = []
         self._metadata_redo_stack: list[MetadataEdit | SceneEdit] = []
         self._closing = False
+        self._close_after_background_tasks = False
         self._initial_folder_prompt_timer = QTimer(self)
         self._initial_folder_prompt_timer.setSingleShot(True)
         self._initial_folder_prompt_timer.timeout.connect(

@@ -657,7 +657,12 @@ def test_main_window_photo_viewer_hydration_keeps_scene_strip_hidden(
 
     window.open_file_from_system(tmp_path / 'A.JPG')
     app.processEvents()
-    window._handle_folder_hydration_finished(hydrated_library)
+    request_id = window._folder_hydration_request_id = 7
+    expected_folder = tmp_path.resolve()
+    window._folder_hydration_folder = expected_folder
+    window._handle_folder_hydration_finished(
+        request_id, expected_folder, hydrated_library
+    )
     app.processEvents()
 
     assert window._photo_viewer_mode is True
@@ -677,6 +682,151 @@ def test_main_window_photo_viewer_hydration_keeps_scene_strip_hidden(
     assert window._browse_mode is True
     assert window.browse_list.isVisible() is True
     assert window.browse_list.currentRow() == window._browse_photo_rows['A']
+    window.close()
+
+
+def test_main_window_stale_photo_viewer_hydration_result_is_ignored(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Ignore a late folder-hydration result from an older photo open.
+
+    Hydration runs after the fast photo-viewer state is shown. Without the
+    request/folder guard, opening B while A's folder is still hydrating could
+    later swap the window back to A's library.
+    """
+    folder_a = tmp_path / 'A'
+    folder_b = tmp_path / 'B'
+    folder_a.mkdir()
+    folder_b.mkdir()
+    create_jpeg(folder_a / 'A.JPG', 'green')
+    create_jpeg(folder_b / 'B.JPG', 'blue')
+    stub_read_exif(monkeypatch, {})
+    app = QApplication.instance() or QApplication([])
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    window.show()
+    monkeypatch.setattr(
+        window.folder_access_manager,
+        'ensure_access_for_file',
+        lambda _path, _parent: True,
+    )
+    monkeypatch.setattr(
+        window, '_start_photo_viewer_exif_refresh', lambda: None
+    )
+    monkeypatch.setattr(window, '_start_viewer_prefetch', lambda: None)
+    monkeypatch.setattr(
+        window, '_start_folder_hydration', lambda _folder: None
+    )
+    old_library = PhotoLibrary(cache_dir=tmp_path / '.old-cache')
+    old_library.load_folder(folder_a)
+
+    window.open_file_from_system(folder_b / 'B.JPG')
+    app.processEvents()
+    current_request_id = window._folder_hydration_request_id = 3
+    current_folder = folder_b.resolve()
+    window._folder_hydration_folder = current_folder
+
+    window._handle_folder_hydration_finished(
+        2, folder_a.resolve(), old_library
+    )
+    app.processEvents()
+
+    assert window.library.current_folder == current_folder
+    assert window.current_photo_id == 'B'
+    assert [photo.photo_id for photo in window.library.photos] == ['B']
+    assert window._folder_hydration_request_id == current_request_id
+    window.close()
+
+
+def test_main_window_queues_only_latest_folder_hydration(
+        tmp_path: Path,
+) -> None:
+    """
+    Keep only the newest queued hydration while an old worker exits.
+
+    This protects rapid file-open sequences: hydration is best-effort cache
+    preparation, so running an intermediate folder after a newer request would
+    waste work and risk stale UI state.
+    """
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    calls: list[str] = []
+
+    class Worker:
+        @staticmethod
+        def cancel() -> None:
+            calls.append('cancel')
+
+    class Thread:
+        @staticmethod
+        def quit() -> None:
+            calls.append('quit')
+
+    old_thread = Thread()
+    old_worker = Worker()
+    old_folder = (tmp_path / 'old').resolve()
+    first_queued = (tmp_path / 'first').resolve()
+    latest_queued = (tmp_path / 'latest').resolve()
+    window._folder_hydration_thread = old_thread
+    window._folder_hydration_worker = old_worker
+    window._folder_hydration_request_id = 11
+    window._folder_hydration_folder = old_folder
+
+    window._start_folder_hydration(first_queued)
+    window._start_folder_hydration(latest_queued)
+
+    starts: list[Path] = []
+    window._start_folder_hydration = starts.append
+    window._clear_folder_hydration_worker(
+        11,
+        old_folder,
+        old_thread,
+        old_worker,
+    )
+
+    assert calls == ['cancel', 'quit', 'cancel', 'quit']
+    assert starts == [latest_queued]
+    assert window._queued_folder_hydration_folder is None
+    window.close()
+
+
+def test_main_window_stale_hydration_progress_and_failure_are_ignored(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Ignore progress and failure signals from superseded hydration work.
+
+    Stale progress must not overwrite the current queued browse message, and
+    stale failures must not show errors for folders the user has already moved
+    past.
+    """
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    current_folder = (tmp_path / 'current').resolve()
+    stale_folder = (tmp_path / 'stale').resolve()
+    window._folder_hydration_request_id = 8
+    window._folder_hydration_folder = current_folder
+    window._folder_hydration_message = 'Current'
+    window._folder_hydration_progress = 40
+    window._pending_browse_after_hydration = True
+    messages: list[str] = []
+    criticals: list[str] = []
+    monkeypatch.setattr(window, '_show_transient_message', messages.append)
+    monkeypatch.setattr(
+        QMessageBox,
+        'critical',
+        lambda *_args: criticals.append('critical'),
+    )
+
+    window._handle_folder_hydration_progress(7, stale_folder, 'Stale', 99)
+    window._handle_folder_hydration_failed(7, stale_folder, 'stale failure')
+
+    assert window._folder_hydration_message == 'Current'
+    assert window._folder_hydration_progress == 40
+    assert window._pending_browse_after_hydration is True
+    assert messages == []
+    assert criticals == []
     window.close()
 
 
@@ -877,6 +1027,13 @@ def test_main_window_permission_error_cancel_regrant_opens_selected_photo_only(
 
 
 def test_main_window_stops_photo_viewer_background_threads() -> None:
+    """
+    Cancel photo-viewer background work without blocking on active threads.
+
+    The worker may be inside synchronous EXIF or folder loading, so close paths
+    must request cancellation and let Qt deliver cleanup later instead of
+    calling wait() on the UI thread.
+    """
     window = main_window_module.MainWindow()
     window._initial_folder_prompt_pending = False
     calls: list[str] = []
@@ -912,22 +1069,137 @@ def test_main_window_stops_photo_viewer_background_threads() -> None:
     assert calls == [
         'cancel',
         'quit',
-        'wait',
         'cancel',
         'quit',
-        'wait',
         'cancel',
         'quit',
-        'wait',
     ]
+    assert window._photo_viewer_exif_worker is not None
+    assert window._photo_viewer_exif_thread is not None
+    assert window._viewer_prefetch_worker is not None
+    assert window._viewer_prefetch_thread is not None
+    assert window._folder_hydration_worker is not None
+    assert window._folder_hydration_thread is not None
+    assert window._pending_browse_after_hydration is False
+    window._photo_viewer_exif_worker = None
+    window._photo_viewer_exif_thread = None
+    window._viewer_prefetch_worker = None
+    window._viewer_prefetch_thread = None
+    window._folder_hydration_worker = None
+    window._folder_hydration_thread = None
+    window.close()
+
+
+def test_main_window_stopped_photo_viewer_threads_do_not_defer_close() -> None:
+    """
+    Treat stopped-but-not-cleared QThread slots as inactive.
+
+    Qt can stop a thread before the queued cleanup slot clears MainWindow's
+    attribute. Close handling should not leave a visible test/app window open
+    just because that stale thread object is still assigned.
+    """
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    calls: list[str] = []
+
+    class Worker:
+        pass
+
+    class Thread:
+        @staticmethod
+        def quit() -> None:
+            calls.append('quit')
+
+        @staticmethod
+        def isRunning() -> bool:  # noqa: N802 - Qt naming in fake
+            return False
+
+    window._photo_viewer_exif_worker = Worker()
+    window._photo_viewer_exif_thread = Thread()
+
+    assert window._photo_viewer_background_tasks_active() is False
+
+    window._stop_photo_viewer_background_tasks()
+
+    assert calls == ['quit']
     assert window._photo_viewer_exif_worker is None
     assert window._photo_viewer_exif_thread is None
-    assert window._viewer_prefetch_worker is None
-    assert window._viewer_prefetch_thread is None
-    assert window._folder_hydration_worker is None
-    assert window._folder_hydration_thread is None
-    assert window._pending_browse_after_hydration is False
     window.close()
+
+
+def test_main_window_close_defers_until_photo_viewer_threads_clear() -> None:
+    """
+    Defer close while active photo-viewer background work is winding down.
+
+    This verifies the nonblocking close path: the first close event is ignored,
+    cancellation is requested, and the real close is retried only after all
+    thread slots clear.
+    """
+    app = QApplication.instance() or QApplication([])
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    calls: list[str] = []
+
+    class Event:
+        def __init__(self) -> None:
+            self.ignored = False
+
+        def ignore(self) -> None:
+            self.ignored = True
+
+    class Worker:
+        @staticmethod
+        def cancel() -> None:
+            calls.append('cancel')
+
+    class Thread:
+        @staticmethod
+        def quit() -> None:
+            calls.append('quit')
+
+    window._viewer_prefetch_worker = Worker()
+    window._viewer_prefetch_thread = Thread()
+    window._folder_hydration_worker = Worker()
+    window._folder_hydration_thread = Thread()
+    window._photo_viewer_exif_worker = Worker()
+    window._photo_viewer_exif_thread = Thread()
+    close_calls: list[str] = []
+    window.close = lambda: close_calls.append('close')
+    close_event = Event()
+
+    window.closeEvent(close_event)
+    app.processEvents()
+
+    assert close_event.ignored is True
+    assert calls == [
+        'cancel',
+        'quit',
+        'cancel',
+        'quit',
+        'cancel',
+        'quit',
+    ]
+    assert window._close_after_background_tasks is True
+    assert window.overlay_message_label.text() == 'Closing...'
+    assert window.overlay_progress_bar.minimum() == 0
+    assert window.overlay_progress_bar.maximum() == 0
+    assert close_calls == []
+
+    window._clear_photo_viewer_exif_worker(
+        window._photo_viewer_exif_thread,
+        window._photo_viewer_exif_worker,
+    )
+    window._clear_viewer_prefetch_worker()
+    window._clear_folder_hydration_worker(
+        window._folder_hydration_request_id,
+        Path('/stale'),
+        window._folder_hydration_thread,
+        window._folder_hydration_worker,
+    )
+
+    assert close_calls == ['close']
+    assert window._close_after_background_tasks is False
+    QTest.qWait(0)
 
 
 def test_main_window_photo_viewer_browse_waits_for_hydration(
