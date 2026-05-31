@@ -228,26 +228,30 @@ def test_photo_viewer_denied_access_blocks_navigation_and_handoff(
     """
     create_jpeg(tmp_path / 'A.JPG', 'green')
     create_jpeg(tmp_path / 'B.JPG', 'blue')
+    messages: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        PhotoViewerWindow,
+        '_show_transient_message',
+        lambda _self, message, *, timeout_ms: messages.append((
+            message,
+            timeout_ms,
+        )),
+    )
     _app, window = _open_viewer(
         tmp_path, monkeypatch, folder_access_granted=False
     )
-    messages: list[tuple[str, int]] = []
     requests: list[object] = []
-    monkeypatch.setattr(
-        window,
-        '_show_transient_message',
-        lambda message, *, timeout_ms: messages.append((message, timeout_ms)),
-    )
     window.culling_requested.connect(requests.append)
 
     assert [photo.photo_id for photo in window.library.photos] == ['B']
+    assert len(messages) == 1
 
     window.navigate(-1)
     window._request_culling_handoff()
 
     assert window.current_photo_id == 'B'
     assert requests == []
-    assert len(messages) == 2
+    assert len(messages) == 3
     assert 'Browsing photos in this folder' in messages[0][0]
     assert (
         messages[0][1]

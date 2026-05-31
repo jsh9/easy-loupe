@@ -346,7 +346,9 @@ class PhotoViewerWindow(QMainWindow):
         self._refresh_window_title()
         self._start_photo_viewer_exif_refresh()
         self._start_viewer_prefetch()
-        if folder_access_granted and self.library.current_folder is not None:
+        if not folder_access_granted:
+            self._show_folder_access_recovery_message()
+        elif self.library.current_folder is not None:
             self._start_folder_hydration(self.library.current_folder)
 
     def _photo_id_for_opened_file(self, file_path: Path) -> str | None:
@@ -363,10 +365,7 @@ class PhotoViewerWindow(QMainWindow):
             return
 
         if not self._folder_access_granted:
-            self._show_transient_message(
-                FOLDER_ACCESS_RECOVERY_MESSAGE,
-                timeout_ms=FOLDER_ACCESS_RECOVERY_TIMEOUT_MS,
-            )
+            self._show_folder_access_recovery_message()
             return
 
         photo_ids = [photo.photo_id for photo in self.library.get_photos()]
@@ -435,10 +434,7 @@ class PhotoViewerWindow(QMainWindow):
 
     def _request_culling_handoff(self) -> None:
         if not self._folder_access_granted:
-            self._show_transient_message(
-                FOLDER_ACCESS_RECOVERY_MESSAGE,
-                timeout_ms=FOLDER_ACCESS_RECOVERY_TIMEOUT_MS,
-            )
+            self._show_folder_access_recovery_message()
             return
 
         if (
@@ -469,6 +465,13 @@ class PhotoViewerWindow(QMainWindow):
             preloaded_library=library,
         )
         self.culling_requested.emit(request)
+
+    def _show_folder_access_recovery_message(self) -> None:
+        """Show the macOS manual-grant guidance for selected-photo fallback."""
+        self._show_transient_message(
+            FOLDER_ACCESS_RECOVERY_MESSAGE,
+            timeout_ms=FOLDER_ACCESS_RECOVERY_TIMEOUT_MS,
+        )
 
     def _toggle_info_overlay(self) -> None:
         """Toggle the EXIF and histogram overlay."""
