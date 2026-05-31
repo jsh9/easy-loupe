@@ -230,15 +230,20 @@ def test_folder_hydration_worker_loads_and_warms_folder(
 
     monkeypatch.setattr(workers_module, 'PhotoLibrary', Library)
     worker = workers_module.FolderHydrationWorker(
+        12,
         tmp_path,
         cache_dir=tmp_path / '.cache',
         sort_mode='filename',
         sort_reversed=True,
     )
     worker.progress.connect(
-        lambda message, progress: progress_events.append((message, progress))
+        lambda _request_id, _folder, message, progress: (
+            progress_events.append((message, progress))
+        )
     )
-    worker.finished.connect(finished_results.append)
+    worker.finished.connect(
+        lambda _request_id, _folder, library: finished_results.append(library)
+    )
 
     worker.run()
 
@@ -288,12 +293,15 @@ def test_folder_hydration_worker_cancel_skips_preview_warming(
 
     monkeypatch.setattr(workers_module, 'PhotoLibrary', Library)
     worker = workers_module.FolderHydrationWorker(
+        12,
         tmp_path,
         cache_dir=tmp_path / '.cache',
         sort_mode='filename',
         sort_reversed=False,
     )
-    worker.finished.connect(finished_results.append)
+    worker.finished.connect(
+        lambda _request_id, _folder, library: finished_results.append(library)
+    )
     worker.cancel()
     worker.run()
 

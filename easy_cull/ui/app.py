@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QEvent, Signal
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QFileOpenEvent
 from PySide6.QtWidgets import QApplication
 
@@ -15,7 +16,11 @@ from easy_cull.ui.identity import (
     branded_argv,
     prepare_app_identity,
 )
+from easy_cull.ui.main_window.build import INITIAL_FOLDER_PROMPT_GRACE_MS
 from easy_cull.ui.main_window.window import MainWindow
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class EasyCullApplication(QApplication):
@@ -48,17 +53,208 @@ class EasyCullApplication(QApplication):
         return pending
 
 
-def _extract_startup_file(argv: list[str] | None) -> Path | None:
+class WindowManager:
+    """Own live EasyCull windows and create one window per opened photo."""
+
+    def __init__(
+            self,
+            window_factory: type[MainWindow] = MainWindow,
+    ) -> None:
+        self._window_factory = window_factory
+        self._windows: list[MainWindow] = []
+
+    def windows(self) -> list[MainWindow]:
+        """Return the currently managed live windows."""
+        return list(self._windows)
+
+    def open_culling_window(self) -> MainWindow:
+        """Create and show the normal no-file culling window."""
+        return self.open_window()
+
+    def open_photo_window(self, startup_file: Path) -> MainWindow:
+        """Create and show a photo-viewer window for one opened photo."""
+        return self.open_window(startup_file=startup_file)
+
+    def open_photo_windows(self, startup_files: list[Path]) -> None:
+        """Create one photo-viewer window for each opened startup file."""
+        for startup_file in startup_files:
+            self.open_photo_window(startup_file)
+
+    def open_window(self, startup_file: Path | None = None) -> MainWindow:
+        """Create, retain, and show an EasyCull main window."""
+        window = self._window_factory(startup_file=startup_file)
+        window.setAttribute(Qt.WA_DeleteOnClose, True)
+        self._windows.append(window)
+        window.destroyed.connect(
+            lambda _object=None, managed_window=window: self._remove_window(
+                managed_window
+            )
+        )
+        window.showMaximized()
+        return window
+
+    def _remove_window(self, window: MainWindow) -> None:
+        """Forget a destroyed window so Qt can quit after the last close."""
+        try:
+            self._windows.remove(window)
+        except ValueError:
+            return
+
+
+class StartupCoordinator:
+    """
+    Route cross-platform app launch events into the right window creation.
+
+    On every platform, this object decides whether startup should create
+    photo-viewer windows for supported files or one normal culling window for a
+    plain no-file launch. Windows and argv-driven launches resolve immediately.
+    The only delayed branch is macOS no-file startup, because Finder can launch
+    the app before Qt delivers the matching ``FileOpen`` event. Keeping that
+    policy here lets ``WindowManager`` focus only on live window lifetime.
+    """
+
+    def __init__(
+            self,
+            window_manager: WindowManager,
+            *,
+            platform: str | None = None,
+            timer_factory: Callable[[], QTimer] = QTimer,
+            launch_resolution_delay_ms: int = INITIAL_FOLDER_PROMPT_GRACE_MS,
+    ) -> None:
+        """
+        Initialize the launch coordinator.
+
+        ``platform`` and ``timer_factory`` are injectable so app-level tests
+        can cover both immediate Windows-style launch routing and the macOS
+        launch race without sleeping on real timers. The delay is used only for
+        macOS plain-startup resolution and intentionally matches the
+        main-window folder-prompt grace period.
+        """
+        self._window_manager = window_manager
+        self._platform = platform if platform is not None else sys.platform
+        self._timer_factory = timer_factory
+        self._launch_resolution_delay_ms = launch_resolution_delay_ms
+        self._launch_resolution_timer: QTimer | None = None
+
+    def start(
+            self,
+            startup_files: list[Path],
+            pending_open_files: list[Path],
+    ) -> None:
+        """
+        Resolve the initial app launch into photo or plain culling windows.
+
+        ``startup_files`` comes from argv, while ``pending_open_files`` holds
+        macOS ``FileOpen`` events received before ``main`` connected the live
+        signal. Both sources represent real photo-open intent and therefore
+        take precedence over a plain no-file culling launch. If neither source
+        contains supported photos, non-macOS platforms open the culling window
+        immediately; macOS briefly waits for a late Finder ``FileOpen``.
+        """
+        supported_files = [
+            path
+            for path in [*startup_files, *pending_open_files]
+            if path.suffix.lower() in SUPPORTED_EXTENSIONS
+        ]
+        if supported_files:
+            self._resolve_as_file_open_launch(supported_files)
+            return
+
+        if self._platform == 'darwin':
+            self._start_macos_launch_resolution()
+            return
+
+        self._resolve_as_plain_launch()
+
+    def open_file_from_system(self, file_path: object) -> None:
+        """
+        Handle a live system file-open event after startup wiring is ready.
+
+        Supported photo files resolve any pending macOS launch decision as a
+        file-open launch and create a new photo-viewer window. Unsupported
+        files are ignored and deliberately do not cancel a pending plain
+        startup, because they do not prove the user intended EasyCull to open a
+        photo.
+        """
+        path = Path(str(file_path)).expanduser()
+        if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+            return
+
+        self._resolve_as_file_open_launch([path])
+
+    def _start_macos_launch_resolution(self) -> None:
+        """
+        Wait briefly for Finder ``FileOpen`` before plain no-file startup.
+
+        Qt does not provide a signal that says launch-time ``FileOpen`` events
+        are exhausted. The single-shot timer is the explicit macOS policy for
+        resolving that uncertainty: a supported file event wins if it arrives
+        first; otherwise EasyCull proceeds as a normal no-file launch.
+        """
+        if (
+            self._launch_resolution_timer is not None
+            and self._launch_resolution_timer.isActive()
+        ):
+            return
+
+        timer = self._timer_factory()
+        timer.setSingleShot(True)
+        timer.timeout.connect(self._resolve_as_plain_launch)
+        self._launch_resolution_timer = timer
+        timer.start(self._launch_resolution_delay_ms)
+
+    def _resolve_as_file_open_launch(self, startup_files: list[Path]) -> None:
+        """
+        Open photo-viewer windows and suppress pending plain startup.
+
+        This is used for argv files, queued launch-time macOS events, and live
+        ``FileOpen`` events. The coordinator does not dedupe paths: each
+        supported photo-open request maps to one independent window.
+        """
+        self._cancel_launch_resolution()
+        self._window_manager.open_photo_windows(startup_files)
+
+    def _resolve_as_plain_launch(self) -> None:
+        """
+        Open the normal culling window for a resolved plain launch.
+
+        On macOS this runs after the launch-resolution timer fires; on other
+        platforms it runs immediately when no supported startup files exist.
+        """
+        self._cancel_launch_resolution()
+        self._window_manager.open_culling_window()
+
+    def _cancel_launch_resolution(self) -> None:
+        """
+        Cancel and drop a pending macOS launch-resolution timer.
+
+        The timer is cleared before opening either photo-viewer or plain
+        culling windows so a stale timeout cannot later create an extra window.
+        """
+        if self._launch_resolution_timer is None:
+            return
+
+        self._launch_resolution_timer.stop()
+        self._launch_resolution_timer = None
+
+
+def _extract_startup_files(argv: list[str] | None) -> list[Path]:
     source_argv = argv if argv is not None else sys.argv
+    startup_files: list[Path] = []
     for raw_arg in source_argv[1:]:
         if raw_arg.startswith('-'):
             continue
 
         path = Path(raw_arg).expanduser()
         if path.suffix.lower() in SUPPORTED_EXTENSIONS:
-            return path
+            startup_files.append(path)
 
-    return None
+    return startup_files
+
+
+def _extract_startup_file(argv: list[str] | None) -> Path | None:
+    startup_files = _extract_startup_files(argv)
+    return startup_files[0] if startup_files else None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -66,14 +262,18 @@ def main(argv: list[str] | None = None) -> int:
     prepare_app_identity()
     app = EasyCullApplication(branded_argv(argv))
     apply_app_identity(app)
-    startup_file = _extract_startup_file(argv)
+    startup_files = _extract_startup_files(argv)
     pending_open_files = app.take_pending_open_files()
-    if startup_file is None and pending_open_files:
-        startup_file = pending_open_files[0]
+    startup_files.extend(
+        path
+        for path in pending_open_files
+        if path.suffix.lower() in SUPPORTED_EXTENSIONS
+    )
 
-    window = MainWindow(startup_file=startup_file)
-    app.file_opened.connect(window.open_file_from_system)
-    window.showMaximized()
+    window_manager = WindowManager()
+    startup_coordinator = StartupCoordinator(window_manager)
+    app.file_opened.connect(startup_coordinator.open_file_from_system)
+    startup_coordinator.start(startup_files, pending_open_files)
     return app.exec()
 
 

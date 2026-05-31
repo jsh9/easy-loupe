@@ -161,12 +161,13 @@ class PhotoViewerExifWorker(QObject):
 class FolderHydrationWorker(QObject):
     """Load a full folder library and prewarm browse/viewer previews."""
 
-    progress = Signal(str, int)
-    finished = Signal(object)
-    failed = Signal(str)
+    progress = Signal(int, object, str, int)
+    finished = Signal(int, object, object)
+    failed = Signal(int, object, str)
 
     def __init__(
             self,
+            request_id: int,
             folder: Path,
             *,
             cache_dir: Path,
@@ -174,6 +175,7 @@ class FolderHydrationWorker(QObject):
             sort_reversed: bool,
     ) -> None:
         super().__init__()
+        self._request_id = request_id
         self._folder = folder
         self._cache_dir = cache_dir
         self._sort_mode = sort_mode
@@ -184,6 +186,10 @@ class FolderHydrationWorker(QObject):
         """Request cancellation before the next preview render starts."""
         self._cancelled = True
 
+    def _emit_progress(self, message: str, progress: int) -> None:
+        """Emit progress with request context for queued GUI-thread slots."""
+        self.progress.emit(self._request_id, self._folder, message, progress)
+
     def run(self) -> None:
         """Load the folder and warm thumbnail/viewer previews."""
         try:
@@ -193,7 +199,7 @@ class FolderHydrationWorker(QObject):
                 sort_reversed=self._sort_reversed,
             )
             library.load_folder(
-                self._folder, progress_callback=self.progress.emit
+                self._folder, progress_callback=self._emit_progress
             )
             photos = library.get_photos()
             total = max(len(photos), 1)
@@ -202,7 +208,7 @@ class FolderHydrationWorker(QObject):
                     break
 
                 progress = 100 + int((index / total) * 100)
-                self.progress.emit('Preparing photo viewer cache', progress)
+                self._emit_progress('Preparing photo viewer cache', progress)
                 try:
                     library.get_preview_path(photo.photo_id, 'thumb')
                     if self._cancelled:
@@ -212,7 +218,7 @@ class FolderHydrationWorker(QObject):
                 except (OSError, RuntimeError, ValueError):
                     continue
         except Exception as exc:  # noqa: BLE001  # pragma: no cover - thread safety path
-            self.failed.emit(str(exc))
+            self.failed.emit(self._request_id, self._folder, str(exc))
             return
 
-        self.finished.emit(library)
+        self.finished.emit(self._request_id, self._folder, library)

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from PySide6.QtCore import QPoint, QThread
+from PySide6.QtCore import QObject, QPoint, QThread, Slot
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -78,6 +78,90 @@ class ThumbnailScrollAnchor:
 
     photo_id: str
     visible_top: int | None
+
+
+class FolderHydrationSignalBridge(QObject):
+    """
+    Relay folder-hydration worker signals on the main-window GUI thread.
+
+    ``FolderHydrationWorker`` lives in a background ``QThread`` because full
+    folder loading and preview warming can be slow. Its results eventually
+    rebuild Qt list widgets and item widgets, and Qt widgets must only be
+    touched from the GUI thread. This bridge is a ``QObject`` parented to the
+    ``MainWindow``, so Qt's queued cross-thread signal delivery invokes these
+    handlers in the same thread as the window.
+    """
+
+    def __init__(self, window: MainWindow) -> None:
+        """
+        Create a GUI-thread bridge owned by ``window``.
+
+        Parenting the bridge to the window gives it the window's thread
+        affinity and lifetime. The worker can be deleted with its background
+        thread while the bridge remains safe to receive queued completion
+        signals until the window clears it.
+        """
+        super().__init__(window)
+        self._window = window
+
+    # ``@Slot`` registers this Python method as a typed Qt slot. Combined with
+    # this bridge object's GUI-thread affinity, PySide queues cross-thread
+    # worker emissions here instead of running the callback in the worker
+    # thread. That matters because even progress handling can update overlays.
+    @Slot(int, object, str, int)
+    def handle_progress(
+            self,
+            request_id: int,
+            expected_folder: Path,
+            message: str,
+            progress: int,
+    ) -> None:
+        """
+        Apply hydration progress after Qt queues it to the GUI thread.
+
+        The request id and expected folder are preserved in the signal payload
+        so the window can ignore progress from an older hydration request after
+        a newer photo-open has replaced it.
+        """
+        self._window._handle_folder_hydration_progress(  # noqa: SLF001
+            request_id, expected_folder, message, progress
+        )
+
+    @Slot(int, object, object)
+    def handle_finished(
+            self,
+            request_id: int,
+            expected_folder: Path,
+            library: object,
+    ) -> None:
+        """
+        Apply hydration results after Qt queues them to the GUI thread.
+
+        The finished path swaps in the fully hydrated library and rebuilds list
+        widgets. Keeping this work on the GUI thread prevents the macOS abort
+        caused by creating item widgets from the worker thread.
+        """
+        self._window._handle_folder_hydration_finished(  # noqa: SLF001
+            request_id, expected_folder, library
+        )
+
+    @Slot(int, object, str)
+    def handle_failed(
+            self,
+            request_id: int,
+            expected_folder: Path,
+            error: str,
+    ) -> None:
+        """
+        Apply hydration failures on the GUI thread for safe UI updates.
+
+        Failure handling may show a dialog, hide an overlay, or show a
+        transient message. Those UI operations follow the same thread rule as
+        successful hydration results.
+        """
+        self._window._handle_folder_hydration_failed(  # noqa: SLF001
+            request_id, expected_folder, error
+        )
 
 
 class MainWindowWorkflowMixin:
@@ -456,6 +540,9 @@ class MainWindowWorkflowMixin:
             thread_attr='_folder_hydration_thread',
             worker_attr='_folder_hydration_worker',
         )
+        if self._folder_hydration_thread is None:
+            self._clear_folder_hydration_bridge()
+
         self._folder_hydration_message = ''
         self._folder_hydration_progress = 0
 
@@ -483,6 +570,8 @@ class MainWindowWorkflowMixin:
             thread_attr='_folder_hydration_thread',
             worker_attr='_folder_hydration_worker',
         )
+        if self._folder_hydration_thread is None:
+            self._clear_folder_hydration_bridge()
 
     def _stop_background_thread(
             self: MainWindow,
@@ -533,32 +622,23 @@ class MainWindowWorkflowMixin:
         self._folder_hydration_progress = 0
         self._folder_hydration_thread = QThread(self)
         self._folder_hydration_worker = FolderHydrationWorker(
+            request_id,
             expected_folder,
             cache_dir=self.library.cache_dir,
             sort_mode=self.library.sort_mode,
             sort_reversed=self.library.sort_reversed,
         )
+        bridge = FolderHydrationSignalBridge(self)
+        self._folder_hydration_bridge = bridge
         self._folder_hydration_worker.moveToThread(
             self._folder_hydration_thread
         )
         self._folder_hydration_thread.started.connect(
             self._folder_hydration_worker.run
         )
-        self._folder_hydration_worker.progress.connect(
-            lambda message, progress: self._handle_folder_hydration_progress(
-                request_id, expected_folder, message, progress
-            )
-        )
-        self._folder_hydration_worker.finished.connect(
-            lambda library: self._handle_folder_hydration_finished(
-                request_id, expected_folder, library
-            )
-        )
-        self._folder_hydration_worker.failed.connect(
-            lambda error: self._handle_folder_hydration_failed(
-                request_id, expected_folder, error
-            )
-        )
+        self._folder_hydration_worker.progress.connect(bridge.handle_progress)
+        self._folder_hydration_worker.finished.connect(bridge.handle_finished)
+        self._folder_hydration_worker.failed.connect(bridge.handle_failed)
         self._folder_hydration_worker.finished.connect(
             self._folder_hydration_thread.quit
         )
@@ -759,6 +839,7 @@ class MainWindowWorkflowMixin:
     ) -> None:
         self._show_progress(message, progress)
 
+    @Slot(int, object, str, int)
     def _handle_folder_hydration_progress(
             self: MainWindow,
             request_id: int,
@@ -777,6 +858,7 @@ class MainWindowWorkflowMixin:
         if self._pending_browse_after_hydration and self._busy:
             self._show_progress(message, progress)
 
+    @Slot(int, object, object)
     def _handle_folder_hydration_finished(
             self: MainWindow,
             request_id: int,
@@ -817,6 +899,7 @@ class MainWindowWorkflowMixin:
             self._hide_progress()
             self._enter_browse_mode()
 
+    @Slot(int, object, str)
     def _handle_folder_hydration_failed(
             self: MainWindow,
             request_id: int,
@@ -851,6 +934,7 @@ class MainWindowWorkflowMixin:
         ):
             self._folder_hydration_thread = None
             self._folder_hydration_worker = None
+            self._clear_folder_hydration_bridge()
             if self._folder_hydration_request_matches(
                 request_id, expected_folder
             ):
@@ -871,6 +955,13 @@ class MainWindowWorkflowMixin:
             self._update_mode_shortcuts()
 
         self._finish_deferred_close_if_ready()
+
+    def _clear_folder_hydration_bridge(self: MainWindow) -> None:
+        """Release the GUI-thread bridge for finished hydration signals."""
+        bridge = self._folder_hydration_bridge
+        self._folder_hydration_bridge = None
+        if isinstance(bridge, QObject):
+            bridge.deleteLater()
 
     def _folder_hydration_request_matches(
             self: MainWindow, request_id: int, expected_folder: Path

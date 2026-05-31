@@ -96,6 +96,7 @@ class MainWindow(
         self._scene_worker: SceneDetectionWorker | None = None
         self._folder_hydration_thread: QThread | None = None
         self._folder_hydration_worker: FolderHydrationWorker | None = None
+        self._folder_hydration_bridge: object | None = None
         self._photo_viewer_exif_thread: QThread | None = None
         self._photo_viewer_exif_worker: PhotoViewerExifWorker | None = None
         self._photo_viewer_exif_request_id = 0

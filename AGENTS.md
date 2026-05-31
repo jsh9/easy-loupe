@@ -131,6 +131,9 @@ Notes:
   - Defines the full PySide6 UI: browse mode, single-pane and split view modes,
     theming, thumbnail widgets, viewer, scene strip, worker thread, and the
     main window.
+  - `ui/app.py` owns application startup orchestration. `StartupCoordinator`
+    resolves argv, queued macOS `FileOpen`, and live system-open events before
+    asking `WindowManager` to create windows.
   - The UI is split primarily across `ui/main_window/`, `ui/viewers/`,
     `ui/widgets.py`, `ui/theme.py`, `ui/workers.py`, and `ui/app.py`.
   - `ui/identity.py` owns the user-facing app name, packaged icon lookup, Qt
@@ -298,6 +301,11 @@ Scene detection runs off the UI thread through:
 - `_handle_scene_progress()`
 - `_handle_scene_finished()` / `_handle_scene_failed()`
 
+Photo-viewer folder hydration also runs off the UI thread. Its worker signals
+must be routed back to the main-window GUI thread before any list/viewer/widget
+state is rebuilt; do not connect worker-thread signals through lambdas that
+call UI-update methods directly.
+
 Current functionality is grouped below so UI changes can be evaluated against
 the actual product behavior, not just the widget layout.
 
@@ -314,6 +322,9 @@ Mode summary:
   fit-to-window at first, supports adjacent-folder navigation, and keeps the
   normal culling chrome and scene strips hidden until the user presses `G` or
   `Enter` to enter culling mode.
+- Multiple system-opened photos create multiple independent EasyCull windows.
+  Each photo-viewer window owns its own `MainWindow`, `PhotoLibrary`,
+  background workers, folder hydration, close lifecycle, title, and mode state.
 - `View mode` is the normal working mode. It shows the left thumbnail strip and
   the main viewer, plus the horizontal scene strip when scene detection is
   available for the current photo.
@@ -349,6 +360,10 @@ Mode-transition summary:
 
 - When the main window first shows and no folder is loaded, `showEvent()`
   schedules the folder chooser automatically.
+- On macOS, Finder may launch EasyCull before delivering the matching
+  `FileOpen` event. App startup must briefly resolve launch intent before
+  creating a normal no-file culling window, so a photo-open launch does not
+  also create a hidden culling window with a folder chooser.
 - Canceling the folder chooser leaves the UI idle: no current photo, no loaded
   photo list, no progress overlay, and no forced state change.
 - If folder loading fails, the progress overlay is dismissed, controls are

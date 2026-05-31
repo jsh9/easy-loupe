@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Never
 
 import pytest
-from PySide6.QtCore import QEvent, QItemSelectionModel, Qt
+from PySide6.QtCore import QEvent, QItemSelectionModel, Qt, QThread
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -827,6 +827,59 @@ def test_main_window_stale_hydration_progress_and_failure_are_ignored(
     assert window._pending_browse_after_hydration is True
     assert messages == []
     assert criticals == []
+    window.close()
+
+
+def test_main_window_folder_hydration_applies_on_gui_thread(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Apply folder-hydration UI updates on the main Qt thread.
+
+    Hydration workers run in ``QThread`` and may finish while building a full
+    folder library. The finished handler rebuilds Qt item widgets, so it must
+    be delivered to the ``MainWindow`` GUI thread rather than executing in the
+    worker thread.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    create_jpeg(tmp_path / 'B.JPG', 'blue')
+    stub_read_exif(monkeypatch, {})
+    app = QApplication.instance() or QApplication([])
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    window.show()
+    window.library.load_viewer_folder(
+        tmp_path / 'A.JPG', allow_folder_scan=True
+    )
+    window.current_photo_id = 'A'
+    window._set_photo_viewer_mode(active=True)
+    window._display_current_photo(force_fit=True)
+    window._refresh_ui()
+    app.processEvents()
+    rebuild_threads: list[QThread] = []
+    original_rebuild = window._rebuild_loaded_views
+
+    def record_rebuild_thread(*args: object, **kwargs: object) -> object:
+        rebuild_threads.append(QThread.currentThread())
+        return original_rebuild(*args, **kwargs)
+
+    monkeypatch.setattr(window, '_rebuild_loaded_views', record_rebuild_thread)
+
+    window._start_folder_hydration(tmp_path)
+    for _attempt in range(200):
+        app.processEvents()
+        if rebuild_threads and window._folder_hydration_thread is None:
+            break
+
+        QTest.qWait(10)
+
+    app.processEvents()
+
+    assert rebuild_threads == [app.thread()]
+    assert window.library.current_folder == tmp_path.resolve()
+    assert [photo.photo_id for photo in window.library.photos] == ['A', 'B']
+    assert window._photo_viewer_mode is True
     window.close()
 
 
