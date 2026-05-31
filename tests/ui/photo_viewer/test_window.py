@@ -63,6 +63,17 @@ def _trigger_viewer_shortcut(window: PhotoViewerWindow, key_text: str) -> None:
     raise AssertionError(f'Missing viewer shortcut for {key_text!r}')
 
 
+def _assert_close_tuple(
+        actual: tuple[float, ...],
+        expected: tuple[float, ...],
+        *,
+        tolerance: float = 0.02,
+) -> None:
+    assert len(actual) == len(expected)
+    for actual_value, expected_value in zip(actual, expected, strict=True):
+        assert abs(actual_value - expected_value) <= tolerance
+
+
 def test_photo_viewer_window_opens_file_and_navigates_adjacent_photos(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -91,6 +102,44 @@ def test_photo_viewer_window_opens_file_and_navigates_adjacent_photos(
 
     assert window.current_photo_id == 'B'
     assert window.windowTitle() == 'EasyCull - B.JPG (2 / 3)'
+    window.close()
+
+
+def test_photo_viewer_message_overlays_are_framed_and_readable(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify viewer messages use visible framed overlays.
+
+    The standalone viewer owns these overlays now; without local styling,
+    hydration and access messages regress to barely visible bare labels over
+    the photo.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    _app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+
+    window._show_progress('Loading folder...', 42)
+
+    assert window.progress_overlay.isVisible() is True
+    assert 'rgba(20, 24, 29, 140)' in window.progress_overlay.styleSheet()
+    assert 'QFrame#progressPanel' in window.progress_panel.styleSheet()
+    assert 'border-radius: 12px' in window.progress_panel.styleSheet()
+    assert 'font-size: 16px' in window.overlay_message_label.styleSheet()
+
+    window._hide_progress()
+    window._show_transient_message('Grant folder access')
+
+    assert window.transient_message_overlay.isVisible() is True
+    assert (
+        'rgba(20, 24, 29, 90)' in window.transient_message_overlay.styleSheet()
+    )
+    assert (
+        'QFrame#transientMessagePanel'
+        in window.transient_message_panel.styleSheet()
+    )
+    assert 'border-radius: 12px' in window.transient_message_panel.styleSheet()
+    assert 'font-size: 28px' in window.transient_message_label.styleSheet()
     window.close()
 
 
@@ -159,6 +208,163 @@ def test_photo_viewer_shortcuts_control_split_zoom_and_keyboard_pan(
     center_after_w = window.viewer.normalized_viewport_center()
     assert center_after_w is not None
     assert center_after_w[1] < center_after_s[1]
+    window.close()
+
+
+def test_photo_viewer_fit_mode_stays_fit_across_navigation(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify fit view remains fit when navigating photos.
+
+    Preserving inspection state should not turn ordinary fit-to-window browsing
+    into manual zoom.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    create_jpeg(tmp_path / 'B.JPG', 'blue')
+    _app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+
+    assert window.viewer._mode == 'single-fit'
+
+    window.navigate(1)
+
+    assert window.current_photo_id == 'B'
+    assert window.viewer._mode == 'single-fit'
+    assert window.viewer.visible_region_rect() is None
+    window.close()
+
+
+def test_photo_viewer_manual_zoom_carries_across_navigation(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify single-pane manual zoom carries to the next photo.
+
+    This protects inspection workflows where the user checks the same area and
+    scale across adjacent photos with arrow-key navigation.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green', size=(2400, 1600))
+    create_jpeg(tmp_path / 'B.JPG', 'blue', size=(2400, 1600))
+    app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+    window.resize(1200, 800)
+    app.processEvents()
+
+    window.space_shortcut.activated.emit()
+    _trigger_viewer_shortcut(window, '=')
+    _trigger_viewer_shortcut(window, 'D')
+    _trigger_viewer_shortcut(window, 'S')
+    app.processEvents()
+    expected_zoom = window.viewer._current_scale
+    expected_center = window.viewer.normalized_viewport_center()
+    assert expected_center is not None
+
+    window.navigate(1)
+    app.processEvents()
+
+    assert window.current_photo_id == 'B'
+    assert window.viewer._mode == 'single-manual'
+    assert abs(window.viewer._current_scale - expected_zoom) <= 0.02
+    center = window.viewer.normalized_viewport_center()
+    assert center is not None
+    _assert_close_tuple(center, expected_center)
+    window.close()
+
+
+def test_photo_viewer_split_zoom_carries_across_navigation(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify split mode and right-pane inspection carry to the next photo.
+
+    The left split pane should remain fit view while the right pane keeps the
+    previous zoom factor and normalized viewport center.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green', size=(2400, 1600))
+    create_jpeg(tmp_path / 'B.JPG', 'blue', size=(2400, 1600))
+    app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+    window.resize(1200, 800)
+    app.processEvents()
+    window.split_mode_shortcut.activated.emit()
+    _trigger_viewer_shortcut(window, '=')
+    _trigger_viewer_shortcut(window, 'D')
+    _trigger_viewer_shortcut(window, 'S')
+    app.processEvents()
+    expected_zoom = window.viewer.split_zoom_viewer.current_zoom_factor()
+    expected_center = (
+        window.viewer.split_zoom_viewer.normalized_viewport_center()
+    )
+    assert expected_center is not None
+
+    window.navigate(1)
+    app.processEvents()
+
+    assert window.current_photo_id == 'B'
+    assert window.viewer.is_split_view() is True
+    assert window.viewer._mode == 'split'
+    assert window.viewer.split_fit_viewer.should_preserve_zoom() is False
+    assert (
+        abs(
+            window.viewer.split_zoom_viewer.current_zoom_factor()
+            - expected_zoom
+        )
+        <= 0.02
+    )
+    center = window.viewer.split_zoom_viewer.normalized_viewport_center()
+    assert center is not None
+    _assert_close_tuple(center, expected_center)
+    window.close()
+
+
+def test_photo_viewer_hydration_preserves_split_inspection_state(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify folder hydration does not collapse the active inspection state.
+
+    Background hydration swaps the lightweight viewer library for a full
+    culling-ready library; it should not reset a user's active split/zoom view.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green', size=(2400, 1600))
+    create_jpeg(tmp_path / 'B.JPG', 'blue', size=(2400, 1600))
+    app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+    hydrated_library = PhotoLibrary(cache_dir=tmp_path / '.hydrated-cache')
+    hydrated_library.load_folder(tmp_path)
+    window.resize(1200, 800)
+    app.processEvents()
+    window.split_mode_shortcut.activated.emit()
+    _trigger_viewer_shortcut(window, '=')
+    _trigger_viewer_shortcut(window, 'D')
+    app.processEvents()
+    expected_zoom = window.viewer.split_zoom_viewer.current_zoom_factor()
+    expected_center = (
+        window.viewer.split_zoom_viewer.normalized_viewport_center()
+    )
+    assert expected_center is not None
+    request_id = window._folder_hydration_request_id = 8
+    expected_folder = tmp_path.resolve()
+    window._folder_hydration_folder = expected_folder
+
+    window._handle_folder_hydration_finished(
+        request_id, expected_folder, hydrated_library
+    )
+    app.processEvents()
+
+    assert window.current_photo_id == 'A'
+    assert window.viewer.is_split_view() is True
+    assert (
+        abs(
+            window.viewer.split_zoom_viewer.current_zoom_factor()
+            - expected_zoom
+        )
+        <= 0.02
+    )
+    center = window.viewer.split_zoom_viewer.normalized_viewport_center()
+    assert center is not None
+    _assert_close_tuple(center, expected_center)
     window.close()
 
 

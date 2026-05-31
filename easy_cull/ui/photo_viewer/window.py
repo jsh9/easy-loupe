@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -59,6 +60,20 @@ FOLDER_ACCESS_RECOVERY_MESSAGE = (
     ' -> Files & Folders.'
 )
 FOLDER_ACCESS_RECOVERY_TIMEOUT_MS = TRANSIENT_MESSAGE_TIMEOUT_MS * 5
+PHOTO_VIEWER_OVERLAY_BACKGROUND = '#d8dde2'
+PHOTO_VIEWER_OVERLAY_TEXT = '#1c232b'
+PHOTO_VIEWER_OVERLAY_BORDER = '#b6bec7'
+PHOTO_VIEWER_PROGRESS_FONT_SIZE_PX = 16
+PHOTO_VIEWER_TRANSIENT_FONT_SIZE_PX = 28
+PHOTO_VIEWER_OVERLAY_FONT_WEIGHT = 600
+
+
+@dataclass(frozen=True)
+class ViewerInspectionState:
+    """Photo-viewer inspection state to carry across photo loads."""
+
+    split: bool
+    manual_view: tuple[float, tuple[float, float]] | None
 
 
 class FolderHydrationSignalBridge(QObject):
@@ -175,6 +190,7 @@ class PhotoViewerWindow(QMainWindow):
         self.exif_overlay.hide()
         self._build_progress_overlay()
         self._build_transient_message_overlay()
+        self._apply_overlay_style()
         self.viewer_stack_widget.installEventFilter(self)
 
     def _build_progress_overlay(self) -> None:
@@ -231,6 +247,59 @@ class PhotoViewerWindow(QMainWindow):
         self.transient_message_timer.setSingleShot(True)
         self.transient_message_timer.timeout.connect(
             self.transient_message_overlay.hide
+        )
+
+    def _apply_overlay_style(self) -> None:
+        """Apply readable fixed styling to photo-viewer overlays."""
+        self.overlay_message_label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: {PHOTO_VIEWER_OVERLAY_TEXT};
+                font-size: {PHOTO_VIEWER_PROGRESS_FONT_SIZE_PX}px;
+                font-weight: {PHOTO_VIEWER_OVERLAY_FONT_WEIGHT};
+            }}
+            """
+        )
+        self.progress_overlay.setStyleSheet(
+            """
+            QWidget#progressOverlay {
+                background-color: rgba(20, 24, 29, 140);
+            }
+            """
+        )
+        self.progress_panel.setStyleSheet(
+            f"""
+            QFrame#progressPanel {{
+                background-color: {PHOTO_VIEWER_OVERLAY_BACKGROUND};
+                border: 1px solid {PHOTO_VIEWER_OVERLAY_BORDER};
+                border-radius: 12px;
+            }}
+            """
+        )
+        self.transient_message_overlay.setStyleSheet(
+            """
+            QWidget#transientMessageOverlay {
+                background-color: rgba(20, 24, 29, 90);
+            }
+            """
+        )
+        self.transient_message_label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: {PHOTO_VIEWER_OVERLAY_TEXT};
+                font-size: {PHOTO_VIEWER_TRANSIENT_FONT_SIZE_PX}px;
+                font-weight: {PHOTO_VIEWER_OVERLAY_FONT_WEIGHT};
+            }}
+            """
+        )
+        self.transient_message_panel.setStyleSheet(
+            f"""
+            QFrame#transientMessagePanel {{
+                background-color: {PHOTO_VIEWER_OVERLAY_BACKGROUND};
+                border: 1px solid {PHOTO_VIEWER_OVERLAY_BORDER};
+                border-radius: 12px;
+            }}
+            """
         )
 
     def _build_shortcuts(self) -> None:
@@ -378,14 +447,32 @@ class PhotoViewerWindow(QMainWindow):
         if next_index < 0 or next_index >= len(photo_ids):
             return
 
+        inspection_state = self._capture_inspection_state()
         self.current_photo_id = photo_ids[next_index]
-        self.viewer.set_fit_view()
-        self._display_current_photo(force_fit=True)
+        self._display_current_photo(inspection_state=inspection_state)
         self._refresh_window_title()
         self._start_photo_viewer_exif_refresh()
         self._start_viewer_prefetch()
 
-    def _display_current_photo(self, *, force_fit: bool = False) -> None:
+    def _capture_inspection_state(self) -> ViewerInspectionState:
+        """Capture split/manual inspection state before a photo change."""
+        if self.viewer.is_split_view():
+            return ViewerInspectionState(
+                split=True,
+                manual_view=self.viewer.split_zoom_viewer.current_manual_view(),
+            )
+
+        return ViewerInspectionState(
+            split=False,
+            manual_view=self.viewer.single_viewer.current_manual_view(),
+        )
+
+    def _display_current_photo(
+            self,
+            *,
+            force_fit: bool = False,
+            inspection_state: ViewerInspectionState | None = None,
+    ) -> None:
         if self.current_photo_id is None:
             self.viewer.clear_photo()
             return
@@ -401,7 +488,21 @@ class PhotoViewerWindow(QMainWindow):
             focus_point_pending=getattr(photo, 'focus_point_pending', False),
             preserve_zoom=False,
         )
+        if not force_fit and inspection_state is not None:
+            self._restore_inspection_state(inspection_state)
+
         self._refresh_info_overlay()
+
+    def _restore_inspection_state(
+            self, inspection_state: ViewerInspectionState
+    ) -> None:
+        """Restore carried split/manual state after loading a new photo."""
+        if inspection_state.split and not self.viewer.is_split_view():
+            self.viewer.toggle_split_view()
+
+        manual_view = inspection_state.manual_view
+        if manual_view is not None:
+            self.viewer.apply_manual_view(*manual_view)
 
     def _refresh_window_title(self) -> None:
         if self.current_photo_id is None or not self.library.photos:
@@ -819,17 +920,23 @@ class PhotoViewerWindow(QMainWindow):
             )
             return
 
-        self._hydrated_library = library
         preserved_photo_id = self.current_photo_id
+        preserve_inspection = preserved_photo_id in {
+            photo.photo_id for photo in library.photos
+        }
+        inspection_state = (
+            self._capture_inspection_state() if preserve_inspection else None
+        )
+        self._hydrated_library = library
         self.library = library
-        if preserved_photo_id in {photo.photo_id for photo in library.photos}:
+        if preserve_inspection:
             self.current_photo_id = preserved_photo_id
         elif library.photos:
             self.current_photo_id = library.photos[0].photo_id
         else:
             self.current_photo_id = None
 
-        self._display_current_photo(force_fit=True)
+        self._display_current_photo(inspection_state=inspection_state)
         self._refresh_window_title()
         if self._pending_culling_handoff:
             self._pending_culling_handoff = False

@@ -250,6 +250,15 @@ class MainPhotoViewer(QWidget):
         self._active_zoom_viewer().keyboard_pan_by(base_dx, base_dy)
         self._sync_mode()
 
+    def apply_manual_view(
+            self, zoom_factor: float, center: tuple[float, float]
+    ) -> None:
+        """Apply a manual zoom factor and center to the active zoom pane."""
+        self._active_zoom_viewer().zoom_to_normalized_center(
+            center, zoom_factor=zoom_factor
+        )
+        self._sync_mode()
+
     def _active_zoom_viewer(self) -> PhotoViewer:
         return (
             self.split_zoom_viewer
