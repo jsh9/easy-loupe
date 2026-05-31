@@ -316,6 +316,76 @@ def test_main_window_system_open_enters_photo_viewer_and_browse_grid(
     window.close()
 
 
+def test_main_window_photo_viewer_mode_disables_metadata_assignment(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Keep photo-viewer mode read-only for ratings, labels, and flags.
+
+    Assignment shortcuts and direct assignment methods should become active
+    only after the user hands off into browse/culling mode.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    create_jpeg(tmp_path / 'B.JPG', 'blue')
+    stub_read_exif(monkeypatch, {})
+    app = QApplication.instance() or QApplication([])
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    window.show()
+    monkeypatch.setattr(
+        window.folder_access_manager,
+        'ensure_access_for_file',
+        lambda _path, _parent: True,
+    )
+    monkeypatch.setattr(window, '_start_viewer_prefetch', lambda: None)
+    monkeypatch.setattr(
+        window, '_start_folder_hydration', lambda _folder: None
+    )
+
+    window.open_file_from_system(tmp_path / 'B.JPG')
+    app.processEvents()
+    save_calls: list[str] = []
+    monkeypatch.setattr(
+        window.library,
+        'save_metadata',
+        lambda: save_calls.append('save'),
+    )
+
+    photo = window.library.get_photo('B')
+    assert window._photo_viewer_mode is True
+    assert all(not action.isEnabled() for action in window._assignment_actions)
+    assert all(
+        not shortcut.isEnabled() for shortcut in window._assignment_shortcuts
+    )
+
+    window._set_rating(5)
+    window._set_color_label('green')
+    window._set_flag('picked')
+
+    assert photo.rating is None
+    assert photo.color_label is None
+    assert photo.flag is None
+    assert window._metadata_undo_stack == []
+    assert save_calls == []
+
+    window._handle_browse_mode_shortcut()
+    app.processEvents()
+
+    assert window._photo_viewer_mode is False
+    assert window._browse_mode is True
+    assert all(action.isEnabled() for action in window._assignment_actions)
+    assert all(
+        shortcut.isEnabled() for shortcut in window._assignment_shortcuts
+    )
+
+    window._set_rating(5)
+
+    assert photo.rating == 5
+    assert window._metadata_undo_stack
+    assert save_calls == ['save']
+    window.close()
+
+
 def test_main_window_photo_viewer_title_prefers_opened_file_extension(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -611,12 +681,20 @@ def test_main_window_canceled_photo_viewer_access_opens_single_photo_only(
     assert window._photo_viewer_folder_access_granted is False
     assert [photo.photo_id for photo in window.library.photos] == ['B']
     assert window.windowTitle() == 'EasyCull - B.JPG (1 / 1)'
+    assert window.browse_mode_shortcut.isEnabled() is True
+    assert window.enter_browse_mode_shortcut.isEnabled() is True
+    assert window.keypad_enter_browse_mode_shortcut.isEnabled() is True
 
     window._navigate_photo_viewer(-1)
     assert window.current_photo_id == 'B'
 
-    window._handle_browse_mode_shortcut()
+    messages: list[str] = []
+    monkeypatch.setattr(window, '_show_transient_message', messages.append)
+
+    window.browse_mode_shortcut.activated.emit()
+
     assert window._browse_mode is False
+    assert messages == ['Allow folder access to browse adjacent photos']
     window.close()
 
 

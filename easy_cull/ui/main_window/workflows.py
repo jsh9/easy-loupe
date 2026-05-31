@@ -1277,6 +1277,9 @@ class MainWindowWorkflowMixin:
         self._show_progress(message, progress)
 
     def _set_rating(self: MainWindow, rating: int | None) -> None:
+        if getattr(self, '_photo_viewer_mode', False):
+            return
+
         if hasattr(self, '_apply_metadata_to_selection'):
             self._apply_metadata_to_selection('rating', rating)
             return
@@ -1288,6 +1291,9 @@ class MainWindowWorkflowMixin:
         self._after_metadata_change()
 
     def _set_color_label(self: MainWindow, color_label: str | None) -> None:
+        if getattr(self, '_photo_viewer_mode', False):
+            return
+
         if hasattr(self, '_apply_metadata_to_selection'):
             self._apply_metadata_to_selection('color_label', color_label)
             return
@@ -1301,6 +1307,9 @@ class MainWindowWorkflowMixin:
         self._after_metadata_change()
 
     def _set_flag(self: MainWindow, flag: str | None) -> None:
+        if getattr(self, '_photo_viewer_mode', False):
+            return
+
         if hasattr(self, '_apply_metadata_to_selection'):
             self._apply_metadata_to_selection('flag', flag)
             return
@@ -1833,7 +1842,10 @@ class MainWindowWorkflowMixin:
             )
 
         for action in self._assignment_actions:
-            action.setEnabled(enabled)
+            action.setEnabled(enabled and not self._photo_viewer_mode)
+
+        for shortcut in self._assignment_shortcuts:
+            shortcut.setEnabled(enabled and not self._photo_viewer_mode)
 
         self._refresh_metadata_history_actions()
 

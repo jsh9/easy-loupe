@@ -264,11 +264,6 @@ def main(argv: list[str] | None = None) -> int:
     apply_app_identity(app)
     startup_files = _extract_startup_files(argv)
     pending_open_files = app.take_pending_open_files()
-    startup_files.extend(
-        path
-        for path in pending_open_files
-        if path.suffix.lower() in SUPPORTED_EXTENSIONS
-    )
 
     window_manager = WindowManager()
     startup_coordinator = StartupCoordinator(window_manager)

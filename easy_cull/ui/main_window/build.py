@@ -860,10 +860,7 @@ class MainWindowBuildMixin:
             or normal_view_shortcuts_enabled
             or self._compare_mode
         )
-        can_enter_browse = bool(self.library.photos) and (
-            not self._photo_viewer_mode
-            or self._photo_viewer_folder_access_granted
-        )
+        can_enter_browse = bool(self.library.photos)
         self.browse_mode_shortcut.setEnabled(can_enter_browse)
         self.enter_browse_mode_shortcut.setEnabled(
             self._photo_viewer_mode and can_enter_browse
@@ -891,6 +888,8 @@ class MainWindowBuildMixin:
 
         for shortcut in self._compare_nav_shortcuts:
             shortcut.setEnabled(self._compare_mode)
+
+        self._refresh_assignment_controls()
 
     def _handle_browse_mode_shortcut(self: MainWindow) -> None:
         if self._photo_viewer_mode:
@@ -1114,6 +1113,15 @@ class MainWindowBuildMixin:
         menu.addAction(action)
         self._assignment_actions.append(action)
         return action
+
+    def _refresh_assignment_controls(self: MainWindow) -> None:
+        """Enable assignment controls only in culling-capable modes."""
+        enabled = not self._busy and not self._photo_viewer_mode
+        for action in self._assignment_actions:
+            action.setEnabled(enabled)
+
+        for shortcut in self._assignment_shortcuts:
+            shortcut.setEnabled(enabled)
 
     def _update_progress_overlay_geometry(self: MainWindow) -> None:
         """Match the progress overlay to the current central widget bounds."""

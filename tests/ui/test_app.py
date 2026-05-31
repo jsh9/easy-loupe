@@ -397,6 +397,69 @@ def test_startup_coordinator_opens_pending_file_events(
     assert _FakeTimer.instances == []
 
 
+def test_main_keeps_pending_file_events_separate_from_argv(
+        tmp_path: Path, monkeypatch: object
+) -> None:
+    """
+    Pass queued macOS file-open events to the startup coordinator only once.
+
+    ``StartupCoordinator.start`` owns combining argv files with pending
+    ``FileOpen`` events, so ``main`` must not copy pending files into the argv
+    startup list before calling it.
+    """
+    argv_photo = tmp_path / 'IMG_1000.JPG'
+    pending_photo = tmp_path / 'IMG_1001.JPG'
+
+    class FakeApplication:
+        instances: ClassVar[list[FakeApplication]] = []
+
+        def __init__(self, argv: list[str]) -> None:
+            self.argv = argv
+            self.file_opened = _FakeSignal()
+            self.__class__.instances.append(self)
+
+        @staticmethod
+        def take_pending_open_files() -> list[Path]:
+            return [pending_photo]
+
+        @staticmethod
+        def exec() -> int:
+            return 0
+
+    class FakeStartupCoordinator:
+        instances: ClassVar[list[FakeStartupCoordinator]] = []
+
+        def __init__(self, window_manager: object) -> None:
+            self.window_manager = window_manager
+            self.startup_files: list[Path] = []
+            self.pending_open_files: list[Path] = []
+            self.__class__.instances.append(self)
+
+        def open_file_from_system(self, file_path: object) -> None:
+            self.live_file_open = file_path
+
+        def start(
+                self,
+                startup_files: list[Path],
+                pending_open_files: list[Path],
+        ) -> None:
+            self.startup_files = list(startup_files)
+            self.pending_open_files = list(pending_open_files)
+
+    monkeypatch.setattr(app_module, 'prepare_app_identity', lambda: None)
+    monkeypatch.setattr(app_module, 'apply_app_identity', lambda _app: None)
+    monkeypatch.setattr(app_module, 'EasyCullApplication', FakeApplication)
+    monkeypatch.setattr(
+        app_module, 'StartupCoordinator', FakeStartupCoordinator
+    )
+
+    assert app_module.main(['python', str(argv_photo)]) == 0
+
+    coordinator = FakeStartupCoordinator.instances[0]
+    assert coordinator.startup_files == [argv_photo]
+    assert coordinator.pending_open_files == [pending_photo]
+
+
 def test_startup_coordinator_system_open_creates_new_window(
         tmp_path: Path,
 ) -> None:
