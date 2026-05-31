@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from easy_cull.core.histogram import compute_rgb_histogram
 from easy_cull.core.photo_library import PhotoLibrary
 from easy_cull.ui.folder_access import FolderAccessManager
 from easy_cull.ui.identity import APP_NAME, easy_cull_icon
@@ -37,6 +38,7 @@ from easy_cull.ui.photo_viewer.workers import (
     PhotoViewerExifWorker,
     ViewerPrefetchWorker,
 )
+from easy_cull.ui.viewers.exif_overlay import ExifOverlayWidget
 from easy_cull.ui.viewers.main_photo_viewer import MainPhotoViewer
 from easy_cull.ui.widgets import ThumbnailPreviewWidget
 
@@ -46,9 +48,11 @@ if TYPE_CHECKING:
 FOCUS_POINT_COORDINATE_COUNT = 2
 PERCENT_COMPLETE = 100
 EXTENDED_PROGRESS_MAX = 200
+VIEWER_KEYBOARD_PAN_STEP = 120
 PHOTO_VIEWER_MINIMAP_WIDTH = 180
 PHOTO_VIEWER_MINIMAP_HEIGHT = 120
 PHOTO_VIEWER_MINIMAP_MARGIN = 14
+INFO_OVERLAY_MARGIN = 14
 FOLDER_ACCESS_RECOVERY_MESSAGE = (
     'Browsing photos in this folder and adjacent-photo navigation need folder'
     ' access. Grant EasyCull access in System Settings -> Privacy & Security'
@@ -130,6 +134,9 @@ class PhotoViewerWindow(QMainWindow):
         self._photo_viewer_exif_refresh_pending = False
         self._viewer_prefetch_thread: QThread | None = None
         self._viewer_prefetch_worker: ViewerPrefetchWorker | None = None
+        self._show_af_point_marker = True
+        self._info_overlay_enabled = False
+        self._info_overlay_refresh_deferred = False
         self._minimap_photo_id: str | None = None
         self._closing = False
         self._close_after_background_tasks = False
@@ -164,6 +171,8 @@ class PhotoViewerWindow(QMainWindow):
         )
         self.minimap.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.minimap.hide()
+        self.exif_overlay = ExifOverlayWidget(self.viewer_stack_widget)
+        self.exif_overlay.hide()
         self._build_progress_overlay()
         self._build_transient_message_overlay()
         self.viewer_stack_widget.installEventFilter(self)
@@ -231,6 +240,28 @@ class PhotoViewerWindow(QMainWindow):
         self.zoom_toggle_shortcut = self._make_shortcut(
             'Z', self.viewer.toggle_focus_zoom
         )
+        self.split_mode_shortcut = self._make_shortcut(
+            Qt.Key_Backslash, self.viewer.toggle_split_view
+        )
+        self.show_af_point_shortcut = self._make_shortcut(
+            'F', self._toggle_show_af_point
+        )
+        self.info_overlay_shortcut = self._make_shortcut(
+            'I', self._toggle_info_overlay
+        )
+        # Mirror the culling workspace's viewer controls here because the
+        # standalone viewer no longer inherits MainWindow's shortcut table.
+        self._viewer_shortcuts = [
+            self._make_shortcut('-', lambda: self.viewer.zoom_step(0.8)),
+            self._make_shortcut('=', lambda: self.viewer.zoom_step(1.25)),
+            self._make_shortcut(
+                Qt.Key_Plus, lambda: self.viewer.zoom_step(1.25)
+            ),
+            self._make_shortcut('W', lambda: self._keyboard_pan_by(0, -1)),
+            self._make_shortcut('A', lambda: self._keyboard_pan_by(-1, 0)),
+            self._make_shortcut('S', lambda: self._keyboard_pan_by(0, 1)),
+            self._make_shortcut('D', lambda: self._keyboard_pan_by(1, 0)),
+        ]
         self.browse_mode_shortcut = self._make_shortcut(
             'G', self._request_culling_handoff
         )
@@ -255,10 +286,25 @@ class PhotoViewerWindow(QMainWindow):
     ) -> QShortcut:
         shortcut = QShortcut(QKeySequence(key), self)
         shortcut.setContext(Qt.WindowShortcut)
+        # Treat the progress overlay as modal: background hydration/close
+        # states should not accept navigation or viewer mutations.
         shortcut.activated.connect(
             lambda: None if self.progress_overlay.isVisible() else callback()
         )
         return shortcut
+
+    def _keyboard_pan_by(self, x_direction: int, y_direction: int) -> None:
+        """Pan using the same screen-feeling step as culling view."""
+        base_dx = x_direction * VIEWER_KEYBOARD_PAN_STEP
+        base_dy = y_direction * VIEWER_KEYBOARD_PAN_STEP
+        self.viewer.keyboard_pan_by(base_dx, base_dy)
+
+    def _toggle_show_af_point(self) -> None:
+        """Toggle the autofocus marker in the standalone viewer."""
+        self._show_af_point_marker = not self._show_af_point_marker
+        self.viewer.set_focus_point_marker_visible(
+            enabled=self._show_af_point_marker
+        )
 
     def open_file(self, file_path: object) -> None:
         """Open a photo file into the lightweight viewer state."""
@@ -277,6 +323,9 @@ class PhotoViewerWindow(QMainWindow):
                 allow_folder_scan=folder_access_granted,
             )
         except PermissionError:
+            # A granted prompt can still fail at scan time on protected
+            # folders. Fall back to the selected photo only so opening remains
+            # useful while navigation and handoff stay blocked.
             folder_access_granted = False
             self.library.load_viewer_folder(
                 resolved_path, allow_folder_scan=False
@@ -353,6 +402,7 @@ class PhotoViewerWindow(QMainWindow):
             focus_point_pending=getattr(photo, 'focus_point_pending', False),
             preserve_zoom=False,
         )
+        self._refresh_info_overlay()
 
     def _refresh_window_title(self) -> None:
         if self.current_photo_id is None or not self.library.photos:
@@ -401,6 +451,9 @@ class PhotoViewerWindow(QMainWindow):
             self._folder_hydration_thread is not None
             and self._hydrated_library is None
         ):
+            # The worker may still be hydrating the full folder needed for
+            # culling. Once a hydrated library exists, handoff may proceed even
+            # before QThread.finished has cleared the thread slot.
             self._pending_culling_handoff = True
             self._show_progress(
                 self._folder_hydration_message or 'Loading folder...',
@@ -416,6 +469,82 @@ class PhotoViewerWindow(QMainWindow):
             preloaded_library=library,
         )
         self.culling_requested.emit(request)
+
+    def _toggle_info_overlay(self) -> None:
+        """Toggle the EXIF and histogram overlay."""
+        self._info_overlay_enabled = not self._info_overlay_enabled
+        self._refresh_info_overlay()
+
+    def _refresh_info_overlay(self, *, allow_defer: bool = True) -> None:
+        """Show or hide the EXIF/histogram pane for the active photo."""
+        if (
+            not self._info_overlay_enabled
+            or self.progress_overlay.isVisible()
+            or self.current_photo_id is None
+            or not self.library.photos
+        ):
+            self.exif_overlay.hide()
+            return
+
+        photo = self.library.get_photo(self.current_photo_id)
+        histogram = None
+        try:
+            image_path = self.library.get_preview_path(
+                photo.photo_id, 'viewer'
+            )
+            histogram = compute_rgb_histogram(image_path)
+        except (OSError, RuntimeError, ValueError):
+            histogram = None
+
+        self.exif_overlay.set_content(photo.exif_display, histogram)
+        if not self._info_overlay_geometry_ready():
+            self.exif_overlay.hide()
+            if allow_defer:
+                self._defer_info_overlay_refresh()
+
+            return
+
+        self._update_info_overlay_geometry()
+        self.exif_overlay.show()
+        self.exif_overlay.raise_()
+
+    def _info_overlay_geometry_ready(self) -> bool:
+        """Return whether the viewer stack can fit the EXIF overlay."""
+        parent_rect = self.viewer_stack_widget.rect()
+        return parent_rect.width() >= self.exif_overlay.width() + (
+            INFO_OVERLAY_MARGIN * 2
+        ) and parent_rect.height() >= self.exif_overlay.minimumHeight() + (
+            INFO_OVERLAY_MARGIN * 2
+        )
+
+    def _defer_info_overlay_refresh(self) -> None:
+        """Retry overlay refresh after Qt settles viewer geometry."""
+        if self._info_overlay_refresh_deferred:
+            return
+
+        self._info_overlay_refresh_deferred = True
+        QTimer.singleShot(0, self._finish_deferred_info_overlay_refresh)
+
+    def _finish_deferred_info_overlay_refresh(self) -> None:
+        self._info_overlay_refresh_deferred = False
+        self._refresh_info_overlay(allow_defer=False)
+
+    def _update_info_overlay_geometry(self) -> None:
+        """Anchor the EXIF overlay at the top right of the viewer stack."""
+        margin = INFO_OVERLAY_MARGIN
+        parent_rect = self.viewer_stack_widget.rect()
+        size_hint = self.exif_overlay.sizeHint()
+        width = self.exif_overlay.width()
+        minimum_height = self.exif_overlay.minimumSizeHint().height()
+        height = min(
+            max(size_hint.height(), minimum_height),
+            max(parent_rect.height() - (margin * 2), 0),
+        )
+        if height < minimum_height:
+            return
+
+        x = max(margin, parent_rect.width() - width - margin)
+        self.exif_overlay.setGeometry(x, margin, width, height)
 
     def _start_photo_viewer_exif_refresh(self) -> None:
         if self.current_photo_id is None or not self.library.photos:
@@ -891,6 +1020,7 @@ class PhotoViewerWindow(QMainWindow):
         return True
 
     def _show_progress(self, message: str, progress: int) -> None:
+        self.exif_overlay.hide()
         max_value = (
             EXTENDED_PROGRESS_MAX
             if progress > PERCENT_COMPLETE
@@ -906,6 +1036,7 @@ class PhotoViewerWindow(QMainWindow):
     def _hide_progress(self) -> None:
         self.progress_overlay.hide()
         self.overlay_progress_bar.setRange(0, 100)
+        self._refresh_info_overlay()
 
     def _show_transient_message(
             self,
@@ -931,14 +1062,16 @@ class PhotoViewerWindow(QMainWindow):
         self._update_progress_overlay_geometry()
         self._update_transient_message_overlay_geometry()
         self._update_minimap_geometry()
+        self._update_info_overlay_geometry()
 
     def eventFilter(self, watched: object, event: QEvent) -> bool:  # noqa: N802
-        """Reposition the minimap when the viewer stack changes size."""
+        """Reposition floating overlays when the viewer stack changes size."""
         if (
             watched is self.viewer_stack_widget
             and event.type() == QEvent.Resize
         ):
             self._update_minimap_geometry()
+            self._update_info_overlay_geometry()
 
         return super().eventFilter(watched, event)
 
