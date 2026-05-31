@@ -246,7 +246,7 @@ class PhotoViewerWindow(QMainWindow):
         self.transient_message_timer = QTimer(self)
         self.transient_message_timer.setSingleShot(True)
         self.transient_message_timer.timeout.connect(
-            self.transient_message_overlay.hide
+            self._hide_transient_message
         )
 
     def _apply_overlay_style(self) -> None:
@@ -317,6 +317,9 @@ class PhotoViewerWindow(QMainWindow):
         )
         self.info_overlay_shortcut = self._make_shortcut(
             'I', self._toggle_info_overlay
+        )
+        self.dismiss_message_shortcut = self._make_shortcut(
+            Qt.Key_Escape, self._hide_transient_message
         )
         # Mirror the culling workspace's viewer controls here because the
         # standalone viewer no longer inherits MainWindow's shortcut table.
@@ -415,9 +418,7 @@ class PhotoViewerWindow(QMainWindow):
         self._refresh_window_title()
         self._start_photo_viewer_exif_refresh()
         self._start_viewer_prefetch()
-        if not folder_access_granted:
-            self._show_folder_access_recovery_message()
-        elif self.library.current_folder is not None:
+        if folder_access_granted and self.library.current_folder is not None:
             self._start_folder_hydration(self.library.current_folder)
 
     def _photo_id_for_opened_file(self, file_path: Path) -> str | None:
@@ -1159,6 +1160,11 @@ class PhotoViewerWindow(QMainWindow):
         self.transient_message_overlay.show()
         self.transient_message_overlay.raise_()
         self.transient_message_timer.start(timeout_ms)
+
+    def _hide_transient_message(self) -> None:
+        """Dismiss the non-modal message overlay and its auto-hide timer."""
+        self.transient_message_timer.stop()
+        self.transient_message_overlay.hide()
 
     def _update_progress_overlay_geometry(self) -> None:
         self.progress_overlay.setGeometry(self.central_widget.rect())

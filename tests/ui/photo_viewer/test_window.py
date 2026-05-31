@@ -143,6 +143,33 @@ def test_photo_viewer_message_overlays_are_framed_and_readable(
     window.close()
 
 
+def test_photo_viewer_escape_dismisses_transient_message_overlay(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify Escape immediately dismisses transient viewer messages.
+
+    Folder-access recovery messages are intentionally non-modal, but they can
+    linger long enough to block inspection. This protects the manual dismissal
+    path without making real progress overlays dismissible.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+    window._show_transient_message('Grant folder access', timeout_ms=10_000)
+    app.processEvents()
+
+    assert window.transient_message_overlay.isVisible() is True
+    assert window.transient_message_timer.isActive() is True
+
+    window.dismiss_message_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.transient_message_overlay.isHidden() is True
+    assert window.transient_message_timer.isActive() is False
+    window.close()
+
+
 def test_photo_viewer_shortcuts_control_split_zoom_and_keyboard_pan(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -429,8 +456,8 @@ def test_photo_viewer_denied_access_blocks_navigation_and_handoff(
     Verify denied folder access stays limited to the opened photo.
 
     Navigation and culling handoff require a full folder scan, so both paths
-    must stop with the recovery message instead of silently opening stale or
-    incomplete culling state.
+    must stop with the recovery message. Initial single-photo viewing should
+    stay quiet and usable because it does not require folder access.
     """
     create_jpeg(tmp_path / 'A.JPG', 'green')
     create_jpeg(tmp_path / 'B.JPG', 'blue')
@@ -450,14 +477,18 @@ def test_photo_viewer_denied_access_blocks_navigation_and_handoff(
     window.culling_requested.connect(requests.append)
 
     assert [photo.photo_id for photo in window.library.photos] == ['B']
-    assert len(messages) == 1
+    assert messages == []
 
     window.navigate(-1)
+
+    assert window.current_photo_id == 'B'
+    assert len(messages) == 1
+
     window._request_culling_handoff()
 
     assert window.current_photo_id == 'B'
     assert requests == []
-    assert len(messages) == 3
+    assert len(messages) == 2
     assert 'Browsing photos in this folder' in messages[0][0]
     assert (
         messages[0][1]
