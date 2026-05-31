@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import (
     QEvent,
@@ -36,6 +36,7 @@ from easy_cull.ui.launch import CullingLaunchRequest
 from easy_cull.ui.main_window.build import TRANSIENT_MESSAGE_TIMEOUT_MS
 from easy_cull.ui.photo_viewer.workers import (
     FolderHydrationWorker,
+    PhotoViewerExifResult,
     PhotoViewerExifWorker,
     ViewerPrefetchWorker,
 )
@@ -46,7 +47,6 @@ from easy_cull.ui.widgets import ThumbnailPreviewWidget
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-FOCUS_POINT_COORDINATE_COUNT = 2
 PERCENT_COMPLETE = 100
 EXTENDED_PROGRESS_MAX = 200
 VIEWER_KEYBOARD_PAN_STEP = 120
@@ -66,6 +66,18 @@ PHOTO_VIEWER_OVERLAY_BORDER = '#b6bec7'
 PHOTO_VIEWER_PROGRESS_FONT_SIZE_PX = 16
 PHOTO_VIEWER_TRANSIENT_FONT_SIZE_PX = 28
 PHOTO_VIEWER_OVERLAY_FONT_WEIGHT = 600
+EXIF_LOADING_VALUE = 'Loading...'
+PHOTO_VIEWER_EXIF_PLACEHOLDER_LABELS = (
+    'Captured',
+    'Camera Model',
+    'Lens Model',
+    'Focal Length',
+    'Aperture',
+    'Shutter Speed',
+    'ISO',
+    'Resolution',
+    'File Size',
+)
 
 
 @dataclass(frozen=True)
@@ -601,7 +613,9 @@ class PhotoViewerWindow(QMainWindow):
         except (OSError, RuntimeError, ValueError):
             histogram = None
 
-        self.exif_overlay.set_content(photo.exif_display, histogram)
+        self.exif_overlay.set_content(
+            self._exif_display_for_overlay(photo), histogram
+        )
         if not self._info_overlay_geometry_ready():
             self.exif_overlay.hide()
             if allow_defer:
@@ -612,6 +626,19 @@ class PhotoViewerWindow(QMainWindow):
         self._update_info_overlay_geometry()
         self.exif_overlay.show()
         self.exif_overlay.raise_()
+
+    @staticmethod
+    def _exif_display_for_overlay(photo: object) -> dict[str, str]:
+        if getattr(photo, 'focus_point_pending', False):
+            return dict.fromkeys(
+                PHOTO_VIEWER_EXIF_PLACEHOLDER_LABELS, EXIF_LOADING_VALUE
+            )
+
+        exif_display = getattr(photo, 'exif_display', {})
+        if exif_display:
+            return dict(exif_display)
+
+        return {}
 
     def _info_overlay_geometry_ready(self) -> bool:
         """Return whether the viewer stack can fit the EXIF overlay."""
@@ -677,6 +704,10 @@ class PhotoViewerWindow(QMainWindow):
             photo.photo_id,
             photo.metadata_source,
             photo.preview_source,
+            [
+                photo.preview_source.parent / filename
+                for filename in photo.files
+            ],
         )
         self._photo_viewer_exif_worker.moveToThread(
             self._photo_viewer_exif_thread
@@ -718,19 +749,16 @@ class PhotoViewerWindow(QMainWindow):
             self,
             request_id: int,
             photo_id: str,
-            focus_point: object,
+            result: object,
     ) -> None:
         if (
             self._closing
             or request_id != self._photo_viewer_exif_request_id
-            or focus_point is None
+            or result is None
         ):
             return
 
-        if (
-            not isinstance(focus_point, tuple)
-            or len(focus_point) != FOCUS_POINT_COORDINATE_COUNT
-        ):
+        if not isinstance(result, PhotoViewerExifResult):
             return
 
         try:
@@ -738,11 +766,15 @@ class PhotoViewerWindow(QMainWindow):
         except KeyError:
             return
 
-        point = cast('tuple[float, float]', focus_point)
-        photo.focus_point = (float(point[0]), float(point[1]))
+        photo.focus_point = result.focus_point
         photo.focus_point_pending = False
+        photo.capture_at = result.capture_at
+        photo.image_width = result.image_width
+        photo.image_height = result.image_height
+        photo.exif_display = dict(result.exif_display)
         if self.current_photo_id == photo_id:
             self.viewer.set_focus_point(photo.focus_point)
+            self._refresh_info_overlay()
 
     def _handle_photo_viewer_exif_failed(
             self, request_id: int, _error: str
@@ -761,6 +793,7 @@ class PhotoViewerWindow(QMainWindow):
 
         photo.focus_point_pending = False
         self.viewer.set_focus_point(photo.focus_point)
+        self._refresh_info_overlay()
 
     def _clear_photo_viewer_exif_worker(
             self, finished_thread: object, finished_worker: object

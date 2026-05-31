@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Signal
 
 import easy_cull.core.exif as exif_module
+from easy_cull.core.folder_loading import build_photo_exif_display
 from easy_cull.core.photo_library import PhotoLibrary
+from easy_cull.core.records import JPEG_EXTENSIONS, RAW_EXTENSIONS
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from datetime import datetime
     from pathlib import Path
 
 
@@ -50,6 +54,17 @@ class ViewerPrefetchWorker(QObject):
         self.finished.emit()
 
 
+@dataclass(frozen=True, slots=True)
+class PhotoViewerExifResult:
+    """EXIF payload for updating one standalone viewer photo record."""
+
+    focus_point: tuple[float, float]
+    exif_display: dict[str, str]
+    capture_at: datetime | None
+    image_width: int | None
+    image_height: int | None
+
+
 class PhotoViewerExifWorker(QObject):
     """Read focus metadata for the active photo-viewer photo."""
 
@@ -62,12 +77,14 @@ class PhotoViewerExifWorker(QObject):
             photo_id: str,
             metadata_source: Path,
             preview_source: Path,
+            photo_files: Sequence[Path],
     ) -> None:
         super().__init__()
         self._request_id = request_id
         self._photo_id = photo_id
         self._metadata_source = metadata_source
         self._preview_source = preview_source
+        self._photo_files = list(photo_files)
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -99,6 +116,26 @@ class PhotoViewerExifWorker(QObject):
             focus_point = exif_module.extract_focus_point(
                 metadata, image_width, image_height
             )
+            jpeg_files = [
+                path
+                for path in self._photo_files
+                if path.suffix.lower() in JPEG_EXTENSIONS
+            ]
+            raw_files = [
+                path
+                for path in self._photo_files
+                if path.suffix.lower() in RAW_EXTENSIONS
+            ]
+            exif_display = build_photo_exif_display(
+                metadata, jpeg_files=jpeg_files, raw_files=raw_files
+            )
+            result = PhotoViewerExifResult(
+                focus_point=focus_point,
+                exif_display=exif_display.exif_display,
+                capture_at=exif_display.capture_at,
+                image_width=exif_display.image_width,
+                image_height=exif_display.image_height,
+            )
         except Exception as exc:  # noqa: BLE001  # pragma: no cover - thread safety path
             self.failed.emit(self._request_id, str(exc))
             return
@@ -107,7 +144,7 @@ class PhotoViewerExifWorker(QObject):
             self.finished.emit(self._request_id, self._photo_id, None)
             return
 
-        self.finished.emit(self._request_id, self._photo_id, focus_point)
+        self.finished.emit(self._request_id, self._photo_id, result)
 
 
 class FolderHydrationWorker(QObject):

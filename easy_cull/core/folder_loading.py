@@ -48,6 +48,16 @@ class LoadedFolderState:
     scene_detection_done: bool
 
 
+@dataclass(frozen=True, slots=True)
+class PhotoExifDisplay:
+    """Formatted EXIF display payload shared by loaders and viewer workers."""
+
+    capture_at: datetime | None
+    image_width: int | None
+    image_height: int | None
+    exif_display: dict[str, str]
+
+
 def load_folder_state(
         folder: Path,
         *,
@@ -223,16 +233,12 @@ def _build_photo_record(
         or exif_map.get(preview_source.name)
         or {}
     )
-    image_width, image_height = exif_module.resolve_image_size(source_metadata)
-    focus_point = exif_module.extract_focus_point(
-        source_metadata, image_width, image_height
+    exif_display = build_photo_exif_display(
+        source_metadata, jpeg_files=jpeg_files, raw_files=raw_files
     )
-    capture_at = exif_module.parse_capture_time(source_metadata)
-    exif_display: dict[str, str] = {}
-    _add_capture_time_display(exif_display, capture_at)
-    exif_display.update(exif_module.format_exif_display(source_metadata))
-    _add_resolution_display(exif_display, image_width, image_height)
-    _add_file_size_display(exif_display, jpeg_files, raw_files)
+    focus_point = exif_module.extract_focus_point(
+        source_metadata, exif_display.image_width, exif_display.image_height
+    )
 
     existing_metadata = normalized_metadata.get(shared_stem, {})
     rating = existing_metadata.get('rating')
@@ -249,13 +255,35 @@ def _build_photo_record(
         metadata_source=metadata_source,
         focus_point=focus_point,
         focus_point_pending=focus_point_pending,
-        capture_at=capture_at,
+        capture_at=exif_display.capture_at,
         rating=rating
         if isinstance(rating, int) and MIN_RATING <= rating <= MAX_RATING
         else None,
         color_label=color_label if color_label in COLOR_LABELS else None,
         flag=flag if flag in {'picked', 'rejected'} else None,
         scene_id=None,
+        image_width=exif_display.image_width,
+        image_height=exif_display.image_height,
+        exif_display=exif_display.exif_display,
+    )
+
+
+def build_photo_exif_display(
+        source_metadata: dict[str, Any],
+        *,
+        jpeg_files: list[Path],
+        raw_files: list[Path],
+) -> PhotoExifDisplay:
+    """Build culling-compatible formatted EXIF rows for one photo group."""
+    image_width, image_height = exif_module.resolve_image_size(source_metadata)
+    capture_at = exif_module.parse_capture_time(source_metadata)
+    exif_display: dict[str, str] = {}
+    _add_capture_time_display(exif_display, capture_at)
+    exif_display.update(exif_module.format_exif_display(source_metadata))
+    _add_resolution_display(exif_display, image_width, image_height)
+    _add_file_size_display(exif_display, jpeg_files, raw_files)
+    return PhotoExifDisplay(
+        capture_at=capture_at,
         image_width=image_width,
         image_height=image_height,
         exif_display=exif_display,

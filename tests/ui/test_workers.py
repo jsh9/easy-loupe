@@ -139,12 +139,23 @@ def test_photo_viewer_exif_worker_emits_current_photo_focus_point(
                 'ImageHeight': 500,
                 'AFAreaXPosition': 250,
                 'AFAreaYPosition': 300,
+                'DateTimeOriginal': '2024:05:01 10:00:00',
+                'Model': 'Z 8',
+                'LensModel': 'NIKKOR Z 50mm f/1.8 S',
+                'FNumber': '2.8',
+                'ExposureTime': '0.004',
+                'ISO': 800,
+                'FocalLength': '50',
             }
         },
     )
 
     worker = photo_viewer_workers_module.PhotoViewerExifWorker(
-        3, 'A', metadata_source, preview_source
+        3,
+        'A',
+        metadata_source,
+        preview_source,
+        [metadata_source, preview_source],
     )
     worker.finished.connect(
         lambda request_id, photo_id, focus_point: finished_events.append((
@@ -158,8 +169,28 @@ def test_photo_viewer_exif_worker_emits_current_photo_focus_point(
     )
     worker.run()
 
-    assert finished_events == [(3, 'A', (0.25, 0.6))]
     assert failed_events == []
+    assert len(finished_events) == 1
+    request_id, photo_id, result = finished_events[0]
+    assert request_id == 3
+    assert photo_id == 'A'
+    assert isinstance(
+        result, photo_viewer_workers_module.PhotoViewerExifResult
+    )
+    assert result.focus_point == (0.25, 0.6)
+    assert result.image_width == 1000
+    assert result.image_height == 500
+    assert result.exif_display == {
+        'Captured': '2024-05-01, 10:00:00 AM',
+        'Camera Model': 'Z 8',
+        'Lens Model': 'NIKKOR Z 50mm f/1.8 S',
+        'Focal Length': '50\u00a0mm',
+        'Aperture': '\u0192/2.8',
+        'Shutter Speed': '1/250\u00a0s',
+        'ISO': '800',
+        'Resolution': '1000 x 500 pixels (0.5 MP)',
+        'File Size': 'JPG: 1 KB, RAW: 1 KB',
+    }
 
 
 def test_photo_viewer_exif_worker_cancel_suppresses_focus_result(
@@ -177,7 +208,11 @@ def test_photo_viewer_exif_worker_cancel_suppresses_focus_result(
     )
 
     worker = photo_viewer_workers_module.PhotoViewerExifWorker(
-        4, 'A', metadata_source, preview_source
+        4,
+        'A',
+        metadata_source,
+        preview_source,
+        [metadata_source, preview_source],
     )
     worker.finished.connect(
         lambda request_id, photo_id, focus_point: finished_events.append((

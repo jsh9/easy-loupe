@@ -9,6 +9,7 @@ import easy_cull.ui.photo_viewer.window as photo_viewer_window_module
 from easy_cull.core.photo_library import PhotoLibrary
 from easy_cull.ui.launch import CullingLaunchRequest
 from easy_cull.ui.photo_viewer.window import PhotoViewerWindow
+from easy_cull.ui.photo_viewer.workers import PhotoViewerExifResult
 from tests.ui._helpers import create_jpeg, stub_read_exif
 
 if TYPE_CHECKING:
@@ -409,6 +410,7 @@ def test_photo_viewer_shortcuts_toggle_af_marker_and_info_overlay(
     app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
     photo = window.library.get_photo('A')
     photo.exif_display = {'Camera Model': 'Z 8', 'ISO': '800'}
+    photo.focus_point_pending = False
 
     assert window.exif_overlay.isHidden() is True
 
@@ -445,6 +447,82 @@ def test_photo_viewer_shortcuts_toggle_af_marker_and_info_overlay(
 
     assert window._info_overlay_enabled is False
     assert window.exif_overlay.isHidden() is True
+    window.close()
+
+
+def test_photo_viewer_info_overlay_shows_exif_loading_placeholders(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify the EXIF overlay opens with placeholder rows while EXIF loads.
+
+    The standalone viewer opens before full metadata is available, so pressing
+    ``I`` should show the panel shape immediately instead of an empty EXIF area
+    until the worker finishes.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green', size=(2000, 1500))
+    app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+
+    window.info_overlay_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.exif_overlay.isVisible() is True
+    assert window.exif_overlay.exif_display() == {
+        'Captured': 'Loading...',
+        'Camera Model': 'Loading...',
+        'Lens Model': 'Loading...',
+        'Focal Length': 'Loading...',
+        'Aperture': 'Loading...',
+        'Shutter Speed': 'Loading...',
+        'ISO': 'Loading...',
+        'Resolution': 'Loading...',
+        'File Size': 'Loading...',
+    }
+    assert window.exif_overlay.histogram_plot.histogram() is not None
+    window.close()
+
+
+def test_photo_viewer_exif_success_replaces_loading_placeholders(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify async EXIF success updates visible placeholder rows in place.
+
+    Users can open ``I`` before metadata is ready; the worker completion must
+    refresh the already-open overlay without requiring another key press.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green', size=(2000, 1500))
+    app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+    window.info_overlay_shortcut.activated.emit()
+    app.processEvents()
+    assert window.exif_overlay.exif_display()['ISO'] == 'Loading...'
+
+    window._photo_viewer_exif_request_id = 8
+    window._handle_photo_viewer_exif_finished(
+        8,
+        'A',
+        PhotoViewerExifResult(
+            focus_point=(0.25, 0.6),
+            exif_display={'Camera Model': 'Z 8', 'ISO': '800'},
+            capture_at=None,
+            image_width=1000,
+            image_height=500,
+        ),
+    )
+    app.processEvents()
+    photo = window.library.get_photo('A')
+
+    assert photo.focus_point == (0.25, 0.6)
+    assert photo.focus_point_pending is False
+    assert photo.image_width == 1000
+    assert photo.image_height == 500
+    assert window.exif_overlay.exif_display() == {
+        'Camera Model': 'Z 8',
+        'ISO': '800',
+    }
+    assert window.viewer.single_viewer._focus_point_marker.isVisible() is True
     window.close()
 
 
@@ -514,6 +592,9 @@ def test_photo_viewer_exif_failure_reveals_fallback_focus_marker(
     assert photo.focus_point == (0.5, 0.5)
     assert photo.focus_point_pending is True
     assert window.viewer.single_viewer._focus_point_marker.isVisible() is False
+    window.info_overlay_shortcut.activated.emit()
+    app.processEvents()
+    assert window.exif_overlay.exif_display()['ISO'] == 'Loading...'
 
     window._photo_viewer_exif_request_id = 7
     window._handle_photo_viewer_exif_failed(7, 'exif failed')
@@ -522,6 +603,7 @@ def test_photo_viewer_exif_failure_reveals_fallback_focus_marker(
     assert photo.focus_point_pending is False
     assert window.viewer.single_viewer._focus_point_pending is False
     assert window.viewer.single_viewer._focus_point_marker.isVisible() is True
+    assert window.exif_overlay.exif_display() == {'File Size': 'JPG: 47 KB'}
     window.close()
 
 
