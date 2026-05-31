@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox, QWidget
 from easy_cull.ui.identity import APP_NAME
 
 APPROVED_ROOTS_SETTINGS_KEY = 'photo_viewer/approved_roots'
+DENIED_ROOTS_SETTINGS_KEY = 'photo_viewer/denied_roots'
 MACOS_CLOUD_STORAGE_DIR = 'Library/CloudStorage'
 COMMON_MAC_PARENT_NAMES = frozenset({
     'Desktop',
@@ -52,6 +53,16 @@ class FolderAccessManager:
         if self.is_file_approved(resolved_file):
             return True
 
+        denied_root = self.denied_root_for_file(resolved_file)
+        if denied_root is not None:
+            # Suppress EasyCull's prompt after a denial, but still probe so a
+            # manual System Settings grant takes effect on the next open.
+            if self._verify_folder_access(denied_root, resolved_file.parent):
+                self.add_approved_root(denied_root)
+                return True
+
+            return False
+
         return self.request_access_for_file(resolved_file, parent)
 
     def request_access_for_file(
@@ -61,10 +72,14 @@ class FolderAccessManager:
         resolved_file = file_path.expanduser().resolve()
         suggested_root = self.suggest_access_root(resolved_file)
         if not self._confirm_access_root(parent, suggested_root):
+            self.add_denied_root(suggested_root)
             return False
 
         if self.is_macos_promptable_root(suggested_root):
-            if not self._probe_folder_access(suggested_root):
+            if not self._verify_folder_access(
+                suggested_root, resolved_file.parent
+            ):
+                self.add_denied_root(suggested_root)
                 return False
 
             self.add_approved_root(suggested_root)
@@ -85,6 +100,7 @@ class FolderAccessManager:
         """Prompt for and persist a native folder-selection grant."""
         selected_root = self._select_access_root(parent, suggested_root)
         if selected_root is None:
+            self.add_denied_root(suggested_root)
             return False
 
         if not self._contains(selected_root, file_path.parent):
@@ -98,6 +114,10 @@ class FolderAccessManager:
             )
             return False
 
+        if not self._verify_folder_access(selected_root, file_path.parent):
+            self.add_denied_root(suggested_root)
+            return False
+
         self.add_approved_root(selected_root)
         return True
 
@@ -109,9 +129,28 @@ class FolderAccessManager:
             for root in self.approved_roots()
         )
 
+    def denied_root_for_file(self, file_path: Path) -> Path | None:
+        """Return the stored denied root covering a file, when present."""
+        resolved_parent = file_path.expanduser().resolve().parent
+        return next(
+            (
+                root
+                for root in self.denied_roots()
+                if self._contains(root, resolved_parent)
+            ),
+            None,
+        )
+
     def approved_roots(self) -> list[Path]:
         """Return stored approved roots as existing absolute paths."""
-        value = self._settings.value(APPROVED_ROOTS_SETTINGS_KEY, [])
+        return self._stored_roots(APPROVED_ROOTS_SETTINGS_KEY)
+
+    def denied_roots(self) -> list[Path]:
+        """Return stored denied roots as existing absolute paths."""
+        return self._stored_roots(DENIED_ROOTS_SETTINGS_KEY)
+
+    def _stored_roots(self, key: str) -> list[Path]:
+        value = self._settings.value(key, [])
         if isinstance(value, str):
             raw_roots = [value]
         elif isinstance(value, list):
@@ -136,6 +175,9 @@ class FolderAccessManager:
         resolved_root = root.expanduser().resolve()
         roots = self.approved_roots()
         if any(self._contains(existing, resolved_root) for existing in roots):
+            # Approval can arrive after a previous denial; remove stale denial
+            # records so future opens do not stay in selected-photo-only mode.
+            self._clear_denied_roots_under(resolved_root)
             return
 
         filtered_roots = [
@@ -146,6 +188,45 @@ class FolderAccessManager:
         filtered_roots.append(resolved_root)
         self._settings.setValue(
             APPROVED_ROOTS_SETTINGS_KEY,
+            [str(path) for path in filtered_roots],
+        )
+        # Once real scanning works, any remembered denial for that tree is
+        # stale and should no longer suppress prompts.
+        self._clear_denied_roots_under(resolved_root)
+
+    def add_denied_root(self, root: Path) -> None:
+        """Persist a denied root unless an approved root already covers it."""
+        resolved_root = root.expanduser().resolve()
+        if any(
+            self._contains(existing, resolved_root)
+            for existing in self.approved_roots()
+        ):
+            return
+
+        roots = self.denied_roots()
+        if any(self._contains(existing, resolved_root) for existing in roots):
+            return
+
+        filtered_roots = [
+            existing
+            for existing in roots
+            if not self._contains(resolved_root, existing)
+        ]
+        filtered_roots.append(resolved_root)
+        self._settings.setValue(
+            DENIED_ROOTS_SETTINGS_KEY,
+            [str(path) for path in filtered_roots],
+        )
+
+    def _clear_denied_roots_under(self, root: Path) -> None:
+        resolved_root = root.expanduser().resolve()
+        filtered_roots = [
+            denied_root
+            for denied_root in self.denied_roots()
+            if not self._contains(resolved_root, denied_root)
+        ]
+        self._settings.setValue(
+            DENIED_ROOTS_SETTINGS_KEY,
             [str(path) for path in filtered_roots],
         )
 
@@ -191,10 +272,18 @@ class FolderAccessManager:
                 next(iterator, None)
             finally:
                 iterator.close()
-        except PermissionError:
+        except OSError:
             return False
 
         return True
+
+    def _verify_folder_access(self, root: Path, photo_folder: Path) -> bool:
+        """Return True only when both requested root and photo folder scan."""
+        roots = [root]
+        if photo_folder != root:
+            roots.append(photo_folder)
+
+        return all(self._probe_folder_access(path) for path in roots)
 
     @staticmethod
     def _select_access_root(

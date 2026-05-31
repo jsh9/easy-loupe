@@ -6,7 +6,15 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QItemSelectionModel, Qt, QTimer
 
+from easy_cull.ui.main_window.build import TRANSIENT_MESSAGE_TIMEOUT_MS
 from easy_cull.ui.theme import PHOTO_ID_ROLE
+
+FOLDER_ACCESS_RECOVERY_MESSAGE = (
+    'Browsing photos in this folder and adjacent-photo navigation need folder'
+    ' access. Grant EasyCull access in System Settings -> Privacy & Security'
+    ' -> Files & Folders.'
+)
+FOLDER_ACCESS_RECOVERY_TIMEOUT_MS = TRANSIENT_MESSAGE_TIMEOUT_MS * 5
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QListWidget, QListWidgetItem
@@ -415,6 +423,13 @@ class MainWindowNavigationMixin:
         ):
             return
 
+        if not self._photo_viewer_folder_access_granted:
+            self._show_transient_message(
+                FOLDER_ACCESS_RECOVERY_MESSAGE,
+                timeout_ms=FOLDER_ACCESS_RECOVERY_TIMEOUT_MS,
+            )
+            return
+
         photo_ids = [photo.photo_id for photo in self.library.get_photos()]
         try:
             current_index = photo_ids.index(self.current_photo_id)
@@ -505,7 +520,8 @@ class MainWindowNavigationMixin:
     def _enter_browse_mode_from_photo_viewer(self: MainWindow) -> None:
         if not self._photo_viewer_folder_access_granted:
             self._show_transient_message(
-                'Allow folder access to browse adjacent photos',
+                FOLDER_ACCESS_RECOVERY_MESSAGE,
+                timeout_ms=FOLDER_ACCESS_RECOVERY_TIMEOUT_MS,
             )
             return
 

@@ -105,7 +105,7 @@ def test_folder_access_manager_uses_tcc_prompt_for_standard_root(
     monkeypatch.setattr(
         manager,
         '_probe_folder_access',
-        lambda path: path == root,
+        lambda path: path in {root, photo.parent},
     )
 
     def fail_folder_chooser(*_args: object) -> str:
@@ -144,7 +144,7 @@ def test_folder_access_manager_uses_macos_prompt_for_cloud_storage_root(
     monkeypatch.setattr(
         manager,
         '_probe_folder_access',
-        lambda path: path == root,
+        lambda path: path in {root, photo.parent},
     )
 
     def fail_folder_chooser(*_args: object) -> str:
@@ -184,11 +184,15 @@ def test_folder_access_manager_cloud_storage_denial_leaves_root_unapproved(
 
     assert manager.ensure_access_for_file(photo) is False
     assert manager.approved_roots() == []
+    assert manager.denied_roots() == [root.resolve()]
 
 
 def test_folder_access_manager_tcc_denial_leaves_root_unapproved(
         tmp_path: Path, monkeypatch: Any
 ) -> None:
+    """
+    Remember a denied standard macOS root without treating it as approved.
+    """
     manager = folder_access_module.FolderAccessManager(_settings(tmp_path))
     home = tmp_path / 'home'
     root = home / 'Desktop'
@@ -204,6 +208,31 @@ def test_folder_access_manager_tcc_denial_leaves_root_unapproved(
 
     assert manager.ensure_access_for_file(photo) is False
     assert manager.approved_roots() == []
+    assert manager.denied_roots() == [root.resolve()]
+
+
+def test_folder_access_manager_parent_denial_leaves_root_unapproved(
+        tmp_path: Path, monkeypatch: Any
+) -> None:
+    """Require the opened photo's parent folder to scan before approving."""
+    manager = folder_access_module.FolderAccessManager(_settings(tmp_path))
+    home = tmp_path / 'home'
+    root = home / 'Downloads'
+    photo = root / 'Shoot' / 'IMG_1000.JPG'
+    photo.parent.mkdir(parents=True)
+    photo.write_bytes(b'jpg')
+    monkeypatch.setattr(folder_access_module.sys, 'platform', 'darwin')
+    monkeypatch.setattr(folder_access_module.Path, 'home', lambda: home)
+    monkeypatch.setattr(
+        manager, '_confirm_access_root', lambda _parent, _path: True
+    )
+    monkeypatch.setattr(
+        manager, '_probe_folder_access', lambda path: path == root
+    )
+
+    assert manager.ensure_access_for_file(photo) is False
+    assert manager.approved_roots() == []
+    assert manager.denied_roots() == [root.resolve()]
 
 
 def test_folder_access_manager_nonstandard_root_uses_native_folder_chooser(
@@ -225,16 +254,22 @@ def test_folder_access_manager_nonstandard_root_uses_native_folder_chooser(
         manager, 'suggest_access_root', lambda _file_path: root
     )
     probe_calls: list[Path] = []
-    monkeypatch.setattr(manager, '_probe_folder_access', probe_calls.append)
+
+    def record_probe(path: Path) -> bool:
+        probe_calls.append(path)
+        return True
+
+    monkeypatch.setattr(manager, '_probe_folder_access', record_probe)
 
     assert manager.ensure_access_for_file(photo) is True
     assert manager.approved_roots() == [root.resolve()]
-    assert probe_calls == []
+    assert probe_calls == [root.resolve(), photo.parent.resolve()]
 
 
 def test_folder_access_manager_confirm_cancel_leaves_root_unapproved(
         tmp_path: Path, monkeypatch: Any
 ) -> None:
+    """Remember the denied root when the user cancels EasyCull's prompt."""
     manager = folder_access_module.FolderAccessManager(_settings(tmp_path))
     root = tmp_path / 'Documents'
     photo = root / 'Shoot' / 'IMG_1000.JPG'
@@ -250,11 +285,15 @@ def test_folder_access_manager_confirm_cancel_leaves_root_unapproved(
 
     assert manager.ensure_access_for_file(photo) is False
     assert manager.approved_roots() == []
+    assert manager.denied_roots() == [root.resolve()]
 
 
 def test_folder_access_manager_native_cancel_leaves_root_unapproved(
         tmp_path: Path, monkeypatch: Any
 ) -> None:
+    """
+    Remember the suggested root when the native folder chooser is canceled.
+    """
     manager = folder_access_module.FolderAccessManager(_settings(tmp_path))
     root = tmp_path / 'Project'
     photo = root / 'Shoot' / 'IMG_1000.JPG'
@@ -273,6 +312,69 @@ def test_folder_access_manager_native_cancel_leaves_root_unapproved(
 
     assert manager.ensure_access_for_file(photo) is False
     assert manager.approved_roots() == []
+    assert manager.denied_roots() == [root.resolve()]
+
+
+def test_folder_access_manager_denied_root_skips_reprompt(
+        tmp_path: Path, monkeypatch: Any
+) -> None:
+    """Open under a remembered denial without showing access dialogs again."""
+    manager = folder_access_module.FolderAccessManager(_settings(tmp_path))
+    home = tmp_path / 'home'
+    root = home / 'Downloads'
+    photo = root / 'Shoot' / 'IMG_1000.JPG'
+    photo.parent.mkdir(parents=True)
+    photo.write_bytes(b'jpg')
+    manager.add_denied_root(root)
+    monkeypatch.setattr(folder_access_module.sys, 'platform', 'darwin')
+    monkeypatch.setattr(folder_access_module.Path, 'home', lambda: home)
+    monkeypatch.setattr(manager, '_probe_folder_access', lambda _path: False)
+
+    def fail_confirm(*_args: object) -> bool:
+        raise AssertionError('access dialog should not open')
+
+    def fail_folder_chooser(*_args: object) -> str:
+        raise AssertionError('folder chooser should not open')
+
+    monkeypatch.setattr(manager, '_confirm_access_root', fail_confirm)
+    monkeypatch.setattr(
+        folder_access_module.QFileDialog,
+        'getExistingDirectory',
+        fail_folder_chooser,
+    )
+
+    assert manager.ensure_access_for_file(photo) is False
+    assert manager.approved_roots() == []
+    assert manager.denied_roots() == [root.resolve()]
+
+
+def test_folder_access_manager_denied_root_recovers_after_settings_change(
+        tmp_path: Path, monkeypatch: Any
+) -> None:
+    """Convert a denied root to approved after manual macOS access recovery."""
+    manager = folder_access_module.FolderAccessManager(_settings(tmp_path))
+    home = tmp_path / 'home'
+    root = home / 'Downloads'
+    photo = root / 'Shoot' / 'IMG_1000.JPG'
+    photo.parent.mkdir(parents=True)
+    photo.write_bytes(b'jpg')
+    manager.add_denied_root(root)
+    monkeypatch.setattr(folder_access_module.sys, 'platform', 'darwin')
+    monkeypatch.setattr(folder_access_module.Path, 'home', lambda: home)
+    monkeypatch.setattr(
+        manager,
+        '_probe_folder_access',
+        lambda path: path in {root, photo.parent},
+    )
+
+    def fail_confirm(*_args: object) -> bool:
+        raise AssertionError('access dialog should not open')
+
+    monkeypatch.setattr(manager, '_confirm_access_root', fail_confirm)
+
+    assert manager.ensure_access_for_file(photo) is True
+    assert manager.approved_roots() == [root.resolve()]
+    assert manager.denied_roots() == []
 
 
 def test_folder_access_manager_invalid_native_root_is_rejected(

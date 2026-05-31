@@ -19,6 +19,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 import easy_cull.ui.folder_access as folder_access_module
 import easy_cull.ui.main_window.build as build_module
+import easy_cull.ui.main_window.navigation as navigation_module
 import easy_cull.ui.main_window.window as main_window_module
 from easy_cull.core.folder_loading import PHOTO_SORT_MODE_FILENAME
 from easy_cull.core.photo_library import PhotoLibrary
@@ -654,8 +655,8 @@ def test_main_window_canceled_photo_viewer_access_opens_single_photo_only(
     """
     Denied folder access keeps photo-viewer mode scoped to the opened file.
 
-    The title should count the single loaded record, matching disabled adjacent
-    navigation and blocked browse-grid entry.
+    Opening stays quiet, then blocked navigation/browse shortcuts explain the
+    System Settings recovery path through the transient overlay.
     """
     create_jpeg(tmp_path / 'A.JPG', 'green')
     create_jpeg(tmp_path / 'B.JPG', 'blue')
@@ -673,6 +674,12 @@ def test_main_window_canceled_photo_viewer_access_opens_single_photo_only(
     monkeypatch.setattr(
         window, '_start_folder_hydration', lambda _folder: None
     )
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        'warning',
+        lambda *_args: warnings.append('warning'),
+    )
 
     window.open_file_from_system(tmp_path / 'B.JPG')
     app.processEvents()
@@ -684,17 +691,88 @@ def test_main_window_canceled_photo_viewer_access_opens_single_photo_only(
     assert window.browse_mode_shortcut.isEnabled() is True
     assert window.enter_browse_mode_shortcut.isEnabled() is True
     assert window.keypad_enter_browse_mode_shortcut.isEnabled() is True
+    assert warnings == []
+
+    messages: list[tuple[str, int]] = []
+
+    def record_message(message: str, *, timeout_ms: int) -> None:
+        messages.append((message, timeout_ms))
+
+    monkeypatch.setattr(window, '_show_transient_message', record_message)
 
     window._navigate_photo_viewer(-1)
-    assert window.current_photo_id == 'B'
 
-    messages: list[str] = []
-    monkeypatch.setattr(window, '_show_transient_message', messages.append)
+    assert window.current_photo_id == 'B'
+    assert len(messages) == 1
+    assert 'Browsing photos in this folder' in messages[0][0]
+    assert 'adjacent-photo navigation' in messages[0][0]
+    assert 'System Settings' in messages[0][0]
+    assert 'Privacy & Security' in messages[0][0]
+    assert 'Files & Folders' in messages[0][0]
+    assert (
+        messages[0][1] == navigation_module.FOLDER_ACCESS_RECOVERY_TIMEOUT_MS
+    )
+    expected_message = messages[0]
 
     window.browse_mode_shortcut.activated.emit()
+    window.enter_browse_mode_shortcut.activated.emit()
+    window.keypad_enter_browse_mode_shortcut.activated.emit()
 
     assert window._browse_mode is False
-    assert messages == ['Allow folder access to browse adjacent photos']
+    assert messages == [expected_message] * 4
+    window.close()
+
+
+def test_main_window_remembered_denial_opens_without_access_dialog(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Reopen under a remembered denial in selected-photo-only mode silently.
+    """
+    home = tmp_path / 'home'
+    root = home / 'Downloads'
+    shoot = root / 'Shoot'
+    shoot.mkdir(parents=True)
+    create_jpeg(shoot / 'A.JPG', 'green')
+    create_jpeg(shoot / 'B.JPG', 'blue')
+    stub_read_exif(monkeypatch, {})
+    app = QApplication.instance() or QApplication([])
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    window.folder_access_manager.add_denied_root(root)
+    window.show()
+    monkeypatch.setattr(folder_access_module.sys, 'platform', 'darwin')
+    monkeypatch.setattr(folder_access_module.Path, 'home', lambda: home)
+    monkeypatch.setattr(
+        window.folder_access_manager,
+        '_probe_folder_access',
+        lambda _path: False,
+    )
+
+    def fail_confirm(*_args: object) -> bool:
+        raise AssertionError('access dialog should not open')
+
+    monkeypatch.setattr(
+        window.folder_access_manager, '_confirm_access_root', fail_confirm
+    )
+    monkeypatch.setattr(window, '_start_viewer_prefetch', lambda: None)
+    monkeypatch.setattr(
+        window, '_start_folder_hydration', lambda _folder: None
+    )
+    warning_calls: list[str] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        'warning',
+        lambda *_args: warning_calls.append('warning'),
+    )
+
+    window.open_file_from_system(shoot / 'B.JPG')
+    app.processEvents()
+
+    assert window._photo_viewer_mode is True
+    assert window._photo_viewer_folder_access_granted is False
+    assert [photo.photo_id for photo in window.library.photos] == ['B']
+    assert warning_calls == []
     window.close()
 
 
@@ -996,6 +1074,12 @@ def test_main_window_denied_cloud_storage_access_opens_single_photo_only(
     monkeypatch.setattr(
         window, '_start_folder_hydration', lambda _folder: None
     )
+    warning_calls: list[str] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        'warning',
+        lambda _parent, _title, text: warning_calls.append(text),
+    )
 
     window.open_file_from_system(root / 'Shoot' / 'B.JPG')
     app.processEvents()
@@ -1004,148 +1088,46 @@ def test_main_window_denied_cloud_storage_access_opens_single_photo_only(
     assert window._photo_viewer_folder_access_granted is False
     assert [photo.photo_id for photo in window.library.photos] == ['B']
     assert window.windowTitle() == 'EasyCull - B.JPG (1 / 1)'
+    assert warning_calls == []
     window.close()
 
 
-def test_main_window_cloud_storage_retry_uses_macos_permission_prompt(
+def test_main_window_permission_error_opens_selected_photo_only(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """
-    Show the macOS-permission retry path for CloudStorage roots.
-
-    The retry dialog should not steer File Provider folders back to the native
-    folder chooser wording because the first recovery attempt is another OS
-    permission probe.
-    """
-    root = tmp_path / 'home' / 'Library' / 'CloudStorage' / 'OneDrive'
-    photo = root / 'Shoot' / 'IMG_1000.JPG'
-    photo.parent.mkdir(parents=True)
-    photo.write_bytes(b'jpg')
-    captured: dict[str, object] = {}
+    """Fall back quietly when a supposedly granted folder scan still fails."""
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    create_jpeg(tmp_path / 'B.JPG', 'blue')
+    stub_read_exif(monkeypatch, {})
+    app = QApplication.instance() or QApplication([])
     window = main_window_module.MainWindow()
     window._initial_folder_prompt_pending = False
-    monkeypatch.setattr(
-        window.folder_access_manager,
-        'suggest_access_root',
-        lambda _file_path: root,
-    )
-    monkeypatch.setattr(
-        window.folder_access_manager,
-        'is_macos_promptable_root',
-        lambda path: path == root,
-    )
-    monkeypatch.setattr(
-        window.folder_access_manager,
-        'request_access_for_file',
-        lambda _file_path, _parent: True,
-    )
+    window.show()
+    load_calls: list[bool] = []
+    original_load_viewer_folder = window.library.load_viewer_folder
 
-    def fake_exec(message_box: QMessageBox) -> int:
-        captured['informative_text'] = message_box.informativeText()
-        captured['buttons'] = [
-            button.text().replace('&', '') for button in message_box.buttons()
-        ]
-        message_box._clicked_button = next(
-            button
-            for button in message_box.buttons()
-            if button.text().replace('&', '') == 'Try macOS Permission Again'
-        )
-        return 0
+    def load_viewer_folder(path: Path, *, allow_folder_scan: bool) -> None:
+        load_calls.append(allow_folder_scan)
+        if len(load_calls) == 1:
+            raise PermissionError('blocked')
 
-    monkeypatch.setattr(QMessageBox, 'exec', fake_exec)
+        original_load_viewer_folder(path, allow_folder_scan=allow_folder_scan)
+
+    window.library.load_viewer_folder = load_viewer_folder
+    monkeypatch.setattr(
+        window.folder_access_manager,
+        'ensure_access_for_file',
+        lambda _path, _parent: True,
+    )
+    monkeypatch.setattr(window, '_start_viewer_prefetch', lambda: None)
+    monkeypatch.setattr(
+        window, '_start_folder_hydration', lambda _folder: None
+    )
+    warning_calls: list[str] = []
     monkeypatch.setattr(
         QMessageBox,
-        'clickedButton',
-        lambda message_box: getattr(message_box, '_clicked_button', None),
-    )
-
-    assert window._retry_photo_viewer_folder_access(photo) is True
-
-    assert 'again' in str(captured['informative_text'])
-    assert 'Try macOS Permission Again' in captured['buttons']
-    assert 'Choose Folder' not in captured['buttons']
-    window.close()
-
-
-def test_main_window_permission_error_regrant_reloads_full_folder(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    create_jpeg(tmp_path / 'A.JPG', 'green')
-    create_jpeg(tmp_path / 'B.JPG', 'blue')
-    stub_read_exif(monkeypatch, {})
-    app = QApplication.instance() or QApplication([])
-    window = main_window_module.MainWindow()
-    window._initial_folder_prompt_pending = False
-    window.show()
-    load_calls: list[bool] = []
-    original_load_viewer_folder = window.library.load_viewer_folder
-
-    def load_viewer_folder(path: Path, *, allow_folder_scan: bool) -> None:
-        load_calls.append(allow_folder_scan)
-        if len(load_calls) == 1:
-            raise PermissionError('blocked')
-
-        original_load_viewer_folder(path, allow_folder_scan=allow_folder_scan)
-
-    window.library.load_viewer_folder = load_viewer_folder
-    monkeypatch.setattr(
-        window.folder_access_manager,
-        'ensure_access_for_file',
-        lambda _path, _parent: True,
-    )
-    monkeypatch.setattr(
-        window,
-        '_retry_photo_viewer_folder_access',
-        lambda _path: True,
-    )
-    monkeypatch.setattr(window, '_start_viewer_prefetch', lambda: None)
-    monkeypatch.setattr(
-        window, '_start_folder_hydration', lambda _folder: None
-    )
-
-    window.open_file_from_system(tmp_path / 'B.JPG')
-    app.processEvents()
-
-    assert load_calls == [True, True]
-    assert window._photo_viewer_folder_access_granted is True
-    assert [photo.photo_id for photo in window.library.photos] == ['A', 'B']
-    window.close()
-
-
-def test_main_window_permission_error_cancel_regrant_opens_selected_photo_only(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    create_jpeg(tmp_path / 'A.JPG', 'green')
-    create_jpeg(tmp_path / 'B.JPG', 'blue')
-    stub_read_exif(monkeypatch, {})
-    app = QApplication.instance() or QApplication([])
-    window = main_window_module.MainWindow()
-    window._initial_folder_prompt_pending = False
-    window.show()
-    load_calls: list[bool] = []
-    original_load_viewer_folder = window.library.load_viewer_folder
-
-    def load_viewer_folder(path: Path, *, allow_folder_scan: bool) -> None:
-        load_calls.append(allow_folder_scan)
-        if len(load_calls) == 1:
-            raise PermissionError('blocked')
-
-        original_load_viewer_folder(path, allow_folder_scan=allow_folder_scan)
-
-    window.library.load_viewer_folder = load_viewer_folder
-    monkeypatch.setattr(
-        window.folder_access_manager,
-        'ensure_access_for_file',
-        lambda _path, _parent: True,
-    )
-    monkeypatch.setattr(
-        window,
-        '_retry_photo_viewer_folder_access',
-        lambda _path: False,
-    )
-    monkeypatch.setattr(window, '_start_viewer_prefetch', lambda: None)
-    monkeypatch.setattr(
-        window, '_start_folder_hydration', lambda _folder: None
+        'warning',
+        lambda _parent, _title, text: warning_calls.append(text),
     )
 
     window.open_file_from_system(tmp_path / 'B.JPG')
@@ -1154,6 +1136,7 @@ def test_main_window_permission_error_cancel_regrant_opens_selected_photo_only(
     assert load_calls == [True, False]
     assert window._photo_viewer_folder_access_granted is False
     assert [photo.photo_id for photo in window.library.photos] == ['B']
+    assert warning_calls == []
     window.close()
 
 
