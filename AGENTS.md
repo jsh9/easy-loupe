@@ -5,12 +5,12 @@
 This repository is a local desktop photo culling app for JPEG, HEIC/HEIF, and
 RAW folders. It is organized around a small set of top-level packages:
 
-- `easy_cull/core/`: non-UI application logic for the photo library, records,
+- `easy_loupe/core/`: non-UI application logic for the photo library, records,
   EXIF, metadata, previews, and scene detection.
-- `easy_cull/ui/`: PySide6 desktop UI built around `PhotoLibrary`.
-- `easy_cull/analysis/`: scene-detection logic plus placeholder
+- `easy_loupe/ui/`: PySide6 desktop UI built around `PhotoLibrary`.
+- `easy_loupe/analysis/`: scene-detection logic plus placeholder
   analysis-oriented feature modules.
-- `easy_cull/operations/`: concrete batch file-operation modules for photo
+- `easy_loupe/operations/`: concrete batch file-operation modules for photo
   organization, XMP sidecars, and undo support.
 
 The codebase is small, but a lot of behavior is still concentrated in a few
@@ -24,23 +24,23 @@ making UI or library changes based on assumptions.
 - Preferred environment manager: `uv`
 - Install dependencies: `uv sync`
 - Install build/test/dev dependencies: `uv sync --extra dev`
-- Launch the app: `uv run python -m easy_cull`
+- Launch the app: `uv run python -m easy_loupe`
 
 ### 2.1. Build Artifacts
 
 - PyInstaller is a dev dependency. Build on the target operating system rather
   than cross-compiling app bundles.
 - Build macOS with `uv run python scripts/build_app/build_app_macos.py`. The
-  distributable artifact is `dist/EasyCull.app`.
-- For macOS distribution, ship `dist/EasyCull.app`. If PyInstaller also leaves
-  `dist/EasyCull/` beside it, that sibling one-folder output is not needed by
+  distributable artifact is `dist/EasyLoupe.app`.
+- For macOS distribution, ship `dist/EasyLoupe.app`. If PyInstaller also leaves
+  `dist/EasyLoupe/` beside it, that sibling one-folder output is not needed by
   users receiving the `.app` and should not be shipped in addition to the app
   bundle.
 - A simple macOS zip can be produced with
-  `ditto -c -k --keepParent dist/EasyCull.app EasyCull-macos.zip`.
+  `ditto -c -k --keepParent dist/EasyLoupe.app EasyLoupe-macos.zip`.
 - Build Windows with `uv run python scripts/build_app/build_app_windows.py`.
-  The default output is the one-folder app `dist\EasyCull\`; distribute the
-  whole folder, not just `EasyCull.exe`.
+  The default output is the one-folder app `dist\EasyLoupe\`; distribute the
+  whole folder, not just `EasyLoupe.exe`.
 - Windows also supports
   `uv run python scripts/build_app/build_app_windows.py --onefile` for a
   movable single executable and `--console` for startup-debug builds.
@@ -48,17 +48,17 @@ making UI or library changes based on assumptions.
   PyInstaller, Qt, shiboken, and bundled ExifTool diagnostics for the built
   artifact.
 - macOS folder access is controlled by TCC, Apple's Transparency, Consent, and
-  Control privacy database. EasyCull's own `QSettings` approved-root list only
+  Control privacy database. EasyLoupe's own `QSettings` approved-root list only
   records product intent; real access to protected folders such as `~/Desktop`,
   `~/Documents`, `~/Downloads`, and File Provider roots under
   `~/Library/CloudStorage/<provider>` comes from the macOS TCC/File Provider
   prompt, a native file/folder chooser, or manual Full Disk Access. For
   VSCode-style access prompts, keep the bundle identifier stable
-  (`com.easycull.EasyCull`) and keep the signed app valid after Info.plist
+  (`com.easyloupe.EasyLoupe`) and keep the signed app valid after Info.plist
   changes.
 - The build scripts stage official ExifTool payloads under ignored `build`
   cache/staging directories and bundle them under
-  `easy_cull/vendor/exiftool/...` inside the PyInstaller artifact. Do not
+  `easy_loupe/vendor/exiftool/...` inside the PyInstaller artifact. Do not
   commit downloaded ExifTool payloads.
 
 ### 2.2. Windows Sessions
@@ -115,7 +115,7 @@ Notes:
 
 ## 4. Repository Map
 
-- `easy_cull/core/`
+- `easy_loupe/core/`
   - Contains the non-UI implementation modules and packages: `photo_library`,
     `records`, `folder_loading`, `exif`, `autofocus_points`, `metadata`, and
     `preview`.
@@ -127,7 +127,7 @@ Notes:
     extraction logic belongs under `autofocus_points/brands/`.
   - `records.py` defines the shared constants plus the `PhotoRecord` and
     `SceneGroup` dataclasses.
-- `easy_cull/ui/`
+- `easy_loupe/ui/`
   - Defines the full PySide6 UI: browse mode, single-pane and split view modes,
     theming, thumbnail widgets, viewer, scene strip, worker thread, and the
     main window.
@@ -149,29 +149,29 @@ Notes:
     resolution helpers for same-monitor handoff.
   - `ui/identity.py` owns the user-facing app name, packaged icon lookup, Qt
     app identity, and best-effort macOS process/app-switcher identity hooks.
-  - `ui/assets/` contains packaged EasyCull icon assets used by Qt and the
+  - `ui/assets/` contains packaged EasyLoupe icon assets used by Qt and the
     PyInstaller build scripts; keep package-data configuration aligned when
     adding or renaming assets.
-- `easy_cull/ui/main_window/`
+- `easy_loupe/ui/main_window/`
   - Contains the `MainWindow` package: `window.py`, `build.py`, `workflows.py`,
     `navigation.py`, and `presentation.py`.
   - `MainWindow` remains the central stateful UI controller.
-- `easy_cull/ui/viewers/`
+- `easy_loupe/ui/viewers/`
   - Contains `PhotoViewer`, `MainPhotoViewer`, shared viewer shell helpers, and
     `ExifOverlayWidget`.
-- `easy_cull/ui/photo_viewer/`
+- `easy_loupe/ui/photo_viewer/`
   - Contains `PhotoViewerWindow` and worker code for file-open photo viewer
     mode. It is intentionally separate from `MainWindow`; handoff into culling
     mode goes through `CullingLaunchRequest` and `WindowManager`.
-- `easy_cull/analysis/`
+- `easy_loupe/analysis/`
   - Contains the concrete `scenes.py` scene-detection implementation plus
     placeholder `quality.py` and `faces.py` modules for future work.
-- `easy_cull/operations/`
+- `easy_loupe/operations/`
   - Contains concrete non-UI batch operations: `export.py` reorganizes tagged
     photo sets by metadata, `xmp.py` writes shared XMP sidecars, and
     `common.py` provides undo bookkeeping plus shared filesystem helpers.
-- `easy_cull/__main__.py`
-  - Package module entry point that delegates to `easy_cull.ui.app`.
+- `easy_loupe/__main__.py`
+  - Package module entry point that delegates to `easy_loupe.ui.app`.
 - `tests/core/`
   - Core behavioral contract for folder loading, EXIF parsing, records,
     metadata, preview generation, autofocus-point extraction, and
@@ -204,11 +204,11 @@ Preserve these behaviors unless the change explicitly intends to redefine the
 product contract and the tests/docs are updated accordingly.
 
 - Photos are grouped by shared filename stem across supported extensions.
-- Supported extensions are defined in `easy_cull/core/records.py` and include
+- Supported extensions are defined in `easy_loupe/core/records.py` and include
   JPEG, HEIC/HEIF, and multiple camera RAW formats.
 - A `PhotoRecord.photo_id` is the visible stem, not the filename with
   extension.
-- Metadata is stored in `easy-cull.json` inside the selected photo folder.
+- Metadata is stored in `easy-loupe.json` inside the selected photo folder.
 - Saved folder metadata uses a top-level `photos` object for per-photo entries
   and may include a top-level `scenes` object with `source` and `groups`.
 - Saved metadata keys use the visible stem format, for example `IMG_2000`, not
@@ -262,13 +262,13 @@ product contract and the tests/docs are updated accordingly.
 - `rawpy` is required to render RAW previews.
 - `imagehash` is required for scene detection.
 - `exiftool` is used opportunistically via `subprocess.run(...)` after path
-  resolution. The runtime lookup order is `EASY_CULL_EXIFTOOL`, a bundled
+  resolution. The runtime lookup order is `EASY_LOUPE_EXIFTOOL`, a bundled
   PyInstaller payload, then `shutil.which("exiftool")`.
 
 Important:
 
 - `exiftool` is not declared in `pyproject.toml`; it is an external system
-  dependency for source/development runs unless `EASY_CULL_EXIFTOOL` points to
+  dependency for source/development runs unless `EASY_LOUPE_EXIFTOOL` points to
   a local executable. Packaged app builds include their own ExifTool payload.
 - If `exiftool` is missing or fails, the library falls back to empty EXIF
   metadata rather than crashing.
@@ -292,8 +292,8 @@ directory derived from:
 
 Relevant details:
 
-- Default cache path is `~/Library/Caches/easy-cull` on macOS when `~/Library`
-  exists, otherwise `~/.cache/easy-cull`.
+- Default cache path is `~/Library/Caches/easy-loupe` on macOS when `~/Library`
+  exists, otherwise `~/.cache/easy-loupe`.
 - If the preferred cache directory is not writable, the library falls back to a
   temp directory.
 - Cache invalidation is currently mtime-based. If you change preview semantics,
@@ -331,7 +331,7 @@ the actual product behavior, not just the widget layout.
 
 Mode summary:
 
-- `Culling mode` is the full EasyCull workspace used for selecting, comparing,
+- `Culling mode` is the full EasyLoupe workspace used for selecting, comparing,
   assigning metadata, organizing, scene workflows, and browse-grid review. It
   includes normal view mode, browse mode, compare mode, the thumbnail strips,
   the top bar, and metadata/scene controls.
@@ -340,7 +340,7 @@ Mode summary:
   fit-to-window at first, supports adjacent-folder navigation, and keeps the
   normal culling chrome and scene strips hidden until the user presses `G` or
   `Enter` to enter culling mode.
-- Multiple system-opened photos create multiple independent EasyCull windows.
+- Multiple system-opened photos create multiple independent EasyLoupe windows.
   Each photo-viewer window owns its own `MainWindow`, `PhotoLibrary`,
   background workers, folder hydration, close lifecycle, title, and mode state.
 - `View mode` is the normal working mode. It shows the left thumbnail strip and
@@ -378,7 +378,7 @@ Mode-transition summary:
 
 - When the main window first shows and no folder is loaded, `showEvent()`
   schedules the folder chooser automatically.
-- On macOS, Finder may launch EasyCull before delivering the matching
+- On macOS, Finder may launch EasyLoupe before delivering the matching
   `FileOpen` event. App startup must briefly resolve launch intent before
   creating a normal no-file culling window, so a photo-open launch does not
   also create a hidden culling window with a folder chooser.
@@ -604,7 +604,7 @@ Mode-transition summary:
   navigation preserves accumulated thumbnail selection across scene-strip
   moves.
 - Clearing all assigned metadata for a photo removes that photo's persisted
-  entry from `easy-cull.json`.
+  entry from `easy-loupe.json`.
 - When scene stacks are shown in the left strip:
   - the displayed scene label is `FIRST...LAST` when a scene contains more than
     one photo
@@ -731,10 +731,10 @@ Additional assignment-menu behavior:
   - verify the distinction between embedded-thumbnail previews and full
     postprocessed renders
 - If you change focus-point extraction:
-  - make the change in `easy_cull/core/autofocus_points/`, keeping
-    `easy_cull/core/exif.py` as the compatibility re-export layer
+  - make the change in `easy_loupe/core/autofocus_points/`, keeping
+    `easy_loupe/core/exif.py` as the compatibility re-export layer
   - add new brand-specific extraction under
-    `easy_cull/core/autofocus_points/brands/` and register it in the brand
+    `easy_loupe/core/autofocus_points/brands/` and register it in the brand
     extractor order in `autofocus_points/extraction.py`
   - add targeted tests under `tests/core/autofocus_points/` for the metadata
     keys, brand detection, orientation handling, and fallback behavior you
@@ -744,7 +744,7 @@ Additional assignment-menu behavior:
   - for Pentax DSLR point-id metadata, preserve the central-layout
     approximation unless new ground-truth samples justify changing the mapping
 - If you change ExifTool resolution or invocation:
-  - test `EASY_CULL_EXIFTOOL`, bundled PyInstaller lookup, and system `PATH`
+  - test `EASY_LOUPE_EXIFTOOL`, bundled PyInstaller lookup, and system `PATH`
     fallback behavior
   - preserve the missing/failing-ExifTool fallback to empty metadata
   - preserve Windows hidden-console subprocess options for GUI builds
@@ -752,10 +752,10 @@ Additional assignment-menu behavior:
   - update `README.md` build/distribution guidance and this file
   - update or extend tests under `tests/scripts/` and `tests/ui/test_app.py`
   - keep `pyproject.toml` package-data entries aligned with assets under
-    `easy_cull/ui/assets/`
-  - verify the platform artifact shape: macOS ships `dist/EasyCull.app`, while
-    Windows default distribution ships the whole `dist\EasyCull\` folder unless
-    `--onefile` is used
+    `easy_loupe/ui/assets/`
+  - verify the platform artifact shape: macOS ships `dist/EasyLoupe.app`, while
+    Windows default distribution ships the whole `dist\EasyLoupe\` folder
+    unless `--onefile` is used
   - verify macOS photo document type registration and protected-folder privacy
     strings when changing direct-file-open behavior
 - If you change photo-viewer startup or handoff behavior:

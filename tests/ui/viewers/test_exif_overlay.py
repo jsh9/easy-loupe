@@ -3,8 +3,8 @@ from __future__ import annotations
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtWidgets import QApplication, QLabel
 
-from easy_cull.ui.theme import THEMES
-from easy_cull.ui.viewers.exif_overlay import (
+from easy_loupe.ui.theme import THEMES
+from easy_loupe.ui.viewers.exif_overlay import (
     CopyableGpsLabel,
     ExifOverlayWidget,
 )

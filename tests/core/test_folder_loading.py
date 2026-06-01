@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import easy_cull.core.folder_loading as folder_loading_module
-from easy_cull.core.folder_loading import PHOTO_SORT_MODE_FILENAME
+import easy_loupe.core.folder_loading as folder_loading_module
+from easy_loupe.core.folder_loading import PHOTO_SORT_MODE_FILENAME
 from tests.core._helpers import create_jpeg
 
 if TYPE_CHECKING:

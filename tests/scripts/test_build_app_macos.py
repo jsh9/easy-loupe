@@ -39,7 +39,7 @@ def test_pyinstaller_command_prefers_module_when_binary_missing(
         '--noconfirm',
         '--windowed',
         '--name',
-        'EasyCull',
+        'EasyLoupe',
         '--icon',
         str(build_app.ICON_PATH),
         '--collect-all',
@@ -47,11 +47,11 @@ def test_pyinstaller_command_prefers_module_when_binary_missing(
         '--collect-all',
         'shiboken6',
         '--collect-data',
-        'easy_cull.ui.assets',
+        'easy_loupe.ui.assets',
         '--copy-metadata',
-        'easy-cull',
+        'easy-loupe',
         '--osx-bundle-identifier',
-        'com.easycull.EasyCull',
+        'com.easyloupe.EasyLoupe',
         '--add-binary',
         exiftool_binary,
         '--add-data',
@@ -83,7 +83,7 @@ def test_pyinstaller_command_uses_binary_when_available(
         '--noconfirm',
         '--windowed',
         '--name',
-        'EasyCull',
+        'EasyLoupe',
         '--icon',
         str(build_app.ICON_PATH),
         '--collect-all',
@@ -91,11 +91,11 @@ def test_pyinstaller_command_uses_binary_when_available(
         '--collect-all',
         'shiboken6',
         '--collect-data',
-        'easy_cull.ui.assets',
+        'easy_loupe.ui.assets',
         '--copy-metadata',
-        'easy-cull',
+        'easy-loupe',
         '--osx-bundle-identifier',
-        'com.easycull.EasyCull',
+        'com.easyloupe.EasyLoupe',
         '--add-binary',
         exiftool_binary,
         '--add-data',
@@ -115,19 +115,19 @@ def test_document_type_entry_registers_supported_photo_extensions() -> None:
 
 
 def test_inject_document_types_updates_info_plist(tmp_path: Path) -> None:
-    app_path = tmp_path / 'EasyCull.app'
+    app_path = tmp_path / 'EasyLoupe.app'
     contents = app_path / 'Contents'
     contents.mkdir(parents=True)
     info_plist = contents / 'Info.plist'
     with info_plist.open('wb') as file:
-        plistlib.dump({'CFBundleName': 'EasyCull'}, file)
+        plistlib.dump({'CFBundleName': 'EasyLoupe'}, file)
 
     build_app.inject_info_plist_metadata(app_path)
 
     with info_plist.open('rb') as file:
         payload = plistlib.load(file)
 
-    assert payload['CFBundleIdentifier'] == 'com.easycull.EasyCull'
+    assert payload['CFBundleIdentifier'] == 'com.easyloupe.EasyLoupe'
     assert payload['CFBundleDocumentTypes'] == [
         build_app.document_type_entry()
     ]
@@ -198,7 +198,7 @@ def test_main_signs_and_verifies_after_metadata_injection(
 def test_remove_bundled_pyside_tool_apps_removes_unused_qt_apps(
         tmp_path: Path,
 ) -> None:
-    app_path = tmp_path / 'EasyCull.app'
+    app_path = tmp_path / 'EasyLoupe.app'
     frameworks = app_path / 'Contents' / 'Frameworks' / 'PySide6'
     resources = app_path / 'Contents' / 'Resources' / 'PySide6'
     for base in (frameworks, resources):
@@ -232,7 +232,7 @@ def test_sign_app_bundle_runs_ad_hoc_codesign(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    app_path = tmp_path / 'EasyCull.app'
+    app_path = tmp_path / 'EasyLoupe.app'
     calls: list[list[str]] = []
 
     def run(command: list[str], **_kwargs: object) -> None:
@@ -251,11 +251,11 @@ def test_verify_app_signature_requires_bundle_identifier(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    app_path = tmp_path / 'EasyCull.app'
+    app_path = tmp_path / 'EasyLoupe.app'
     calls: list[list[str]] = []
 
     class Result:
-        stderr = 'Identifier=com.easycull.EasyCull\n'
+        stderr = 'Identifier=com.easyloupe.EasyLoupe\n'
         stdout = ''
         returncode = 0
 
@@ -284,10 +284,10 @@ def test_verify_app_signature_rejects_wrong_bundle_identifier(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    app_path = tmp_path / 'EasyCull.app'
+    app_path = tmp_path / 'EasyLoupe.app'
 
     class Result:
-        stderr = 'Identifier=EasyCull\n'
+        stderr = 'Identifier=EasyLoupe\n'
         stdout = ''
         returncode = 0
 
@@ -300,7 +300,7 @@ def test_verify_app_signature_rejects_wrong_bundle_identifier(
     with pytest.raises(RuntimeError) as exc_info:
         build_app.verify_app_signature(app_path)
 
-    assert 'com.easycull.EasyCull' in str(exc_info.value)
+    assert 'com.easyloupe.EasyLoupe' in str(exc_info.value)
 
 
 def test_print_diagnostics_reports_signature_verification_failure(
@@ -308,11 +308,11 @@ def test_print_diagnostics_reports_signature_verification_failure(
         monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
 ) -> None:
-    app_path = tmp_path / 'EasyCull.app'
+    app_path = tmp_path / 'EasyLoupe.app'
     contents = app_path / 'Contents'
     contents.mkdir(parents=True)
     with (contents / 'Info.plist').open('wb') as file:
-        plistlib.dump({'CFBundleIdentifier': 'com.easycull.EasyCull'}, file)
+        plistlib.dump({'CFBundleIdentifier': 'com.easyloupe.EasyLoupe'}, file)
 
     class FailedVerify:
         stderr = 'invalid Info.plist'
@@ -320,7 +320,7 @@ def test_print_diagnostics_reports_signature_verification_failure(
         returncode = 1
 
     class SigningDetails:
-        stderr = 'Identifier=EasyCull\nSignature=adhoc\n'
+        stderr = 'Identifier=EasyLoupe\nSignature=adhoc\n'
         stdout = ''
         returncode = 0
 
@@ -359,13 +359,13 @@ def test_print_diagnostics_reports_bundle_identity_and_privacy_keys(
         monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
 ) -> None:
-    app_path = tmp_path / 'EasyCull.app'
+    app_path = tmp_path / 'EasyLoupe.app'
     contents = app_path / 'Contents'
     contents.mkdir(parents=True)
     with (contents / 'Info.plist').open('wb') as file:
         plistlib.dump(
             {
-                'CFBundleIdentifier': 'com.easycull.EasyCull',
+                'CFBundleIdentifier': 'com.easyloupe.EasyLoupe',
                 'CFBundleDocumentTypes': [build_app.document_type_entry()],
                 **build_app.PRIVACY_USAGE_DESCRIPTIONS,
             },
@@ -374,7 +374,7 @@ def test_print_diagnostics_reports_bundle_identity_and_privacy_keys(
 
     class Result:
         stderr = (
-            'Identifier=com.easycull.EasyCull\n'
+            'Identifier=com.easyloupe.EasyLoupe\n'
             'Signature=adhoc\n'
             'TeamIdentifier=not set\n'
         )
@@ -405,9 +405,9 @@ def test_print_diagnostics_reports_bundle_identity_and_privacy_keys(
     build_app.print_diagnostics()
 
     output = capsys.readouterr().out
-    assert 'Bundle ID: com.easycull.EasyCull' in output
+    assert 'Bundle ID: com.easyloupe.EasyLoupe' in output
     assert 'codesign verify: ok' in output
-    assert 'codesign Identifier=com.easycull.EasyCull' in output
+    assert 'codesign Identifier=com.easyloupe.EasyLoupe' in output
     assert 'codesign Signature=adhoc' in output
     assert 'Entitlements: none' in output
     assert 'NSDesktopFolderUsageDescription: present' in output

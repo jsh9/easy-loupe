@@ -1,7 +1,7 @@
 """
 Behavior tests for main-window navigation and selection workflows.
 
-``easy_cull.ui.main_window.selection`` is intentionally covered here through
+``easy_loupe.ui.main_window.selection`` is intentionally covered here through
 the real ``MainWindow`` because selection resolution depends on live Qt list
 widgets, scene-strip rebuilding, hidden selections, and shortcut routing.
 """
@@ -17,9 +17,9 @@ from PySide6.QtGui import QKeyEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
-import easy_cull.ui.main_window.window as main_window_module
-from easy_cull.core.folder_loading import PHOTO_SORT_MODE_FILENAME
-from easy_cull.core.photo_library import PhotoLibrary
+import easy_loupe.ui.main_window.window as main_window_module
+from easy_loupe.core.folder_loading import PHOTO_SORT_MODE_FILENAME
+from easy_loupe.core.photo_library import PhotoLibrary
 from tests.ui._helpers import (
     create_jpeg,
     create_main_window_with_library,
@@ -651,13 +651,13 @@ def test_restore_active_navigation_focus_ignores_inactive_window(
         monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
-    Ignore stale deferred focus restores after EasyCull loses activation.
+    Ignore stale deferred focus restores after EasyLoupe loses activation.
 
     Window activation schedules navigation-focus restoration through a
     zero-delay timer. During an AltTab
-    (https://github.com/lwouis/alt-tab-macos) switch away from EasyCull, that
+    (https://github.com/lwouis/alt-tab-macos) switch away from EasyLoupe, that
     queued callback can run after another window has already been raised. In
-    that case EasyCull must not move focus, select a navigation item, or do
+    that case EasyLoupe must not move focus, select a navigation item, or do
     anything that could help pull its window back to the front.
     """
     _theme_module, app, window = create_main_window_with_library(

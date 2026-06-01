@@ -1,6 +1,12 @@
 # Change Log
 
-## [Unreleased]
+## [1.0.1] = 2026-06-01
+
+- Changed
+  - Renamed/rebranded `EasyCull` into `EasyLoupe` because now this app is no
+    longer just a photo culling tool, but also a photo viewer
+
+## [1.0.0] - 2026-06-01
 
 - Adds a direct-file-open photo viewer for photos launched from Finder,
   Explorer, or argv. The viewer opens the selected photo immediately, hydrates
@@ -23,7 +29,7 @@
   uses native TCC/File Provider prompts where possible, falls back to a folder
   chooser for other inaccessible roots, and keeps denied-access launches in a
   usable single-photo viewer instead of failing the window outright.
-- macOS packaging now registers EasyCull as a photo document viewer and adds
+- macOS packaging now registers EasyLoupe as a photo document viewer and adds
   the privacy usage strings needed for protected-folder access.
 - Internally, file-open photo viewing is separated from the main culling window
   with dedicated worker and folder-access modules, plus shared viewer-window
@@ -62,7 +68,7 @@
       into individual photos
     - Undo/redo support for manual scene merge and break actions through the
       existing metadata history shortcuts
-    - Scene groups are saved in `easy-cull.json` and restored when the folder
+    - Scene groups are saved in `easy-loupe.json` and restored when the folder
       is loaded again
   - Compare mode can open the active photo alone with `Space`, toggle that
     photo between fit and 100%, return to the grid with `Esc`, and use `Z` for
@@ -101,10 +107,10 @@
   - Compare mode for selected photos with configurable limits, adaptive grids,
     active-pane tagging, synchronized zoom/pan, live grid refreshes, and
     transient in-mode guidance
-  - Native `About EasyCull` menu item and dialog showing branded app details
+  - Native `About EasyLoupe` menu item and dialog showing branded app details
     plus the installed package version
 - Changed
-  - PyInstaller build commands now copy EasyCull package metadata so packaged
+  - PyInstaller build commands now copy EasyLoupe package metadata so packaged
     apps can resolve and display the installed version
 
 ## [0.1.3] - 2026-05-20
@@ -124,11 +130,11 @@
   - Native PyInstaller build scripts for macOS and Windows, including shared
     build helpers, diagnostic modes, and Windows `--onefile` / `--console`
     build options
-  - Packaged EasyCull icon assets and runtime app identity setup so the app
+  - Packaged EasyLoupe icon assets and runtime app identity setup so the app
     name and icon are applied through Qt and native platform surfaces where
     supported
   - Bundled ExifTool payload support for packaged macOS and Windows builds,
-    with runtime lookup through `EASY_CULL_EXIFTOOL`, bundled app resources,
+    with runtime lookup through `EASY_LOUPE_EXIFTOOL`, bundled app resources,
     then system `PATH`
   - Packaging tests for build command construction and UI identity/icon assets
 - Changed
@@ -144,7 +150,7 @@
 
 - Fixed
   - Prevented deferred navigation-focus restoration from activating or raising
-    EasyCull after the app loses focus, fixing unwanted focus stealing during
+    EasyLoupe after the app loses focus, fixing unwanted focus stealing during
     AltTab switching (#1)
 - Added
   - Regression tests covering inactive-window focus restoration and ensuring

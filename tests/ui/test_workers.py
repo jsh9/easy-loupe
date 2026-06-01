@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Never
 
-import easy_cull.ui.photo_viewer.workers as photo_viewer_workers_module
-import easy_cull.ui.workers as workers_module
-from easy_cull.operations.common import OperationSummary
+import easy_loupe.ui.photo_viewer.workers as photo_viewer_workers_module
+import easy_loupe.ui.workers as workers_module
+from easy_loupe.operations.common import OperationSummary
 
 if TYPE_CHECKING:
     from pathlib import Path

@@ -6,22 +6,22 @@ from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-import easy_cull.ui.identity as identity_module
-import easy_cull.ui.main_window.build as build_module
-import easy_cull.ui.main_window.window as main_window_module
-import easy_cull.ui.theme as theme_module
-from easy_cull.core.folder_loading import (
+import easy_loupe.ui.identity as identity_module
+import easy_loupe.ui.main_window.build as build_module
+import easy_loupe.ui.main_window.window as main_window_module
+import easy_loupe.ui.theme as theme_module
+from easy_loupe.core.folder_loading import (
     PHOTO_SORT_MODE_CAPTURE_TIME,
     PHOTO_SORT_MODE_FILENAME,
     normalize_sort_reversed,
 )
-from easy_cull.core.photo_library import PhotoLibrary
-from easy_cull.ui.launch import CullingLaunchRequest
-from easy_cull.ui.viewers.compare_photo_viewer import (
+from easy_loupe.core.photo_library import PhotoLibrary
+from easy_loupe.ui.launch import CullingLaunchRequest
+from easy_loupe.ui.viewers.compare_photo_viewer import (
     COMPARE_PHOTO_LIMIT_OPTIONS,
     DEFAULT_COMPARE_PHOTO_LIMIT,
 )
-from easy_cull.ui.viewers.exif_overlay import HISTOGRAM_HEIGHT
+from easy_loupe.ui.viewers.exif_overlay import HISTOGRAM_HEIGHT
 from tests.ui._helpers import (
     create_jpeg,
     create_main_window_with_library,
@@ -154,7 +154,7 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:
     app = QApplication.instance() or QApplication([])
     window = main_window_module.MainWindow()
 
-    assert window.windowTitle() == 'EasyCull'
+    assert window.windowTitle() == 'EasyLoupe'
     assert not window.windowIcon().isNull()
     assert (
         window.open_action.shortcut().toString(QKeySequence.PortableText)
@@ -191,7 +191,7 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:
     assert window.merge_scene_action.isEnabled() is False
     assert window.assign_photo_menu.title() == 'Assign to &Photo'
     assert window.help_menu.title() == '&Help'
-    assert window.about_action.text() == 'About EasyCull'
+    assert window.about_action.text() == 'About EasyLoupe'
     assert window.about_action.menuRole() == QAction.AboutRole
     assert (
         window.rating_actions[1].shortcut().toString(QKeySequence.PortableText)
@@ -889,7 +889,7 @@ def test_main_window_photo_sort_preserves_selected_compare_photo_view(
     del app
 
 
-def test_about_action_shows_easy_cull_version(
+def test_about_action_shows_easy_loupe_version(
         monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     app = QApplication.instance() or QApplication([])
@@ -908,9 +908,9 @@ def test_about_action_shows_easy_cull_version(
     assert about_calls == [
         (
             window,
-            'About EasyCull',
+            'About EasyLoupe',
             (
-                'EasyCull\n\n'
+                'EasyLoupe\n\n'
                 f'Version {identity_module.APP_VERSION}\n\n'
                 'Photo culling made easy.'
             ),

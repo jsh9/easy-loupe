@@ -1,7 +1,7 @@
 """
 Behavior tests for compare-mode flows through the real ``MainWindow``.
 
-``easy_cull.ui.main_window.compare`` is intentionally covered here instead of
+``easy_loupe.ui.main_window.compare`` is intentionally covered here instead of
 with direct mixin unit tests because compare behavior is the integration of
 shortcuts, selection restoration, pane state, and metadata assignment.
 """
@@ -14,8 +14,8 @@ from typing import TYPE_CHECKING
 import pytest
 from PySide6.QtCore import Qt
 
-from easy_cull.core.records import METADATA_FILENAME
-from easy_cull.ui.main_window.build import VIEWER_KEYBOARD_PAN_STEP
+from easy_loupe.core.records import METADATA_FILENAME
+from easy_loupe.ui.main_window.build import VIEWER_KEYBOARD_PAN_STEP
 from tests.ui._helpers import (
     create_main_window_with_library,
     set_scene_detection_result,

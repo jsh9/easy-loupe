@@ -70,8 +70,8 @@ wheels = [
 ]
 
 [[package]]
-name = "easy-cull"
-version = "1.0.0"
+name = "easy-loupe"
+version = "1.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "imagehash" },

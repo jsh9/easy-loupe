@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from PySide6.QtCore import QSettings
 
-import easy_cull.ui.folder_access as folder_access_module
+import easy_loupe.ui.folder_access as folder_access_module
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -128,7 +128,7 @@ def test_folder_access_manager_uses_macos_prompt_for_cloud_storage_root(
     Use the OS-prompt path for File Provider roots.
 
     CloudStorage access should probe the provider root directly so macOS can
-    grant access, and must not open EasyCull's native folder chooser first.
+    grant access, and must not open EasyLoupe's native folder chooser first.
     """
     manager = folder_access_module.FolderAccessManager(_settings(tmp_path))
     home = tmp_path / 'home'
@@ -166,7 +166,7 @@ def test_folder_access_manager_cloud_storage_denial_leaves_root_unapproved(
     """
     Avoid persisting File Provider roots when macOS denies the probe.
 
-    Persisting only after a successful probe keeps EasyCull's approved-root
+    Persisting only after a successful probe keeps EasyLoupe's approved-root
     preference aligned with actual OS access.
     """
     manager = folder_access_module.FolderAccessManager(_settings(tmp_path))
@@ -269,7 +269,7 @@ def test_folder_access_manager_nonstandard_root_uses_native_folder_chooser(
 def test_folder_access_manager_confirm_cancel_leaves_root_unapproved(
         tmp_path: Path, monkeypatch: Any
 ) -> None:
-    """Remember the denied root when the user cancels EasyCull's prompt."""
+    """Remember the denied root when the user cancels EasyLoupe's prompt."""
     manager = folder_access_module.FolderAccessManager(_settings(tmp_path))
     root = tmp_path / 'Documents'
     photo = root / 'Shoot' / 'IMG_1000.JPG'

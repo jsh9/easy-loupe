@@ -1,4 +1,4 @@
-# EasyCull
+# EasyLoupe
 
 <!--TOC-->
 
@@ -43,7 +43,7 @@ tox -e ty
 Start the app:
 
 ```bash
-uv run python -m easy_cull
+uv run python -m easy_loupe
 ```
 
 ### 1.2. Option B: Anaconda
@@ -51,8 +51,8 @@ uv run python -m easy_cull
 Create and activate an environment:
 
 ```bash
-conda create -n easy-cull python=3.12
-conda activate easy-cull
+conda create -n easy-loupe python=3.12
+conda activate easy-loupe
 ```
 
 Install dependencies:
@@ -64,7 +64,7 @@ pip install PySide6 imagehash pillow pillow-heif rawpy
 Start the app:
 
 ```bash
-python -m easy_cull
+python -m easy_loupe
 ```
 
 ### 1.3. Open the App
@@ -73,27 +73,27 @@ Launch the desktop app and use the native folder picker to choose a photo
 folder.
 
 You can also open a supported photo file directly from Finder, Explorer, or an
-argv path. EasyCull starts in a lightweight photo-viewer window for that file,
+argv path. EasyLoupe starts in a lightweight photo-viewer window for that file,
 loads neighboring photos from the same folder in the background when folder
 access is available, and can enter the full culling workspace with `G` or
 `Enter`.
 
 ## 2. Build App Binary
 
-EasyCull uses PyInstaller for native app bundles. Build on the target operating
-system: the macOS app should be built on macOS, and a Windows executable should
-be built on Windows.
+EasyLoupe uses PyInstaller for native app bundles. Build on the target
+operating system: the macOS app should be built on macOS, and a Windows
+executable should be built on Windows.
 
 Packaged builds include an ExifTool payload for camera maker-note metadata used
-by autofocus-point detection. At runtime EasyCull checks `EASY_CULL_EXIFTOOL`
+by autofocus-point detection. At runtime EasyLoupe checks `EASY_LOUPE_EXIFTOOL`
 first, then a bundled ExifTool payload when running from a packaged app, then
-`exiftool` from the system `PATH`. To point EasyCull at a specific local
-ExifTool binary while developing, set `EASY_CULL_EXIFTOOL` to that executable
+`exiftool` from the system `PATH`. To point EasyLoupe at a specific local
+ExifTool binary while developing, set `EASY_LOUPE_EXIFTOOL` to that executable
 path before launching the app.
 
 ### 2.1. macOS
 
-When EasyCull is launched as `python -m easy_cull`, macOS still sees the
+When EasyLoupe is launched as `python -m easy_loupe`, macOS still sees the
 underlying Python executable as the running application. The in-app window
 title is correct, but app-level switchers can still show `python3.13` or the
 Python icon.
@@ -104,21 +104,21 @@ and AltTab behavior:
 ```bash
 uv sync --extra dev
 uv run python scripts/build_app/build_app_macos.py
-open dist/EasyCull.app
+open dist/EasyLoupe.app
 ```
 
-The generated `EasyCull.app` is a PyInstaller bundle with its own Python
+The generated `EasyLoupe.app` is a PyInstaller bundle with its own Python
 runtime, dependencies, bundled ExifTool payload, `Info.plist`, and
-`EasyCull.icns` app icon. It is much larger than a launcher stub because it
+`EasyLoupe.icns` app icon. It is much larger than a launcher stub because it
 contains the application runtime.
 
-For macOS distribution, ship `dist/EasyCull.app`. PyInstaller may also leave a
-separate `dist/EasyCull/` one-folder output beside the app bundle; users do not
-need that folder when receiving the `.app`, and shipping both duplicates the
-runtime payload. A simple zip package can be created with:
+For macOS distribution, ship `dist/EasyLoupe.app`. PyInstaller may also leave a
+separate `dist/EasyLoupe/` one-folder output beside the app bundle; users do
+not need that folder when receiving the `.app`, and shipping both duplicates
+the runtime payload. A simple zip package can be created with:
 
 ```bash
-ditto -c -k --keepParent dist/EasyCull.app EasyCull-macos.zip
+ditto -c -k --keepParent dist/EasyLoupe.app EasyLoupe-macos.zip
 ```
 
 For macOS packaging diagnostics:
@@ -128,7 +128,7 @@ uv run python scripts/build_app/build_app_macos.py --diagnose
 ```
 
 The diagnostic command prints the Python/PySide6/PyInstaller versions plus Qt,
-shiboken, and bundled ExifTool paths found inside `dist/EasyCull.app`.
+shiboken, and bundled ExifTool paths found inside `dist/EasyLoupe.app`.
 
 ### 2.2. Windows
 
@@ -140,14 +140,14 @@ uv sync --extra dev
 uv run python scripts/build_app/build_app_windows.py
 ```
 
-The default output is a one-folder PyInstaller app at `dist\EasyCull\`. Run the
-executable from inside that folder:
+The default output is a one-folder PyInstaller app at `dist\EasyLoupe\`. Run
+the executable from inside that folder:
 
 ```powershell
-.\dist\EasyCull\EasyCull.exe
+.\dist\EasyLoupe\EasyLoupe.exe
 ```
 
-Do not copy only `EasyCull.exe` out of `dist\EasyCull\`. In the default
+Do not copy only `EasyLoupe.exe` out of `dist\EasyLoupe\`. In the default
 one-folder build, the `.exe` is only the launcher; Qt, PySide6, Python, and
 other DLLs live next to it under the same output folder. If you want one file
 that can be moved by itself, build a single executable instead:
@@ -159,7 +159,7 @@ uv run python scripts/build_app/build_app_windows.py --onefile
 The one-file build should be much larger than the launcher `.exe` from the
 one-folder build because it embeds the dependency payload.
 
-The script creates `easy_cull\ui\assets\EasyCull.ico` from the packaged PNG
+The script creates `easy_loupe\ui\assets\EasyLoupe.ico` from the packaged PNG
 when the `.ico` asset is missing.
 
 The Windows and macOS build scripts download the official ExifTool release
@@ -167,15 +167,15 @@ payload from <https://exiftool.org/> / SourceForge into the ignored `build`
 cache when the local cache is missing, then package it into the app bundle. The
 downloaded payload is not committed to the repository.
 
-Both scripts embed the packaged EasyCull icon assets. Runtime Qt app identity
+Both scripts embed the packaged EasyLoupe icon assets. Runtime Qt app identity
 also uses the same assets so Finder, Dock, app switcher, AltTab, Windows
-taskbar, and window chrome have the EasyCull name and icon where the platform
+taskbar, and window chrome have the EasyLoupe name and icon where the platform
 allows it.
 
 PySide6, Pillow, rawpy, and imagehash are all PyInstaller-compatible in
 principle, but RAW support should be verified with sample RAW files on Windows.
 If `QtWidgets` still fails to import on a packaged build, first confirm that
-the whole `dist\EasyCull\` folder is intact and that the test machine is a
+the whole `dist\EasyLoupe\` folder is intact and that the test machine is a
 supported Windows 10/11 system for the bundled Qt/PySide6 version.
 
 For packaging diagnostics on Windows:
@@ -183,11 +183,11 @@ For packaging diagnostics on Windows:
 ```powershell
 uv run python scripts/build_app/build_app_windows.py --diagnose
 uv run python scripts/build_app/build_app_windows.py --console
-.\dist\EasyCull\EasyCull.exe
+.\dist\EasyLoupe\EasyLoupe.exe
 ```
 
 The diagnostic command prints the Python/PySide6/PyInstaller versions plus the
-Qt DLLs and Windows platform plugin found under `dist\EasyCull\`. The console
+Qt DLLs and Windows platform plugin found under `dist\EasyLoupe\`. The console
 build keeps a terminal attached so startup errors include a normal traceback.
 
 ## 3. Features
@@ -225,7 +225,7 @@ build keeps a terminal attached so startup errors include a normal traceback.
 - Uses a progress overlay during long-running work such as folder loading and
   scene detection, photo organization, and XMP writing, temporarily disabling
   interactions and assignment actions.
-- Writes visible metadata immediately to `easy-cull.json` in the selected
+- Writes visible metadata immediately to `easy-loupe.json` in the selected
   folder.
 
 ## 4. Modes and Transitions
@@ -326,7 +326,7 @@ Common transitions:
 
 ## 6. Metadata File
 
-The app stores per-photo metadata in `easy-cull.json` inside the selected
+The app stores per-photo metadata in `easy-loupe.json` inside the selected
 folder under a top-level `photos` object. Photo keys use the visible photo
 stem, not the filename with extension.
 

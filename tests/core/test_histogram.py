@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from PIL import Image
 
-from easy_cull.core.histogram import compute_rgb_histogram
+from easy_loupe.core.histogram import compute_rgb_histogram
 
 if TYPE_CHECKING:
     from pathlib import Path

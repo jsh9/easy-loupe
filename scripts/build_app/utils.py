@@ -1,4 +1,4 @@
-"""Shared helpers for EasyCull PyInstaller build scripts."""
+"""Shared helpers for EasyLoupe PyInstaller build scripts."""
 
 from __future__ import annotations
 
@@ -10,11 +10,11 @@ import sys
 import urllib.request
 from pathlib import Path
 
-APP_NAME = 'EasyCull'
-BUNDLE_IDENTIFIER = 'com.easycull.EasyCull'
+APP_NAME = 'EasyLoupe'
+BUNDLE_IDENTIFIER = 'com.easyloupe.EasyLoupe'
 EXIFTOOL_VERSION = '13.58'
 REPO_ROOT = Path(__file__).resolve().parents[2]
-ENTRYPOINT = REPO_ROOT / 'easy_cull' / '__main__.py'
+ENTRYPOINT = REPO_ROOT / 'easy_loupe' / '__main__.py'
 EXIFTOOL_CACHE_DIR = REPO_ROOT / 'build' / 'exiftool-cache'
 
 
@@ -45,9 +45,9 @@ def common_pyinstaller_args(
         '--collect-all',
         'shiboken6',
         '--collect-data',
-        'easy_cull.ui.assets',
+        'easy_loupe.ui.assets',
         '--copy-metadata',
-        'easy-cull',
+        'easy-loupe',
         str(ENTRYPOINT),
     ]
     if windowed:

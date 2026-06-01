@@ -5,8 +5,8 @@ from typing import TYPE_CHECKING
 import pytest
 from PySide6.QtCore import QSettings
 
-from easy_cull.ui.identity import APP_NAME
-from easy_cull.ui.main_window.build import (
+from easy_loupe.ui.identity import APP_NAME
+from easy_loupe.ui.main_window.build import (
     COMPARE_PHOTO_LIMIT_SETTINGS_KEY,
     PHOTO_SORT_MODE_SETTINGS_KEY,
     PHOTO_SORT_REVERSED_SETTINGS_KEY,

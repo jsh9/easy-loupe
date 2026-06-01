@@ -1,4 +1,4 @@
-"""Build the distributable macOS EasyCull.app with PyInstaller."""
+"""Build the distributable macOS EasyLoupe.app with PyInstaller."""
 
 from __future__ import annotations
 
@@ -14,20 +14,20 @@ if __package__ in {None, ''}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.build_app import utils
-from easy_cull.core.records import SUPPORTED_EXTENSIONS
+from easy_loupe.core.records import SUPPORTED_EXTENSIONS
 
 APP_NAME = utils.APP_NAME
 BUNDLE_IDENTIFIER = utils.BUNDLE_IDENTIFIER
 EXIFTOOL_VERSION = utils.EXIFTOOL_VERSION
 REPO_ROOT = utils.REPO_ROOT
 ENTRYPOINT = utils.ENTRYPOINT
-ICON_PATH = REPO_ROOT / 'easy_cull' / 'ui' / 'assets' / 'EasyCull.icns'
+ICON_PATH = REPO_ROOT / 'easy_loupe' / 'ui' / 'assets' / 'EasyLoupe.icns'
 APP_PATH = REPO_ROOT / 'dist' / f'{APP_NAME}.app'
 EXIFTOOL_CACHE_DIR = utils.EXIFTOOL_CACHE_DIR
 EXIFTOOL_STAGE_DIR = REPO_ROOT / 'build' / 'exiftool' / 'macos'
 EXIFTOOL_STAGE_EXE = EXIFTOOL_STAGE_DIR / 'exiftool'
 EXIFTOOL_STAGE_LIB = EXIFTOOL_STAGE_DIR / 'lib'
-EXIFTOOL_BUNDLE_DIR = 'easy_cull/vendor/exiftool/macos'
+EXIFTOOL_BUNDLE_DIR = 'easy_loupe/vendor/exiftool/macos'
 EXIFTOOL_SOURCE_URL = (
     'https://sourceforge.net/projects/exiftool/files/'
     f'Image-ExifTool-{EXIFTOOL_VERSION}.tar.gz/download'
@@ -38,32 +38,32 @@ EXIFTOOL_SOURCE_ARCHIVE = (
 PYSIDE_TOOL_APP_NAMES = ('Assistant', 'Designer', 'Linguist')
 PRIVACY_USAGE_DESCRIPTIONS = {
     'NSDesktopFolderUsageDescription': (
-        'EasyCull needs access to Desktop photo folders so you can navigate'
+        'EasyLoupe needs access to Desktop photo folders so you can navigate'
         ' adjacent photos opened from Finder.'
     ),
     'NSDocumentsFolderUsageDescription': (
-        'EasyCull needs access to Documents photo folders so you can navigate'
+        'EasyLoupe needs access to Documents photo folders so you can navigate'
         ' adjacent photos opened from Finder.'
     ),
     'NSDownloadsFolderUsageDescription': (
-        'EasyCull needs access to Downloads photo folders so you can navigate'
+        'EasyLoupe needs access to Downloads photo folders so you can navigate'
         ' adjacent photos opened from Finder.'
     ),
     'NSRemovableVolumesUsageDescription': (
-        'EasyCull needs access to removable photo volumes so you can review'
+        'EasyLoupe needs access to removable photo volumes so you can review'
         ' and cull imported shoots.'
     ),
     'NSNetworkVolumesUsageDescription': (
-        'EasyCull needs access to network photo volumes so you can review'
+        'EasyLoupe needs access to network photo volumes so you can review'
         ' and cull shared shoots.'
     ),
 }
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Build the macOS EasyCull app bundle or print diagnostics."""
+    """Build the macOS EasyLoupe app bundle or print diagnostics."""
     parser = argparse.ArgumentParser(
-        description='Build dist/EasyCull.app with PyInstaller.'
+        description='Build dist/EasyLoupe.app with PyInstaller.'
     )
     parser.add_argument(
         '--no-clean',
@@ -192,14 +192,14 @@ def document_type_entry() -> dict[str, object]:
             for extension in sorted(SUPPORTED_EXTENSIONS)
         ],
         'CFBundleTypeIconFile': ICON_PATH.name,
-        'CFBundleTypeName': 'EasyCull Photo',
+        'CFBundleTypeName': 'EasyLoupe Photo',
         'CFBundleTypeRole': 'Viewer',
         'LSHandlerRank': 'Alternate',
     }
 
 
 def inject_info_plist_metadata(app_path: Path = APP_PATH) -> None:
-    """Add EasyCull macOS bundle metadata to the built app plist."""
+    """Add EasyLoupe macOS bundle metadata to the built app plist."""
     info_plist = app_path / 'Contents' / 'Info.plist'
     if not info_plist.exists():
         raise FileNotFoundError(f'Info.plist missing: {info_plist}')
@@ -368,7 +368,9 @@ def _bundled_exiftool_paths() -> list[Path]:
     return [
         path
         for path in sorted(APP_PATH.rglob('exiftool'))
-        if path.as_posix().endswith('easy_cull/vendor/exiftool/macos/exiftool')
+        if path.as_posix().endswith(
+            'easy_loupe/vendor/exiftool/macos/exiftool'
+        )
     ]
 
 
