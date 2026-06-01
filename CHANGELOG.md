@@ -1,6 +1,12 @@
 # Change Log
 
-## [Unreleased]
+## [1.0.1] = 2026-06-01
+
+- Changed
+  - Renamed/rebranded `EasyCull` into `EasyLoupe` because now this app is no
+    longer just a photo culling tool, but also a photo viewer
+
+## [1.0.0] - 2026-06-01
 
 - Adds a direct-file-open photo viewer for photos launched from Finder,
   Explorer, or argv. The viewer opens the selected photo immediately, hydrates
