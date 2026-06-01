@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Protocol
 
-from PySide6.QtCore import QEvent, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QFileOpenEvent, QScreen
 from PySide6.QtWidgets import QApplication
 
@@ -56,19 +56,75 @@ class EasyCullApplication(QApplication):
         return pending
 
 
+class _WindowSignal(Protocol):
+    """Signal object that lets ``WindowManager`` subscribe to Qt events."""
+
+    def connect(self, callback: Callable[..., None]) -> object:
+        """Connect a callback to the signal."""
+
+
+class _ManagedWindow(Protocol):
+    """Top-level EasyCull window retained until its ``destroyed`` signal."""
+
+    destroyed: _WindowSignal
+
+    def setAttribute(  # noqa: N802 - Qt API naming
+            self,
+            attribute: Qt.WidgetAttribute,
+            enabled: bool,  # noqa: FBT001
+    ) -> None:
+        """Set a Qt widget attribute."""
+
+    def setGeometry(self, geometry: QRect) -> None:  # noqa: N802
+        """Set the window geometry."""
+
+    def move(self, point: QPoint) -> None:
+        """Move the window to a screen point."""
+
+    def showMaximized(self) -> None:  # noqa: N802
+        """Show the window maximized."""
+
+
+class _PhotoHandoffWindow(_ManagedWindow, Protocol):
+    """Photo-viewer window that can request and then yield to culling mode."""
+
+    culling_requested: _WindowSignal
+
+    def close(self) -> None:
+        """Close the handoff window after culling opens."""
+
+
+class _CullingWindowFactory(Protocol):
+    """Callable that builds a culling ``MainWindow`` for a launch request."""
+
+    def __call__(
+            self,
+            *,
+            launch_request: CullingLaunchRequest | None = None,
+    ) -> _ManagedWindow:
+        """Create a culling window."""
+
+
+class _PhotoWindowFactory(Protocol):
+    """Callable that builds a photo-viewer window for one opened file."""
+
+    def __call__(self, *, startup_file: Path) -> _PhotoHandoffWindow:
+        """Create a photo-viewer window."""
+
+
 class WindowManager:
     """Own live EasyCull windows and create one window per opened photo."""
 
     def __init__(
             self,
-            culling_window_factory: type[MainWindow] = MainWindow,
-            photo_window_factory: type[PhotoViewerWindow] = PhotoViewerWindow,
+            culling_window_factory: _CullingWindowFactory = MainWindow,
+            photo_window_factory: _PhotoWindowFactory = PhotoViewerWindow,
     ) -> None:
         self._culling_window_factory = culling_window_factory
         self._photo_window_factory = photo_window_factory
-        self._windows: list[Any] = []
+        self._windows: list[_ManagedWindow] = []
 
-    def windows(self) -> list[Any]:
+    def windows(self) -> list[_ManagedWindow]:
         """Return the currently managed live windows."""
         return list(self._windows)
 
@@ -77,13 +133,13 @@ class WindowManager:
             launch_request: CullingLaunchRequest | None = None,
             *,
             target_screen: QScreen | None = None,
-    ) -> MainWindow:
+    ) -> _ManagedWindow:
         """Create and show the normal no-file culling window."""
         window = self._culling_window_factory(launch_request=launch_request)
         self._retain_and_show(window, target_screen=target_screen)
         return window
 
-    def open_photo_window(self, startup_file: Path) -> PhotoViewerWindow:
+    def open_photo_window(self, startup_file: Path) -> _PhotoHandoffWindow:
         """Create and show a photo-viewer window for one opened photo."""
         window = self._photo_window_factory(startup_file=startup_file)
         window.culling_requested.connect(
@@ -101,7 +157,7 @@ class WindowManager:
 
     def _retain_and_show(
             self,
-            window: Any,
+            window: _ManagedWindow,
             *,
             target_screen: QScreen | None = None,
     ) -> None:
@@ -120,7 +176,11 @@ class WindowManager:
 
         window.showMaximized()
 
-    def _handle_culling_request(self, viewer: Any, request: object) -> None:
+    def _handle_culling_request(
+            self,
+            viewer: _PhotoHandoffWindow,
+            request: object,
+    ) -> None:
         """Open culling UI for a viewer handoff and close the viewer."""
         if not isinstance(request, CullingLaunchRequest):
             return
@@ -130,11 +190,9 @@ class WindowManager:
             launch_request=request,
             target_screen=target_screen,
         )
-        close = getattr(viewer, 'close', None)
-        if callable(close):
-            close()
+        viewer.close()
 
-    def _remove_window(self, window: Any) -> None:
+    def _remove_window(self, window: _ManagedWindow) -> None:
         """Forget a destroyed window so Qt can quit after the last close."""
         try:
             self._windows.remove(window)
