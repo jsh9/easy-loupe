@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
-from PySide6.QtGui import QFileOpenEvent
+from PySide6.QtGui import QFileOpenEvent, QScreen
 from PySide6.QtWidgets import QApplication
 
 from easy_cull.core.records import SUPPORTED_EXTENSIONS
@@ -20,6 +20,7 @@ from easy_cull.ui.launch import CullingLaunchRequest
 from easy_cull.ui.main_window.build import INITIAL_FOLDER_PROMPT_GRACE_MS
 from easy_cull.ui.main_window.window import MainWindow
 from easy_cull.ui.photo_viewer.window import PhotoViewerWindow
+from easy_cull.ui.viewers.shell import resolve_widget_screen
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -74,10 +75,12 @@ class WindowManager:
     def open_culling_window(
             self,
             launch_request: CullingLaunchRequest | None = None,
+            *,
+            target_screen: QScreen | None = None,
     ) -> MainWindow:
         """Create and show the normal no-file culling window."""
         window = self._culling_window_factory(launch_request=launch_request)
-        self._retain_and_show(window)
+        self._retain_and_show(window, target_screen=target_screen)
         return window
 
     def open_photo_window(self, startup_file: Path) -> PhotoViewerWindow:
@@ -96,7 +99,12 @@ class WindowManager:
         for startup_file in startup_files:
             self.open_photo_window(startup_file)
 
-    def _retain_and_show(self, window: Any) -> None:
+    def _retain_and_show(
+            self,
+            window: Any,
+            *,
+            target_screen: QScreen | None = None,
+    ) -> None:
         """Retain and show an EasyCull window."""
         window.setAttribute(Qt.WA_DeleteOnClose, True)
         self._windows.append(window)
@@ -105,6 +113,11 @@ class WindowManager:
                 managed_window
             )
         )
+        if target_screen is not None:
+            target_geometry = target_screen.availableGeometry()
+            window.setGeometry(target_geometry)
+            window.move(target_geometry.topLeft())
+
         window.showMaximized()
 
     def _handle_culling_request(self, viewer: Any, request: object) -> None:
@@ -112,7 +125,11 @@ class WindowManager:
         if not isinstance(request, CullingLaunchRequest):
             return
 
-        self.open_culling_window(launch_request=request)
+        target_screen = resolve_widget_screen(viewer)
+        self.open_culling_window(
+            launch_request=request,
+            target_screen=target_screen,
+        )
         close = getattr(viewer, 'close', None)
         if callable(close):
             close()

@@ -18,12 +18,8 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QCloseEvent, QPixmap, QShortcut
 from PySide6.QtWidgets import (
-    QFrame,
-    QHBoxLayout,
-    QLabel,
     QMainWindow,
     QMessageBox,
-    QProgressBar,
     QVBoxLayout,
     QWidget,
 )
@@ -47,6 +43,10 @@ from easy_cull.ui.photo_viewer.workers import (
 from easy_cull.ui.viewers.exif_overlay import ExifOverlayWidget
 from easy_cull.ui.viewers.main_photo_viewer import MainPhotoViewer
 from easy_cull.ui.viewers.shell import (
+    VIEWER_KEYBOARD_PAN_STEP,
+    build_progress_overlay,
+    build_transient_message_overlay,
+    build_viewer_shortcuts,
     exif_overlay_geometry_ready,
     make_window_shortcut,
     update_exif_overlay_geometry,
@@ -58,7 +58,6 @@ if TYPE_CHECKING:
 
 PERCENT_COMPLETE = 100
 EXTENDED_PROGRESS_MAX = 200
-VIEWER_KEYBOARD_PAN_STEP = 120
 PHOTO_VIEWER_MINIMAP_WIDTH = 180
 PHOTO_VIEWER_MINIMAP_HEIGHT = 120
 PHOTO_VIEWER_MINIMAP_MARGIN = 14
@@ -217,57 +216,21 @@ class PhotoViewerWindow(QMainWindow):
         self.viewer_stack_widget.installEventFilter(self)
 
     def _build_progress_overlay(self) -> None:
-        self.progress_overlay = QWidget(self.central_widget)
-        self.progress_overlay.setObjectName('progressOverlay')
-        self.progress_overlay.hide()
-        overlay_layout = QVBoxLayout(self.progress_overlay)
-        overlay_layout.setContentsMargins(0, 0, 0, 0)
-        overlay_layout.addStretch(1)
-        overlay_center = QHBoxLayout()
-        overlay_center.addStretch(1)
-        self.progress_panel = QFrame(self.progress_overlay)
-        self.progress_panel.setObjectName('progressPanel')
-        panel_layout = QVBoxLayout(self.progress_panel)
-        panel_layout.setContentsMargins(24, 20, 24, 20)
-        panel_layout.setSpacing(14)
-        self.overlay_message_label = QLabel('', self.progress_panel)
-        self.overlay_message_label.setAlignment(Qt.AlignCenter)
-        panel_layout.addWidget(self.overlay_message_label)
-        self.overlay_progress_bar = QProgressBar(self.progress_panel)
-        self.overlay_progress_bar.setRange(0, 100)
-        self.overlay_progress_bar.setFixedWidth(360)
-        panel_layout.addWidget(self.overlay_progress_bar)
-        overlay_center.addWidget(self.progress_panel)
-        overlay_center.addStretch(1)
-        overlay_layout.addLayout(overlay_center)
-        overlay_layout.addStretch(1)
+        overlay = build_progress_overlay(self.central_widget)
+        self.progress_overlay = overlay.overlay
+        self.progress_panel = overlay.panel
+        self.overlay_message_label = overlay.message_label
+        self.overlay_progress_bar = overlay.progress_bar
 
     def _build_transient_message_overlay(self) -> None:
-        self.transient_message_overlay = QWidget(self.central_widget)
-        self.transient_message_overlay.setObjectName('transientMessageOverlay')
-        self.transient_message_overlay.setAttribute(
-            Qt.WidgetAttribute.WA_TransparentForMouseEvents
+        overlay = build_transient_message_overlay(
+            self.central_widget,
+            timer_parent=self,
         )
-        self.transient_message_overlay.hide()
-        overlay_layout = QVBoxLayout(self.transient_message_overlay)
-        overlay_layout.setContentsMargins(0, 0, 0, 0)
-        overlay_layout.addStretch(1)
-        overlay_center = QHBoxLayout()
-        overlay_center.addStretch(1)
-        self.transient_message_panel = QFrame(self.transient_message_overlay)
-        self.transient_message_panel.setObjectName('transientMessagePanel')
-        panel_layout = QVBoxLayout(self.transient_message_panel)
-        panel_layout.setContentsMargins(22, 16, 22, 16)
-        self.transient_message_label = QLabel('', self.transient_message_panel)
-        self.transient_message_label.setAlignment(Qt.AlignCenter)
-        self.transient_message_label.setWordWrap(True)
-        panel_layout.addWidget(self.transient_message_label)
-        overlay_center.addWidget(self.transient_message_panel)
-        overlay_center.addStretch(1)
-        overlay_layout.addLayout(overlay_center)
-        overlay_layout.addStretch(1)
-        self.transient_message_timer = QTimer(self)
-        self.transient_message_timer.setSingleShot(True)
+        self.transient_message_overlay = overlay.overlay
+        self.transient_message_panel = overlay.panel
+        self.transient_message_label = overlay.message_label
+        self.transient_message_timer = overlay.timer
         self.transient_message_timer.timeout.connect(
             self._hide_transient_message
         )
@@ -344,19 +307,11 @@ class PhotoViewerWindow(QMainWindow):
         self.dismiss_message_shortcut = self._make_shortcut(
             Qt.Key_Escape, self._hide_transient_message
         )
-        # Mirror the culling workspace's viewer controls here because the
-        # standalone viewer no longer inherits MainWindow's shortcut table.
-        self._viewer_shortcuts = [
-            self._make_shortcut('-', lambda: self.viewer.zoom_step(0.8)),
-            self._make_shortcut('=', lambda: self.viewer.zoom_step(1.25)),
-            self._make_shortcut(
-                Qt.Key_Plus, lambda: self.viewer.zoom_step(1.25)
-            ),
-            self._make_shortcut('W', lambda: self._keyboard_pan_by(0, -1)),
-            self._make_shortcut('A', lambda: self._keyboard_pan_by(-1, 0)),
-            self._make_shortcut('S', lambda: self._keyboard_pan_by(0, 1)),
-            self._make_shortcut('D', lambda: self._keyboard_pan_by(1, 0)),
-        ]
+        self._viewer_shortcuts = build_viewer_shortcuts(
+            self._make_shortcut,
+            zoom_step=self.viewer.zoom_step,
+            keyboard_pan_by=self._keyboard_pan_by,
+        )
         self.browse_mode_shortcut = self._make_shortcut(
             'G', self._request_culling_handoff
         )

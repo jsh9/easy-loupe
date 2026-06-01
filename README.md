@@ -22,7 +22,7 @@ ______________________________________________________________________
 
 <!--TOC-->
 
-Desktop photo culling app for JPEG and RAW photo folders.
+Desktop photo culling app for JPEG, HEIC/HEIF, and RAW photo folders.
 
 ## 1. Setup and Run
 
@@ -58,7 +58,7 @@ conda activate easy-cull
 Install dependencies:
 
 ```bash
-pip install PySide6 imagehash pillow rawpy
+pip install PySide6 imagehash pillow pillow-heif rawpy
 ```
 
 Start the app:
@@ -187,7 +187,8 @@ build keeps a terminal attached so startup errors include a normal traceback.
 ## 3. Features
 
 - Opens folders through the native desktop folder picker.
-- Groups JPEG and RAW files by shared filename stem.
+- Groups JPEG, HEIC/HEIF, and multiple camera RAW formats by shared filename
+  stem.
 - Shows view mode, browse mode, and compare mode: view mode uses the vertical
   thumbnail strip, central photo viewer, optional split view, and scene strip;
   browse mode shows a full-photo grid; compare mode displays up to the

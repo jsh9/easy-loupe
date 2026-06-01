@@ -188,9 +188,8 @@ Preserve these behaviors unless the change explicitly intends to redefine the
 product contract and the tests/docs are updated accordingly.
 
 - Photos are grouped by shared filename stem across supported extensions.
-- Supported extensions are currently:
-  - JPEG: `.jpg`, `.jpeg`
-  - RAW: `.cr3`, `.nef`
+- Supported extensions are defined in `easy_cull/core/records.py` and include
+  JPEG, HEIC/HEIF, and multiple camera RAW formats.
 - A `PhotoRecord.photo_id` is the visible stem, not the filename with
   extension.
 - Metadata is stored in `easy-cull.json` inside the selected photo folder.

@@ -1,18 +1,52 @@
-"""Shared shell helpers for EasyCull viewer windows."""
+"""
+Shared viewer-window shell helpers.
+
+The shell is the shared scaffolding around viewer-style windows: keyboard
+shortcuts, progress overlays, transient message overlays, and screen-placement
+helpers. Window-specific visual styling stays with the individual windows.
+"""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import QObject, Qt, QTimer
+from PySide6.QtGui import QGuiApplication, QKeySequence, QScreen, QShortcut
+from PySide6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QProgressBar,
+    QVBoxLayout,
+    QWidget,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from PySide6.QtWidgets import QWidget
-
 DEFAULT_EXIF_OVERLAY_MARGIN = 14
+VIEWER_KEYBOARD_PAN_STEP = 120
+
+
+@dataclass(frozen=True, slots=True)
+class ProgressOverlayWidgets:
+    """Widget bundle for a centered progress overlay."""
+
+    overlay: QWidget
+    panel: QFrame
+    message_label: QLabel
+    progress_bar: QProgressBar
+
+
+@dataclass(frozen=True, slots=True)
+class TransientMessageOverlayWidgets:
+    """Widget bundle for a centered transient message overlay."""
+
+    overlay: QWidget
+    panel: QFrame
+    message_label: QLabel
+    timer: QTimer
 
 
 def make_window_shortcut(
@@ -27,6 +61,98 @@ def make_window_shortcut(
     shortcut.setContext(Qt.WindowShortcut)
     shortcut.activated.connect(lambda: None if blocked() else callback())
     return shortcut
+
+
+def build_viewer_shortcuts[ShortcutT](
+        make_shortcut: Callable[[str | int, Callable[[], None]], ShortcutT],
+        *,
+        zoom_step: Callable[[float], None],
+        keyboard_pan_by: Callable[[int, int], None],
+) -> list[ShortcutT]:
+    """Create the common viewer zoom and keyboard-pan shortcuts."""
+    return [
+        make_shortcut('-', lambda: zoom_step(0.8)),
+        make_shortcut('=', lambda: zoom_step(1.25)),
+        make_shortcut(Qt.Key_Plus, lambda: zoom_step(1.25)),
+        make_shortcut('W', lambda: keyboard_pan_by(0, -1)),
+        make_shortcut('A', lambda: keyboard_pan_by(-1, 0)),
+        make_shortcut('S', lambda: keyboard_pan_by(0, 1)),
+        make_shortcut('D', lambda: keyboard_pan_by(1, 0)),
+    ]
+
+
+def build_progress_overlay(parent: QWidget) -> ProgressOverlayWidgets:
+    """Build the common centered progress overlay widget bundle."""
+    overlay = QWidget(parent)
+    overlay.setObjectName('progressOverlay')
+    overlay.hide()
+    overlay_layout = QVBoxLayout(overlay)
+    overlay_layout.setContentsMargins(0, 0, 0, 0)
+    overlay_layout.addStretch(1)
+    overlay_center = QHBoxLayout()
+    overlay_center.addStretch(1)
+    panel = QFrame(overlay)
+    panel.setObjectName('progressPanel')
+    panel_layout = QVBoxLayout(panel)
+    panel_layout.setContentsMargins(24, 20, 24, 20)
+    panel_layout.setSpacing(14)
+    message_label = QLabel('', panel)
+    message_label.setAlignment(Qt.AlignCenter)
+    panel_layout.addWidget(message_label)
+    progress_bar = QProgressBar(panel)
+    progress_bar.setRange(0, 100)
+    progress_bar.setFixedWidth(360)
+    panel_layout.addWidget(progress_bar)
+    overlay_center.addWidget(panel)
+    overlay_center.addStretch(1)
+    overlay_layout.addLayout(overlay_center)
+    overlay_layout.addStretch(1)
+    return ProgressOverlayWidgets(
+        overlay=overlay,
+        panel=panel,
+        message_label=message_label,
+        progress_bar=progress_bar,
+    )
+
+
+def build_transient_message_overlay(
+        parent: QWidget,
+        *,
+        timer_parent: QObject | None = None,
+) -> TransientMessageOverlayWidgets:
+    """Build the common centered transient-message overlay widget bundle."""
+    overlay = QWidget(parent)
+    overlay.setObjectName('transientMessageOverlay')
+    overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+    overlay.setFocusPolicy(Qt.NoFocus)
+    overlay.hide()
+    overlay_layout = QVBoxLayout(overlay)
+    overlay_layout.setContentsMargins(0, 0, 0, 0)
+    overlay_layout.addStretch(1)
+    overlay_center = QHBoxLayout()
+    overlay_center.addStretch(1)
+    panel = QFrame(overlay)
+    panel.setObjectName('transientMessagePanel')
+    panel.setFocusPolicy(Qt.NoFocus)
+    panel_layout = QVBoxLayout(panel)
+    panel_layout.setContentsMargins(22, 16, 22, 16)
+    message_label = QLabel('', panel)
+    message_label.setAlignment(Qt.AlignCenter)
+    message_label.setWordWrap(True)
+    message_label.setFocusPolicy(Qt.NoFocus)
+    panel_layout.addWidget(message_label)
+    overlay_center.addWidget(panel)
+    overlay_center.addStretch(1)
+    overlay_layout.addLayout(overlay_center)
+    overlay_layout.addStretch(1)
+    timer = QTimer(timer_parent or parent)
+    timer.setSingleShot(True)
+    return TransientMessageOverlayWidgets(
+        overlay=overlay,
+        panel=panel,
+        message_label=message_label,
+        timer=timer,
+    )
 
 
 def exif_overlay_geometry_ready(
@@ -62,3 +188,20 @@ def update_exif_overlay_geometry(
 
     x = max(margin, parent_rect.width() - width - margin)
     overlay.setGeometry(x, margin, width, height)
+
+
+def resolve_widget_screen(widget: object) -> QScreen | None:
+    """Return the screen containing a widget, if Qt can resolve one."""
+    window_handle_fn = getattr(widget, 'windowHandle', None)
+    window_handle = window_handle_fn() if callable(window_handle_fn) else None
+    if window_handle is not None:
+        screen_fn = getattr(window_handle, 'screen', None)
+        screen = screen_fn() if callable(screen_fn) else None
+        if screen is not None:
+            return screen
+
+    frame_geometry_fn = getattr(widget, 'frameGeometry', None)
+    if not callable(frame_geometry_fn):
+        return None
+
+    return QGuiApplication.screenAt(frame_geometry_fn().center())

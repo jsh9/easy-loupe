@@ -225,12 +225,20 @@ class _FakeCullingWindow:
         self.launch_request = launch_request
         self.attributes: list[tuple[object, bool]] = []
         self.destroyed = _FakeSignal()
+        self.geometry_calls: list[object] = []
+        self.move_calls: list[object] = []
         self.show_maximized_calls = 0
 
     def setAttribute(  # noqa: N802 - Qt naming in fake
             self, attribute: object, enabled: bool
     ) -> None:
         self.attributes.append((attribute, enabled))
+
+    def setGeometry(self, geometry: object) -> None:  # noqa: N802
+        self.geometry_calls.append(geometry)
+
+    def move(self, point: object) -> None:
+        self.move_calls.append(point)
 
     def showMaximized(self) -> None:  # noqa: N802 - Qt naming in fake
         self.show_maximized_calls += 1
@@ -245,6 +253,7 @@ class _FakePhotoWindow:
         self.attributes: list[tuple[object, bool]] = []
         self.destroyed = _FakeSignal()
         self.culling_requested = _FakeSignal()
+        self.screen: object | None = None
         self.show_maximized_calls = 0
         self.closed = False
 
@@ -260,8 +269,38 @@ class _FakePhotoWindow:
         self.closed = True
         self.destroyed.emit()
 
+    def windowHandle(self) -> object | None:  # noqa: N802 - Qt naming in fake
+        if self.screen is None:
+            return None
+
+        return _FakeWindowHandle(self.screen)
+
     def destroy(self) -> None:
         self.destroyed.emit()
+
+
+class _FakeWindowHandle:
+    def __init__(self, screen: object) -> None:
+        self._screen = screen
+
+    def screen(self) -> object:
+        return self._screen
+
+
+class _FakeGeometry:
+    def __init__(self) -> None:
+        self.top_left = object()
+
+    def topLeft(self) -> object:  # noqa: N802 - Qt naming in fake
+        return self.top_left
+
+
+class _FakeScreen:
+    def __init__(self) -> None:
+        self.geometry = _FakeGeometry()
+
+    def availableGeometry(self) -> _FakeGeometry:  # noqa: N802
+        return self.geometry
 
 
 def _fake_window_manager() -> app_module.WindowManager:
@@ -574,6 +613,34 @@ def test_window_manager_hands_viewer_off_to_culling_window(
     assert viewer.closed is True
     assert len(windows) == 1
     assert windows[0].launch_request is request
+    assert windows[0].geometry_calls == []
+    assert windows[0].move_calls == []
+
+
+def test_window_manager_handoff_places_culling_window_on_viewer_screen(
+        tmp_path: Path,
+) -> None:
+    """Open handoff culling windows on the photo viewer's current screen."""
+    startup_photo = tmp_path / 'IMG_1000.JPG'
+    manager = _fake_window_manager()
+    viewer = manager.open_photo_window(startup_photo)
+    screen = _FakeScreen()
+    viewer.screen = screen
+    request = app_module.CullingLaunchRequest(
+        folder=tmp_path,
+        selected_photo_id='IMG_1000',
+        enter_browse=True,
+    )
+
+    viewer.culling_requested.emit(request)
+
+    windows = manager.windows()
+    assert viewer.closed is True
+    assert len(windows) == 1
+    assert windows[0].launch_request is request
+    assert windows[0].geometry_calls == [screen.geometry]
+    assert windows[0].move_calls == [screen.geometry.top_left]
+    assert windows[0].show_maximized_calls == 1
 
 
 def test_apply_app_identity_sets_qt_name_and_icon() -> None:
