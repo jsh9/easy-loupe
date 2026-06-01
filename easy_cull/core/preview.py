@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import tempfile
+import threading
+import weakref
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
@@ -13,7 +15,7 @@ from PIL import Image, ImageOps
 
 from easy_cull.core.records import (
     FIT_MAX_SIZE,
-    JPEG_EXTENSIONS,
+    RASTER_EXTENSIONS,
     THUMB_MAX_SIZE,
     PhotoRecord,
 )
@@ -22,6 +24,32 @@ try:
     import rawpy
 except ImportError:  # pragma: no cover - handled by dependency installation
     rawpy = cast('Any', None)
+
+try:
+    from pillow_heif import register_heif_opener
+except ImportError:  # pragma: no cover - handled by dependency installation
+    register_heif_opener = cast('Any', None)
+else:
+    register_heif_opener()
+
+
+_PREVIEW_LOCKS_GUARD = threading.Lock()
+# Keep one lock per cache key only while a render is in flight. The guard
+# protects registry mutation; the weak values prevent long sessions from
+# retaining locks for every preview key ever visited.
+_PREVIEW_LOCKS: weakref.WeakValueDictionary[str, threading.Lock] = (
+    weakref.WeakValueDictionary()
+)
+
+
+def _preview_lock(cache_key: str) -> threading.Lock:
+    with _PREVIEW_LOCKS_GUARD:
+        lock = _PREVIEW_LOCKS.get(cache_key)
+        if lock is None:
+            lock = threading.Lock()
+            _PREVIEW_LOCKS[cache_key] = lock
+
+        return lock
 
 
 def _default_cache_dir() -> Path:
@@ -49,16 +77,41 @@ def get_preview_path(
     if target.exists():
         return target
 
-    image = render_source_image(photo.preview_source, kind)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    image.save(target, format='JPEG', quality=92, optimize=True)
-    image.close()
+    with _preview_lock(key):
+        if target.exists():
+            return target
+
+        image = render_source_image(photo.preview_source, kind)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            dir=target.parent,
+            prefix=f'.{key}.',
+            suffix='.tmp',
+            delete=False,
+        ) as temp_file:
+            temp_path = Path(temp_file.name)
+
+        try:
+            image.save(temp_path, format='JPEG', quality=92, optimize=True)
+            temp_path.replace(target)
+        finally:
+            image.close()
+            if temp_path.exists():
+                temp_path.unlink()
+
     return target
 
 
 def render_source_image(source: Path, kind: str) -> Image.Image:
     """Open and optionally resize a source image for the requested kind."""
-    if source.suffix.lower() in JPEG_EXTENSIONS:
+    if source.suffix.lower() in RASTER_EXTENSIONS:
+        if source.suffix.lower() in {'.heic', '.heif'} and (
+            register_heif_opener is None
+        ):
+            raise RuntimeError(
+                'pillow-heif is required to render HEIC/HEIF previews'
+            )
+
         with Image.open(source) as opened:
             image = ImageOps.exif_transpose(opened).convert('RGB')
     else:

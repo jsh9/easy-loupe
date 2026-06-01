@@ -10,8 +10,39 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 JPEG_EXTENSIONS = {'.jpg', '.jpeg'}
-RAW_EXTENSIONS = {'.cr3', '.nef'}
-SUPPORTED_EXTENSIONS = JPEG_EXTENSIONS | RAW_EXTENSIONS
+HEIF_EXTENSIONS = {'.heic', '.heif'}
+RASTER_EXTENSIONS = JPEG_EXTENSIONS | HEIF_EXTENSIONS
+RAW_EXTENSIONS = {
+    '.3fr',
+    '.arw',
+    '.cr2',
+    '.cr3',
+    '.crw',
+    '.dcr',
+    '.dng',
+    '.erf',
+    '.fff',
+    '.iiq',
+    '.kdc',
+    '.mef',
+    '.mos',
+    '.mrw',
+    '.nef',
+    '.nrw',
+    '.orf',
+    '.ori',
+    '.pef',
+    '.ptx',
+    '.raf',
+    '.raw',
+    '.rw2',
+    '.rwl',
+    '.sr2',
+    '.srf',
+    '.srw',
+    '.x3f',
+}
+SUPPORTED_EXTENSIONS = RASTER_EXTENSIONS | RAW_EXTENSIONS
 METADATA_FILENAME = 'easy-cull.json'
 COLOR_LABELS = {'red', 'yellow', 'green', 'blue', 'purple'}
 
@@ -46,6 +77,9 @@ class PhotoRecord:
     preview_source: Path
     metadata_source: Path
     focus_point: tuple[float, float]
+    has_heif: bool = False
+    has_raster: bool = False
+    focus_point_pending: bool = False
     capture_at: datetime | None = None
     rating: int | None = None
     color_label: str | None = None
@@ -62,6 +96,8 @@ class PhotoRecord:
             'display_name': self.display_name,
             'files': self.files,
             'has_jpeg': self.has_jpeg,
+            'has_heif': self.has_heif,
+            'has_raster': self.has_raster,
             'has_raw': self.has_raw,
             'rating': self.rating,
             'color_label': self.color_label,

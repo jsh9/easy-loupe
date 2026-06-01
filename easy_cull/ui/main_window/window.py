@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction, QKeySequence, QShortcut
 from PySide6.QtWidgets import QMainWindow
 
@@ -24,6 +25,7 @@ from easy_cull.ui.theme import THEMES
 if TYPE_CHECKING:
     from PySide6.QtCore import QThread
 
+    from easy_cull.ui.launch import CullingLaunchRequest
     from easy_cull.ui.main_window.dialogs import OrganizerDialogResult
     from easy_cull.ui.main_window.workflows import MetadataEdit, SceneEdit
     from easy_cull.ui.workers import (
@@ -43,7 +45,9 @@ class MainWindow(
 ):
     """Desktop photo-culling main window and view-state controller."""
 
-    def __init__(self) -> None:
+    def __init__(
+            self, launch_request: CullingLaunchRequest | None = None
+    ) -> None:
         super().__init__()
         self.library = PhotoLibrary()
         self.current_photo_id: str | None = None
@@ -73,7 +77,7 @@ class MainWindow(
         # rebuilds the strip and would otherwise drop those exact selections.
         self._preserved_scene_selection_photo_ids: set[str] = set()
 
-        self._initial_folder_prompt_pending = True
+        self._initial_folder_prompt_pending = launch_request is None
         self._scene_thread: QThread | None = None
         self._scene_worker: SceneDetectionWorker | None = None
         self._operation_thread: QThread | None = None
@@ -97,6 +101,11 @@ class MainWindow(
         self._scene_overlay_photo_id: str | None = None
         self._metadata_undo_stack: list[MetadataEdit | SceneEdit] = []
         self._metadata_redo_stack: list[MetadataEdit | SceneEdit] = []
+        self._initial_folder_prompt_timer = QTimer(self)
+        self._initial_folder_prompt_timer.setSingleShot(True)
+        self._initial_folder_prompt_timer.timeout.connect(
+            self._open_initial_folder_if_needed
+        )
 
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(easy_cull_icon())
@@ -106,6 +115,8 @@ class MainWindow(
         self._build_menu()
         self._build_shortcuts()
         self._refresh_ui()
+        if launch_request is not None:
+            self.load_culling_launch_request(launch_request)
 
     @staticmethod
     def _shortcut_tooltip(label: str, shortcut: str) -> str:

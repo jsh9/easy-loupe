@@ -1,5 +1,34 @@
 # Change Log
 
+## [Unreleased]
+
+- Adds a direct-file-open photo viewer for photos launched from Finder,
+  Explorer, or argv. The viewer opens the selected photo immediately, hydrates
+  the surrounding folder in the background when access is available, supports
+  adjacent-photo navigation, EXIF and histogram display, AF-point loading,
+  zoom/pan inspection, transient status messages, and `G` / `Enter` handoff
+  into the full culling workspace.
+- Startup routing now distinguishes plain app launches from file-open launches,
+  including macOS `FileOpen` events that arrive shortly after Finder starts the
+  app. Multiple opened photos create independent photo-viewer windows, and
+  photo-viewer-to-culling handoff keeps the culling window on the viewer's
+  monitor.
+- Folder loading and previews now support HEIC/HEIF plus a broader set of RAW
+  extensions. JPEG remains the preferred preview source when grouped with other
+  formats, HEIF is preferred over slower RAW rendering when no JPEG is present,
+  and shared EXIF/file-size display rows cover JPEG, HEIF, and RAW members of a
+  photo group.
+- macOS photo-viewer startup now has explicit protected-folder access handling
+  for Desktop, Documents, Downloads, and File Provider cloud-storage roots. It
+  uses native TCC/File Provider prompts where possible, falls back to a folder
+  chooser for other inaccessible roots, and keeps denied-access launches in a
+  usable single-photo viewer instead of failing the window outright.
+- macOS packaging now registers EasyCull as a photo document viewer and adds
+  the privacy usage strings needed for protected-folder access.
+- Internally, file-open photo viewing is separated from the main culling window
+  with dedicated worker and folder-access modules, plus shared viewer-window
+  shortcut, overlay, and screen-resolution helpers.
+
 ## [0.2.3] - 2026-05-30
 
 - Fixed

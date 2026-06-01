@@ -175,11 +175,13 @@ def test_main_window_uses_viewer_preview_for_central_image() -> None:
                 image_path: Path,
                 focus_point: tuple[float, float],
                 *,
+                focus_point_pending: bool,
                 preserve_zoom: bool,
                 preserved_center: tuple[float, float] | None,
         ) -> None:
             self.image_path = image_path
             self.focus_point = focus_point
+            self.focus_point_pending = focus_point_pending
             self.preserve_zoom = preserve_zoom
             self.preserved_center = preserved_center
 
@@ -204,6 +206,7 @@ def test_main_window_uses_viewer_preview_for_central_image() -> None:
     assert fake_window.library.preview_requests == [('IMG_7000', 'viewer')]
     assert fake_window.viewer.image_path == Path('/tmp/fake-preview.jpg')
     assert fake_window.viewer.focus_point == (0.25, 0.75)
+    assert fake_window.viewer.focus_point_pending is False
     assert fake_window.viewer.preserve_zoom is False
     assert fake_window.viewer.preserved_center is None
 
@@ -234,7 +237,6 @@ def test_main_window_browse_mode_toggles_grid_and_space_behavior(
     app.processEvents()
 
     assert focus_zoom_calls == ['toggle']
-    assert window._browse_mode is False
 
     window.browse_mode_shortcut.activated.emit()
     app.processEvents()

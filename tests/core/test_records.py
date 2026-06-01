@@ -20,6 +20,13 @@ def test_records_module_exports_photo_record() -> None:
 def test_photo_record_to_api_dict_returns_expected_shape(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """
+    Verify API serialization exposes the supported source-type flags.
+
+    Clients distinguish JPEG, HEIF, any raster, and RAW availability, so this
+    catches regressions where the record model gains a source type but the API
+    response shape is not kept in sync.
+    """
     create_jpeg(tmp_path / 'IMG_9000.JPG', 'orange')
     stub_read_exif(
         monkeypatch,
@@ -41,6 +48,8 @@ def test_photo_record_to_api_dict_returns_expected_shape(
     assert api_dict['display_name'] == 'IMG_9000'
     assert api_dict['files'] == ['IMG_9000.JPG']
     assert api_dict['has_jpeg'] is True
+    assert api_dict['has_heif'] is False
+    assert api_dict['has_raster'] is True
     assert api_dict['has_raw'] is False
     assert api_dict['rating'] == 3
     assert api_dict['color_label'] == 'blue'

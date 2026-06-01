@@ -80,18 +80,7 @@ class MainWindowNavigationMixin:
             QTimer.singleShot(0, self._restore_thumbnail_strip_focus)
             return
 
-        if (
-            not self.isActiveWindow()
-            or self._busy
-            or self._background_task_active()
-            or self._compare_mode
-            or self._browse_mode
-            or not self.library.photos
-            or not self.content_splitter.isVisible()
-            or not self.thumbnail_list.isVisible()
-            or not self.thumbnail_list.isEnabled()
-            or self.thumbnail_list.count() == 0
-        ):
+        if not self._thumbnail_strip_focus_available():
             return
 
         if self.thumbnail_list.currentRow() < 0:
@@ -102,6 +91,25 @@ class MainWindowNavigationMixin:
 
         self.thumbnail_list.setFocus(Qt.OtherFocusReason)
         self.thumbnail_list.viewport().setFocus(Qt.OtherFocusReason)
+
+    def _thumbnail_strip_focus_available(self: MainWindow) -> bool:
+        """Return whether the thumbnail strip can accept focus now."""
+        if (
+            not self.isActiveWindow()
+            or self._busy
+            or self._background_task_active()
+            or self._compare_mode
+            or self._browse_mode
+            or not self.library.photos
+        ):
+            return False
+
+        return (
+            self.content_splitter.isVisible()
+            and self.thumbnail_list.isVisible()
+            and self.thumbnail_list.isEnabled()
+            and self.thumbnail_list.count() > 0
+        )
 
     def _list_selection_changed(self: MainWindow) -> None:
         """Refresh selection-dependent presentation for multi-selection."""
@@ -387,6 +395,7 @@ class MainWindowNavigationMixin:
         self.viewer.set_photo(
             image_path,
             photo.focus_point,
+            focus_point_pending=getattr(photo, 'focus_point_pending', False),
             preserve_zoom=preserve_zoom,
             preserved_center=preserved_center,
         )

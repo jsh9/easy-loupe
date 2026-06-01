@@ -13,7 +13,12 @@ from easy_cull.core.folder_loading import (
     PHOTO_SORT_MODE_FILENAME,
 )
 from easy_cull.core.photo_library import PhotoLibrary
-from easy_cull.core.records import METADATA_FILENAME, SceneGroup
+from easy_cull.core.records import (
+    METADATA_FILENAME,
+    RAW_EXTENSIONS,
+    SUPPORTED_EXTENSIONS,
+    SceneGroup,
+)
 from tests.core._helpers import FakeHash, create_jpeg, stub_read_exif
 
 if TYPE_CHECKING:
@@ -85,6 +90,127 @@ def test_load_folder_groups_jpeg_and_raw_files_by_stem(
     assert first.flag == 'rejected'
     assert first.rating == 4
     assert first.color_label == 'green'
+
+
+def test_supported_extensions_include_major_viewer_formats() -> None:
+    assert {'.jpg', '.jpeg', '.heic', '.heif'} <= SUPPORTED_EXTENSIONS
+    assert {
+        '.crw',
+        '.cr2',
+        '.cr3',
+        '.nef',
+        '.nrw',
+        '.arw',
+        '.raf',
+        '.rwl',
+        '.dng',
+        '.rw2',
+        '.orf',
+        '.ori',
+    } <= RAW_EXTENSIONS
+
+
+def test_load_folder_prefers_heic_preview_over_raw_with_shared_stem(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify HEIF files participate in shared-stem photo records as rasters.
+
+    RAW should remain the metadata source when present, but HEIF must be a
+    usable preview source and appear in the EXIF file-size summary.
+    """
+    (tmp_path / 'IMG_0100.HEIC').write_bytes(b'heic')
+    (tmp_path / 'IMG_0100.ARW').write_bytes(b'raw')
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+
+    assert [photo.photo_id for photo in library.photos] == ['IMG_0100']
+    photo = library.photos[0]
+    assert photo.preview_source == tmp_path / 'IMG_0100.HEIC'
+    assert photo.metadata_source == tmp_path / 'IMG_0100.ARW'
+    assert photo.has_jpeg is False
+    assert photo.has_heif is True
+    assert photo.has_raster is True
+    assert photo.has_raw is True
+    assert photo.exif_display == {'File Size': 'HEIF: 1 KB, RAW: 1 KB'}
+
+
+def test_load_folder_prefers_jpeg_preview_over_heif_with_shared_stem(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify JPEG wins when a shared-stem group has multiple raster sources.
+
+    HEIF still contributes source flags and EXIF display data, but JPEG is the
+    safer preview source when both raster formats are available.
+    """
+    create_jpeg(tmp_path / 'IMG_0101.JPG', 'blue')
+    (tmp_path / 'IMG_0101.HEIC').write_bytes(b'heic')
+    (tmp_path / 'IMG_0101.ARW').write_bytes(b'raw')
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+
+    assert [photo.photo_id for photo in library.photos] == ['IMG_0101']
+    photo = library.photos[0]
+    assert photo.files == [
+        'IMG_0101.ARW',
+        'IMG_0101.HEIC',
+        'IMG_0101.JPG',
+    ]
+    assert photo.preview_source == tmp_path / 'IMG_0101.JPG'
+    assert photo.metadata_source == tmp_path / 'IMG_0101.ARW'
+    assert photo.has_jpeg is True
+    assert photo.has_heif is True
+    assert photo.has_raster is True
+    assert photo.has_raw is True
+    assert photo.exif_display == {
+        'File Size': 'JPG: 5 KB, HEIF: 1 KB, RAW: 1 KB'
+    }
+
+
+def test_load_viewer_folder_uses_filename_order_and_can_open_single_file(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify viewer folder loads always use ascending filename order.
+
+    The photo viewer should ignore culling sort preferences, including a
+    persisted capture-time reverse order, so adjacent navigation is stable.
+    """
+    create_jpeg(tmp_path / 'B.JPG', 'blue')
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    create_jpeg(tmp_path / 'C.JPG', 'purple')
+    stub_read_exif(
+        monkeypatch,
+        {
+            'C.JPG': {'DateTimeOriginal': '2024:05:01 10:00:00'},
+            'A.JPG': {'DateTimeOriginal': '2024:05:01 10:00:10'},
+        },
+    )
+
+    library = PhotoLibrary(
+        cache_dir=tmp_path / '.cache',
+        sort_mode=PHOTO_SORT_MODE_CAPTURE_TIME,
+        sort_reversed=True,
+    )
+    library.load_viewer_folder(tmp_path / 'B.JPG')
+
+    assert [photo.photo_id for photo in library.photos] == ['A', 'B', 'C']
+    assert library.sort_mode == PHOTO_SORT_MODE_FILENAME
+    assert library.sort_reversed is False
+    assert all(photo.focus_point_pending for photo in library.photos)
+
+    single_library = PhotoLibrary(cache_dir=tmp_path / '.single-cache')
+    single_library.load_viewer_folder(
+        tmp_path / 'B.JPG', allow_folder_scan=False
+    )
+
+    assert [photo.photo_id for photo in single_library.photos] == ['B']
+    assert single_library.get_photo('B').focus_point_pending is True
 
 
 def test_load_folder_rejects_missing_directory(tmp_path: Path) -> None:

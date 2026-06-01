@@ -10,9 +10,11 @@ import easy_cull.core.exif as exif_module
 import easy_cull.core.metadata as metadata_module
 from easy_cull.core.records import (
     COLOR_LABELS,
+    HEIF_EXTENSIONS,
     JPEG_EXTENSIONS,
     MAX_RATING,
     MIN_RATING,
+    RASTER_EXTENSIONS,
     RAW_EXTENSIONS,
     SUPPORTED_EXTENSIONS,
     PhotoRecord,
@@ -45,6 +47,16 @@ class LoadedFolderState:
     scenes: list[SceneGroup]
     scene_source: str | None
     scene_detection_done: bool
+
+
+@dataclass(frozen=True, slots=True)
+class PhotoExifDisplay:
+    """Formatted EXIF display payload shared by loaders and viewer workers."""
+
+    capture_at: datetime | None
+    image_width: int | None
+    image_height: int | None
+    exif_display: dict[str, str]
 
 
 def load_folder_state(
@@ -124,18 +136,91 @@ def load_folder_state(
     )
 
 
+def load_viewer_folder_state(
+        opened_file: Path,
+        *,
+        allow_folder_scan: bool,
+) -> LoadedFolderState:
+    """Build a fast filename-sorted state for photo-viewer startup."""
+    opened_file = opened_file.expanduser().resolve()
+    if not opened_file.is_file():
+        raise FileNotFoundError(f'{opened_file} is not a file')
+
+    if opened_file.suffix.lower() not in SUPPORTED_EXTENSIONS:
+        raise ValueError(f'{opened_file.name} is not a supported photo file')
+
+    folder = opened_file.parent
+    if allow_folder_scan:
+        files = sorted(
+            [
+                path
+                for path in folder.iterdir()
+                if (
+                    path.is_file()
+                    and path.suffix.lower() in SUPPORTED_EXTENSIONS
+                )
+            ],
+            key=lambda path: path.name.lower(),
+        )
+        metadata_entries = metadata_module.read_folder_metadata(folder)
+    else:
+        files = [opened_file]
+        metadata_entries = {}
+
+    groups: dict[str, list[Path]] = {}
+    for path in files:
+        groups.setdefault(path.stem.lower(), []).append(path)
+
+    normalized_metadata = metadata_module.normalize_metadata_entries(
+        metadata_entries or {}
+    )
+    records = [
+        _build_photo_record(
+            grouped_files,
+            {},
+            normalized_metadata,
+            focus_point_pending=True,
+        )
+        for _, grouped_files in sorted(
+            groups.items(), key=operator.itemgetter(0)
+        )
+    ]
+    sort_photo_records(
+        records,
+        PHOTO_SORT_MODE_FILENAME,
+        sort_reversed=DEFAULT_PHOTO_SORT_REVERSED,
+    )
+    return LoadedFolderState(
+        current_folder=folder,
+        folder_label=folder.name,
+        photos=records,
+        photo_map={photo.photo_id: photo for photo in records},
+        scenes=[],
+        scene_source=None,
+        scene_detection_done=False,
+    )
+
+
 def _build_photo_record(
         grouped_files: list[Path],
         exif_map: dict[str, dict[str, Any]],
         normalized_metadata: dict[str, dict[str, Any]],
+        *,
+        focus_point_pending: bool = False,
 ) -> PhotoRecord:
     sorted_group_files = sorted(
         grouped_files, key=lambda path: path.name.lower()
     )
-    jpeg_files = [
+    raster_files = [
         path
         for path in sorted_group_files
-        if path.suffix.lower() in JPEG_EXTENSIONS
+        if path.suffix.lower() in RASTER_EXTENSIONS
+    ]
+    jpeg_files = [
+        path for path in raster_files if path.suffix.lower() in JPEG_EXTENSIONS
+    ]
+    heif_files = [
+        path for path in raster_files if path.suffix.lower() in HEIF_EXTENSIONS
     ]
     raw_files = [
         path
@@ -143,7 +228,16 @@ def _build_photo_record(
         if path.suffix.lower() in RAW_EXTENSIONS
     ]
 
-    preview_source = jpeg_files[0] if jpeg_files else raw_files[0]
+    # Preserve alphabetical file listing, but choose previews by format
+    # priority. JPEG is the safest raster source; HEIF is still preferred over
+    # RAW because it avoids the slower RAW render path.
+    if jpeg_files:
+        preview_source = jpeg_files[0]
+    elif heif_files:
+        preview_source = heif_files[0]
+    else:
+        preview_source = raw_files[0]
+
     metadata_source = raw_files[0] if raw_files else preview_source
     shared_stem = preview_source.stem
 
@@ -152,16 +246,15 @@ def _build_photo_record(
         or exif_map.get(preview_source.name)
         or {}
     )
-    image_width, image_height = exif_module.resolve_image_size(source_metadata)
-    focus_point = exif_module.extract_focus_point(
-        source_metadata, image_width, image_height
+    exif_display = build_photo_exif_display(
+        source_metadata,
+        jpeg_files=jpeg_files,
+        heif_files=heif_files,
+        raw_files=raw_files,
     )
-    capture_at = exif_module.parse_capture_time(source_metadata)
-    exif_display: dict[str, str] = {}
-    _add_capture_time_display(exif_display, capture_at)
-    exif_display.update(exif_module.format_exif_display(source_metadata))
-    _add_resolution_display(exif_display, image_width, image_height)
-    _add_file_size_display(exif_display, jpeg_files, raw_files)
+    focus_point = exif_module.extract_focus_point(
+        source_metadata, exif_display.image_width, exif_display.image_height
+    )
 
     existing_metadata = normalized_metadata.get(shared_stem, {})
     rating = existing_metadata.get('rating')
@@ -177,13 +270,44 @@ def _build_photo_record(
         preview_source=preview_source,
         metadata_source=metadata_source,
         focus_point=focus_point,
-        capture_at=capture_at,
+        has_heif=bool(heif_files),
+        has_raster=bool(raster_files),
+        focus_point_pending=focus_point_pending,
+        capture_at=exif_display.capture_at,
         rating=rating
         if isinstance(rating, int) and MIN_RATING <= rating <= MAX_RATING
         else None,
         color_label=color_label if color_label in COLOR_LABELS else None,
         flag=flag if flag in {'picked', 'rejected'} else None,
         scene_id=None,
+        image_width=exif_display.image_width,
+        image_height=exif_display.image_height,
+        exif_display=exif_display.exif_display,
+    )
+
+
+def build_photo_exif_display(
+        source_metadata: dict[str, Any],
+        *,
+        jpeg_files: list[Path],
+        heif_files: list[Path] | None = None,
+        raw_files: list[Path],
+) -> PhotoExifDisplay:
+    """Build culling-compatible formatted EXIF rows for one photo group."""
+    image_width, image_height = exif_module.resolve_image_size(source_metadata)
+    capture_at = exif_module.parse_capture_time(source_metadata)
+    exif_display: dict[str, str] = {}
+    _add_capture_time_display(exif_display, capture_at)
+    exif_display.update(exif_module.format_exif_display(source_metadata))
+    _add_resolution_display(exif_display, image_width, image_height)
+    _add_file_size_display(
+        exif_display,
+        jpeg_files,
+        heif_files or [],
+        raw_files,
+    )
+    return PhotoExifDisplay(
+        capture_at=capture_at,
         image_width=image_width,
         image_height=image_height,
         exif_display=exif_display,
@@ -218,13 +342,18 @@ def _add_resolution_display(
 def _add_file_size_display(
         exif_display: dict[str, str],
         jpeg_files: list[Path],
+        heif_files: list[Path],
         raw_files: list[Path],
 ) -> None:
     parts: list[str] = []
     jpeg_size = sum(path.stat().st_size for path in jpeg_files)
+    heif_size = sum(path.stat().st_size for path in heif_files)
     raw_size = sum(path.stat().st_size for path in raw_files)
     if jpeg_size:
         parts.append(f'JPG: {_format_file_size(jpeg_size)}')
+
+    if heif_size:
+        parts.append(f'HEIF: {_format_file_size(heif_size)}')
 
     if raw_size:
         parts.append(f'RAW: {_format_file_size(raw_size)}')

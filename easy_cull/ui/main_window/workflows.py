@@ -41,6 +41,7 @@ from easy_cull.ui.workers import OperationWorker, SceneDetectionWorker
 
 if TYPE_CHECKING:
     from easy_cull.core.records import SceneGroup
+    from easy_cull.ui.launch import CullingLaunchRequest
     from easy_cull.ui.main_window.window import MainWindow
 
 ProgressCallback = Callable[[str, int], None]
@@ -106,6 +107,41 @@ class MainWindowWorkflowMixin:
         self._hide_progress()
         self.open_button.setEnabled(True)
         self._refresh_ui()
+        self._restore_active_navigation_focus(defer=True)
+
+    def load_culling_launch_request(
+            self: MainWindow, request: CullingLaunchRequest
+    ) -> None:
+        """Load a culling workspace requested by a photo-viewer handoff."""
+        if request.preloaded_library is not None:
+            self.library = request.preloaded_library
+        else:
+            self.library.load_folder(request.folder)
+
+        # Handoff may reuse a hydrated photo-viewer library, whose order is
+        # filename-only. Culling mode owns the persisted sort controls, so
+        # reapply them before rebuilding any lists from the handed-off state.
+        self.library.set_sort_order(
+            sort_mode=self._load_photo_sort_mode(),
+            sort_reversed=self._load_photo_sort_reversed(),
+        )
+        self._check_photo_sort_control(self.library.sort_mode)
+        self._check_photo_sort_reverse_control(self.library.sort_reversed)
+        loaded_photo_ids = {photo.photo_id for photo in self.library.photos}
+        self.current_photo_id = (
+            request.selected_photo_id
+            if request.selected_photo_id in loaded_photo_ids
+            else self.library.photos[0].photo_id
+            if self.library.photos
+            else None
+        )
+        self._initial_folder_prompt_pending = False
+        self._initial_folder_prompt_timer.stop()
+        self._rebuild_loaded_views(preserve_current_photo=True)
+        self._clear_metadata_history()
+        if request.enter_browse and self.library.photos:
+            self._enter_browse_mode()
+
         self._restore_active_navigation_focus(defer=True)
 
     def detect_scenes(self: MainWindow) -> None:
@@ -1107,6 +1143,9 @@ class MainWindowWorkflowMixin:
 
         for action in self._assignment_actions:
             action.setEnabled(enabled)
+
+        for shortcut in self._assignment_shortcuts:
+            shortcut.setEnabled(enabled)
 
         self._refresh_metadata_history_actions()
 

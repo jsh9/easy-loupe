@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QEvent, QSettings, Qt, QTimer
@@ -45,16 +46,27 @@ from easy_cull.ui.viewers.compare_photo_viewer import (
 )
 from easy_cull.ui.viewers.exif_overlay import ExifOverlayWidget
 from easy_cull.ui.viewers.main_photo_viewer import MainPhotoViewer
-from easy_cull.ui.widgets import SceneListWidget, ThumbnailListWidget
+from easy_cull.ui.viewers.shell import (
+    VIEWER_KEYBOARD_PAN_STEP,
+    build_progress_overlay,
+    build_transient_message_overlay,
+    build_viewer_shortcuts,
+    exif_overlay_geometry_ready,
+    make_window_shortcut,
+    update_exif_overlay_geometry,
+)
+from easy_cull.ui.widgets import (
+    SceneListWidget,
+    ThumbnailListWidget,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from PySide6.QtGui import QResizeEvent, QShowEvent
+    from PySide6.QtGui import QCloseEvent, QResizeEvent, QShowEvent
 
     from easy_cull.ui.main_window.window import MainWindow
 
-VIEWER_KEYBOARD_PAN_STEP = 120
 COMPARE_PHOTO_LIMIT_SETTINGS_KEY = 'compare/photo_limit'
 PHOTO_SORT_MODE_SETTINGS_KEY = 'photos/sort_mode'
 PHOTO_SORT_REVERSED_SETTINGS_KEY = 'photos/sort_reversed'
@@ -62,6 +74,7 @@ MIN_SCENE_MERGE_PHOTO_COUNT = 2
 TRANSIENT_MESSAGE_FONT_SIZE_PX = 28
 TRANSIENT_MESSAGE_FONT_WEIGHT = 600
 TRANSIENT_MESSAGE_TIMEOUT_MS = 1600
+INITIAL_FOLDER_PROMPT_GRACE_MS = 250
 
 
 class MainWindowBuildMixin:
@@ -76,9 +89,11 @@ class MainWindowBuildMixin:
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(10)
 
-        top_bar = QHBoxLayout()
+        self.top_bar_widget = QWidget(self.central_widget)
+        top_bar = QHBoxLayout(self.top_bar_widget)
+        top_bar.setContentsMargins(0, 0, 0, 0)
         top_bar.setSpacing(10)
-        root.addLayout(top_bar)
+        root.addWidget(self.top_bar_widget)
         self._build_top_bar(top_bar)
         self._build_view_mode_ui(root)
         self._build_progress_overlay()
@@ -288,60 +303,21 @@ class MainWindowBuildMixin:
         self.viewer_stack_widget.installEventFilter(self)
 
     def _build_progress_overlay(self: MainWindow) -> None:
-        self.progress_overlay = QWidget(self.central_widget)
-        self.progress_overlay.setObjectName('progressOverlay')
-        self.progress_overlay.hide()
-        overlay_layout = QVBoxLayout(self.progress_overlay)
-        overlay_layout.setContentsMargins(0, 0, 0, 0)
-        overlay_layout.addStretch(1)
-        overlay_center = QHBoxLayout()
-        overlay_center.addStretch(1)
-        self.progress_panel = QFrame(self.progress_overlay)
-        self.progress_panel.setObjectName('progressPanel')
-        panel_layout = QVBoxLayout(self.progress_panel)
-        panel_layout.setContentsMargins(24, 20, 24, 20)
-        panel_layout.setSpacing(14)
-        self.overlay_message_label = QLabel('', self.progress_panel)
-        self.overlay_message_label.setAlignment(Qt.AlignCenter)
-        panel_layout.addWidget(self.overlay_message_label)
-        self.overlay_progress_bar = QProgressBar(self.progress_panel)
-        self.overlay_progress_bar.setRange(0, 100)
-        self.overlay_progress_bar.setFixedWidth(360)
-        panel_layout.addWidget(self.overlay_progress_bar)
-        overlay_center.addWidget(self.progress_panel)
-        overlay_center.addStretch(1)
-        overlay_layout.addLayout(overlay_center)
-        overlay_layout.addStretch(1)
+        overlay = build_progress_overlay(self.central_widget)
+        self.progress_overlay = overlay.overlay
+        self.progress_panel = overlay.panel
+        self.overlay_message_label = overlay.message_label
+        self.overlay_progress_bar = overlay.progress_bar
 
     def _build_transient_message_overlay(self: MainWindow) -> None:
-        self.transient_message_overlay = QWidget(self.central_widget)
-        self.transient_message_overlay.setObjectName('transientMessageOverlay')
-        self.transient_message_overlay.setAttribute(
-            Qt.WidgetAttribute.WA_TransparentForMouseEvents
+        overlay = build_transient_message_overlay(
+            self.central_widget,
+            timer_parent=self,
         )
-        self.transient_message_overlay.setFocusPolicy(Qt.NoFocus)
-        self.transient_message_overlay.hide()
-        overlay_layout = QVBoxLayout(self.transient_message_overlay)
-        overlay_layout.setContentsMargins(0, 0, 0, 0)
-        overlay_layout.addStretch(1)
-        overlay_center = QHBoxLayout()
-        overlay_center.addStretch(1)
-        self.transient_message_panel = QFrame(self.transient_message_overlay)
-        self.transient_message_panel.setObjectName('transientMessagePanel')
-        self.transient_message_panel.setFocusPolicy(Qt.NoFocus)
-        panel_layout = QVBoxLayout(self.transient_message_panel)
-        panel_layout.setContentsMargins(22, 16, 22, 16)
-        self.transient_message_label = QLabel('', self.transient_message_panel)
-        self.transient_message_label.setAlignment(Qt.AlignCenter)
-        self.transient_message_label.setWordWrap(True)
-        self.transient_message_label.setFocusPolicy(Qt.NoFocus)
-        panel_layout.addWidget(self.transient_message_label)
-        overlay_center.addWidget(self.transient_message_panel)
-        overlay_center.addStretch(1)
-        overlay_layout.addLayout(overlay_center)
-        overlay_layout.addStretch(1)
-        self.transient_message_timer = QTimer(self)
-        self.transient_message_timer.setSingleShot(True)
+        self.transient_message_overlay = overlay.overlay
+        self.transient_message_panel = overlay.panel
+        self.transient_message_label = overlay.message_label
+        self.transient_message_timer = overlay.timer
         self.transient_message_timer.timeout.connect(
             self._hide_transient_message
         )
@@ -762,15 +738,11 @@ class MainWindowBuildMixin:
                 Qt.Key_QuoteLeft, lambda: self._set_color_label(None)
             )
         ]
-        self._viewer_shortcuts = [
-            self._make_shortcut('-', lambda: self._zoom_step(0.8)),
-            self._make_shortcut('=', lambda: self._zoom_step(1.25)),
-            self._make_shortcut(Qt.Key_Plus, lambda: self._zoom_step(1.25)),
-            self._make_shortcut('W', lambda: self._keyboard_pan_by(0, -1)),
-            self._make_shortcut('A', lambda: self._keyboard_pan_by(-1, 0)),
-            self._make_shortcut('S', lambda: self._keyboard_pan_by(0, 1)),
-            self._make_shortcut('D', lambda: self._keyboard_pan_by(1, 0)),
-        ]
+        self._viewer_shortcuts = build_viewer_shortcuts(
+            self._make_shortcut,
+            zoom_step=self._zoom_step,
+            keyboard_pan_by=self._keyboard_pan_by,
+        )
         self._scene_nav_shortcuts = [
             self._make_shortcut(Qt.Key_Left, lambda: self._navigate_scene(-1)),
             self._make_shortcut(Qt.Key_Right, lambda: self._navigate_scene(1)),
@@ -802,10 +774,12 @@ class MainWindowBuildMixin:
             key: str | int,
             callback: Callable[[], None],
     ) -> QShortcut:
-        shortcut = QShortcut(QKeySequence(key), self)
-        shortcut.setContext(Qt.WindowShortcut)
-        shortcut.activated.connect(lambda: None if self._busy else callback())
-        return shortcut
+        return make_window_shortcut(
+            self,
+            key,
+            callback,
+            blocked=lambda: self._busy,
+        )
 
     def _update_mode_shortcuts(self: MainWindow) -> None:
         normal_view_shortcuts_enabled = (
@@ -815,7 +789,8 @@ class MainWindowBuildMixin:
         self.split_mode_shortcut.setEnabled(
             normal_view_shortcuts_enabled or self._compare_mode
         )
-        self.browse_mode_shortcut.setEnabled(bool(self.library.photos))
+        can_enter_browse = bool(self.library.photos)
+        self.browse_mode_shortcut.setEnabled(can_enter_browse)
         self.compare_mode_shortcut.setEnabled(
             not self._compare_mode and bool(self.library.photos)
         )
@@ -831,6 +806,8 @@ class MainWindowBuildMixin:
 
         for shortcut in self._compare_nav_shortcuts:
             shortcut.setEnabled(self._compare_mode)
+
+        self._refresh_assignment_controls()
 
     def _handle_space_shortcut(self: MainWindow) -> None:
         if self._compare_mode:
@@ -963,12 +940,8 @@ class MainWindowBuildMixin:
 
     def _info_overlay_geometry_ready(self: MainWindow) -> bool:
         """Return whether the viewer stack is large enough for the overlay."""
-        parent_rect = self.viewer_stack_widget.rect()
-        margin = 14
-        return parent_rect.width() >= self.exif_overlay.width() + (
-            margin * 2
-        ) and parent_rect.height() >= self.exif_overlay.minimumHeight() + (
-            margin * 2
+        return exif_overlay_geometry_ready(
+            self.viewer_stack_widget, self.exif_overlay
         )
 
     def _defer_info_overlay_refresh(self: MainWindow) -> None:
@@ -988,20 +961,9 @@ class MainWindowBuildMixin:
         if not hasattr(self, 'exif_overlay'):
             return
 
-        margin = 14
-        parent_rect = self.viewer_stack_widget.rect()
-        size_hint = self.exif_overlay.sizeHint()
-        width = self.exif_overlay.width()
-        minimum_height = self.exif_overlay.minimumSizeHint().height()
-        height = min(
-            max(size_hint.height(), minimum_height),
-            max(parent_rect.height() - (margin * 2), 0),
+        update_exif_overlay_geometry(
+            self.viewer_stack_widget, self.exif_overlay
         )
-        if height < minimum_height:
-            return
-
-        x = max(margin, parent_rect.width() - width - margin)
-        self.exif_overlay.setGeometry(x, margin, width, height)
 
     def _create_assignment_action(
             self: MainWindow,
@@ -1024,6 +986,15 @@ class MainWindowBuildMixin:
         menu.addAction(action)
         self._assignment_actions.append(action)
         return action
+
+    def _refresh_assignment_controls(self: MainWindow) -> None:
+        """Enable assignment controls only in culling-capable modes."""
+        enabled = not self._busy
+        for action in self._assignment_actions:
+            action.setEnabled(enabled)
+
+        for shortcut in self._assignment_shortcuts:
+            shortcut.setEnabled(enabled)
 
     def _update_progress_overlay_geometry(self: MainWindow) -> None:
         """Match the progress overlay to the current central widget bounds."""
@@ -1078,9 +1049,28 @@ class MainWindowBuildMixin:
         if (
             self._initial_folder_prompt_pending
             and self.library.current_folder is None
+            and not self._initial_folder_prompt_timer.isActive()
+        ):
+            delay_ms = (
+                INITIAL_FOLDER_PROMPT_GRACE_MS
+                if sys.platform == 'darwin'
+                else 0
+            )
+            self._initial_folder_prompt_timer.start(delay_ms)
+
+    def _open_initial_folder_if_needed(self: MainWindow) -> None:
+        if (
+            self._initial_folder_prompt_pending
+            and self.library.current_folder is None
         ):
             self._initial_folder_prompt_pending = False
-            QTimer.singleShot(0, self.choose_folder)
+            self.choose_folder()
+
+    def closeEvent(self: MainWindow, event: QCloseEvent) -> None:  # noqa: N802 - Qt API
+        """Stop pending initial folder prompt before closing."""
+        self._initial_folder_prompt_pending = False
+        self._initial_folder_prompt_timer.stop()
+        super().closeEvent(event)
 
     def changeEvent(self: MainWindow, event: QEvent) -> None:  # noqa: N802 - Qt API
         """Restore navigation focus when the main window becomes active."""

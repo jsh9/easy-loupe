@@ -2,8 +2,8 @@
 
 ## 1. Purpose
 
-This repository is a local desktop photo culling app for JPEG and RAW folders.
-It is organized around a small set of top-level packages:
+This repository is a local desktop photo culling app for JPEG, HEIC/HEIF, and
+RAW folders. It is organized around a small set of top-level packages:
 
 - `easy_cull/core/`: non-UI application logic for the photo library, records,
   EXIF, metadata, previews, and scene detection.
@@ -47,6 +47,15 @@ making UI or library changes based on assumptions.
 - Both build scripts support `--diagnose`; use it to print Python, PySide6,
   PyInstaller, Qt, shiboken, and bundled ExifTool diagnostics for the built
   artifact.
+- macOS folder access is controlled by TCC, Apple's Transparency, Consent, and
+  Control privacy database. EasyCull's own `QSettings` approved-root list only
+  records product intent; real access to protected folders such as `~/Desktop`,
+  `~/Documents`, `~/Downloads`, and File Provider roots under
+  `~/Library/CloudStorage/<provider>` comes from the macOS TCC/File Provider
+  prompt, a native file/folder chooser, or manual Full Disk Access. For
+  VSCode-style access prompts, keep the bundle identifier stable
+  (`com.easycull.EasyCull`) and keep the signed app valid after Info.plist
+  changes.
 - The build scripts stage official ExifTool payloads under ignored `build`
   cache/staging directories and bundle them under
   `easy_cull/vendor/exiftool/...` inside the PyInstaller artifact. Do not
@@ -122,8 +131,22 @@ Notes:
   - Defines the full PySide6 UI: browse mode, single-pane and split view modes,
     theming, thumbnail widgets, viewer, scene strip, worker thread, and the
     main window.
+  - `ui/app.py` owns application startup orchestration. `StartupCoordinator`
+    resolves argv, queued macOS `FileOpen`, and live system-open events before
+    asking `WindowManager` to create windows.
+  - `ui/photo_viewer/` owns the lightweight direct-file-open photo viewer,
+    background folder hydration, neighbor navigation, EXIF/focus loading, and
+    culling-window handoff.
+  - `ui/folder_access.py` owns macOS protected-folder and cloud-storage access
+    prompts used by photo-viewer startup before scanning neighboring files.
+  - `ui/launch.py` defines `CullingLaunchRequest`, the handoff payload used
+    when a photo-viewer window opens the full culling workspace.
   - The UI is split primarily across `ui/main_window/`, `ui/viewers/`,
-    `ui/widgets.py`, `ui/theme.py`, `ui/workers.py`, and `ui/app.py`.
+    `ui/photo_viewer/`, `ui/widgets.py`, `ui/theme.py`, `ui/workers.py`, and
+    `ui/app.py`.
+  - `ui/viewers/shell.py` contains shared viewer-window scaffolding such as
+    zoom/pan shortcut wiring, progress/transient overlays, and screen
+    resolution helpers for same-monitor handoff.
   - `ui/identity.py` owns the user-facing app name, packaged icon lookup, Qt
     app identity, and best-effort macOS process/app-switcher identity hooks.
   - `ui/assets/` contains packaged EasyCull icon assets used by Qt and the
@@ -134,7 +157,12 @@ Notes:
     `navigation.py`, and `presentation.py`.
   - `MainWindow` remains the central stateful UI controller.
 - `easy_cull/ui/viewers/`
-  - Contains `PhotoViewer`, `MainPhotoViewer`, and `ExifOverlayWidget`.
+  - Contains `PhotoViewer`, `MainPhotoViewer`, shared viewer shell helpers, and
+    `ExifOverlayWidget`.
+- `easy_cull/ui/photo_viewer/`
+  - Contains `PhotoViewerWindow` and worker code for file-open photo viewer
+    mode. It is intentionally separate from `MainWindow`; handoff into culling
+    mode goes through `CullingLaunchRequest` and `WindowManager`.
 - `easy_cull/analysis/`
   - Contains the concrete `scenes.py` scene-detection implementation plus
     placeholder `quality.py` and `faces.py` modules for future work.
@@ -176,9 +204,8 @@ Preserve these behaviors unless the change explicitly intends to redefine the
 product contract and the tests/docs are updated accordingly.
 
 - Photos are grouped by shared filename stem across supported extensions.
-- Supported extensions are currently:
-  - JPEG: `.jpg`, `.jpeg`
-  - RAW: `.cr3`, `.nef`
+- Supported extensions are defined in `easy_cull/core/records.py` and include
+  JPEG, HEIC/HEIF, and multiple camera RAW formats.
 - A `PhotoRecord.photo_id` is the visible stem, not the filename with
   extension.
 - Metadata is stored in `easy-cull.json` inside the selected photo folder.
@@ -231,6 +258,7 @@ product contract and the tests/docs are updated accordingly.
 
 - `PySide6` powers the desktop UI.
 - `Pillow` handles image loading/transforms.
+- `pillow-heif` registers HEIC/HEIF image support for Pillow.
 - `rawpy` is required to render RAW previews.
 - `imagehash` is required for scene detection.
 - `exiftool` is used opportunistically via `subprocess.run(...)` after path
@@ -249,6 +277,8 @@ Important:
   during metadata reads.
 - If `rawpy` or `imagehash` is unavailable and the corresponding feature path
   is exercised, the library raises a runtime error.
+- If `pillow-heif` is unavailable, HEIC/HEIF preview rendering raises a runtime
+  error instead of silently producing an invalid preview.
 
 ## 7. Preview And Cache Behavior
 
@@ -289,6 +319,11 @@ Scene detection runs off the UI thread through:
 - `_handle_scene_progress()`
 - `_handle_scene_finished()` / `_handle_scene_failed()`
 
+Photo-viewer folder hydration also runs off the UI thread. Its worker signals
+must be routed back to the main-window GUI thread before any list/viewer/widget
+state is rebuilt; do not connect worker-thread signals through lambdas that
+call UI-update methods directly.
+
 Current functionality is grouped below so UI changes can be evaluated against
 the actual product behavior, not just the widget layout.
 
@@ -296,6 +331,18 @@ the actual product behavior, not just the widget layout.
 
 Mode summary:
 
+- `Culling mode` is the full EasyCull workspace used for selecting, comparing,
+  assigning metadata, organizing, scene workflows, and browse-grid review. It
+  includes normal view mode, browse mode, compare mode, the thumbnail strips,
+  the top bar, and metadata/scene controls.
+- `Photo viewer mode` is the lightweight startup mode used when a specific file
+  is opened from Finder, Explorer, or argv. It shows only the opened photo
+  fit-to-window at first, supports adjacent-folder navigation, and keeps the
+  normal culling chrome and scene strips hidden until the user presses `G` or
+  `Enter` to enter culling mode.
+- Multiple system-opened photos create multiple independent EasyCull windows.
+  Each photo-viewer window owns its own `MainWindow`, `PhotoLibrary`,
+  background workers, folder hydration, close lifecycle, title, and mode state.
 - `View mode` is the normal working mode. It shows the left thumbnail strip and
   the main viewer, plus the horizontal scene strip when scene detection is
   available for the current photo.
@@ -331,6 +378,10 @@ Mode-transition summary:
 
 - When the main window first shows and no folder is loaded, `showEvent()`
   schedules the folder chooser automatically.
+- On macOS, Finder may launch EasyCull before delivering the matching
+  `FileOpen` event. App startup must briefly resolve launch intent before
+  creating a normal no-file culling window, so a photo-open launch does not
+  also create a hidden culling window with a folder chooser.
 - Canceling the folder chooser leaves the UI idle: no current photo, no loaded
   photo list, no progress overlay, and no forced state change.
 - If folder loading fails, the progress overlay is dismissed, controls are
@@ -705,6 +756,23 @@ Additional assignment-menu behavior:
   - verify the platform artifact shape: macOS ships `dist/EasyCull.app`, while
     Windows default distribution ships the whole `dist\EasyCull\` folder unless
     `--onefile` is used
+  - verify macOS photo document type registration and protected-folder privacy
+    strings when changing direct-file-open behavior
+- If you change photo-viewer startup or handoff behavior:
+  - test argv, live system-open events, and queued macOS `FileOpen` events
+  - verify multiple opened photos create independent photo-viewer windows
+  - verify `G` and `Enter` wait for folder hydration when needed, then open
+    culling mode for the current photo
+  - verify photo-viewer-to-culling handoff opens the culling window on the same
+    monitor as the photo-viewer window
+  - verify worker signals are routed back to the GUI thread before UI state is
+    rebuilt
+- If you change macOS folder-access behavior:
+  - test protected-folder roots, File Provider roots under
+    `~/Library/CloudStorage`, chooser fallback, denied access, and remembered
+    approved roots
+  - keep real TCC/File Provider access separate from the app's own
+    intent-tracking `QSettings` entries
 - If you change scene detection:
   - test grouping behavior, not just helper functions
   - preserve ordering assumptions based on capture time
