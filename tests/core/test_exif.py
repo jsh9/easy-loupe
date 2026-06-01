@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, Never
 
 import pytest
 
-import easy_cull.core.exif as core_exif_module
+import easy_loupe.core.exif as core_exif_module
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -132,7 +132,7 @@ def test_resolve_exiftool_path_finds_pyinstaller_bundle(
 ) -> None:
     bundled_exiftool = (
         tmp_path
-        / 'easy_cull'
+        / 'easy_loupe'
         / 'vendor'
         / 'exiftool'
         / 'windows'
@@ -178,7 +178,7 @@ def test_exiftool_subprocess_kwargs_are_empty_without_windows_support(
 
     The console-popup problem is Windows-specific. On macOS/Linux, Python's
     subprocess module does not provide the Windows-only constants used to hide
-    a helper process window, so EasyCull should pass no extra options.
+    a helper process window, so EasyLoupe should pass no extra options.
     """
     # Remove the Windows-only subprocess attributes even if the test happens to
     # run on Windows, so this test behaves like a non-Windows Python runtime.
@@ -201,7 +201,7 @@ def test_exiftool_subprocess_kwargs_hide_windows_console(
 
     The app itself is a PySide/Qt GUI, but ExifTool is a separate console
     program. This test fakes the Windows-only subprocess constants/classes and
-    checks that EasyCull asks Windows to keep that helper process hidden.
+    checks that EasyLoupe asks Windows to keep that helper process hidden.
     """
 
     class FakeStartupInfo:

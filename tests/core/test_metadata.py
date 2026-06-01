@@ -5,15 +5,15 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from easy_cull import core
-from easy_cull.core.metadata import (
+from easy_loupe import core
+from easy_loupe.core.metadata import (
     normalize_metadata_entries,
     normalize_scene_groups,
     serialize_folder_metadata,
     serialize_metadata_entries,
 )
-from easy_cull.core.photo_library import PhotoLibrary
-from easy_cull.core.records import METADATA_FILENAME
+from easy_loupe.core.photo_library import PhotoLibrary
+from easy_loupe.core.records import METADATA_FILENAME
 from tests.core._helpers import create_jpeg, make_photo_record, stub_read_exif
 
 if TYPE_CHECKING:

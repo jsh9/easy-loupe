@@ -1,1 +1,1 @@
-"""Build scripts for EasyCull app bundles."""
+"""Build scripts for EasyLoupe app bundles."""

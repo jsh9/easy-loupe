@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-import easy_cull.analysis.scenes as analysis_scenes_module
+import easy_loupe.analysis.scenes as analysis_scenes_module
 
 
 def test_analysis_scenes_module_exports_detect_scenes() -> None:

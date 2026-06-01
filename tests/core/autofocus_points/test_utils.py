@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-import easy_cull.core.autofocus_points.utils as autofocus_utils_module
+import easy_loupe.core.autofocus_points.utils as autofocus_utils_module
 
 
 @pytest.mark.parametrize(

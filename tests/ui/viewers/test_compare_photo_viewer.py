@@ -7,8 +7,8 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
-from easy_cull.ui.theme import THEMES
-from easy_cull.ui.viewers.compare_photo_viewer import (
+from easy_loupe.ui.theme import THEMES
+from easy_loupe.ui.viewers.compare_photo_viewer import (
     ACTIVE_COMPARE_BORDER_WIDTH,
     COMPARE_GRID_HELP_TEXT,
     COMPARE_HELP_TEXT,

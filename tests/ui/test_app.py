@@ -4,17 +4,17 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QApplication
 
-import easy_cull.ui as ui_package
-import easy_cull.ui.app as app_module
-import easy_cull.ui.identity as identity_module
-import easy_cull.ui.main_window as ui_main_window_package
-import easy_cull.ui.main_window.window as main_window_module
-import easy_cull.ui.viewers as ui_viewers_package
-import easy_cull.ui.viewers.exif_overlay as exif_overlay_module
-import easy_cull.ui.viewers.main_photo_viewer as main_photo_viewer_module
-import easy_cull.ui.viewers.photo_viewer as photo_viewer_module
-import easy_cull.ui.widgets as widgets_module
-import easy_cull.ui.workers as workers_module
+import easy_loupe.ui as ui_package
+import easy_loupe.ui.app as app_module
+import easy_loupe.ui.identity as identity_module
+import easy_loupe.ui.main_window as ui_main_window_package
+import easy_loupe.ui.main_window.window as main_window_module
+import easy_loupe.ui.viewers as ui_viewers_package
+import easy_loupe.ui.viewers.exif_overlay as exif_overlay_module
+import easy_loupe.ui.viewers.main_photo_viewer as main_photo_viewer_module
+import easy_loupe.ui.viewers.photo_viewer as photo_viewer_module
+import easy_loupe.ui.widgets as widgets_module
+import easy_loupe.ui.workers as workers_module
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -63,10 +63,10 @@ def test_ui_identity_uses_packaged_logo_assets() -> None:
     assert ico.is_file()
     assert png.is_file()
     assert svg.is_file()
-    assert not identity_module.easy_cull_icon().isNull()
+    assert not identity_module.easy_loupe_icon().isNull()
 
 
-def test_easy_cull_icon_adds_windows_ico_sizes(
+def test_easy_loupe_icon_adds_windows_ico_sizes(
         monkeypatch: object,
 ) -> None:
     _app = QApplication.instance() or QApplication([])
@@ -74,7 +74,7 @@ def test_easy_cull_icon_adds_windows_ico_sizes(
 
     sizes = {
         (size.width(), size.height())
-        for size in identity_module.easy_cull_icon().availableSizes()
+        for size in identity_module.easy_loupe_icon().availableSizes()
     }
 
     assert (16, 16) in sizes
@@ -83,12 +83,16 @@ def test_easy_cull_icon_adds_windows_ico_sizes(
 
 
 def test_branded_argv_replaces_process_executable_name() -> None:
-    assert identity_module.branded_argv(['python3.13', '-m', 'easy_cull']) == [
-        'EasyCull',
+    assert identity_module.branded_argv([
+        'python3.13',
         '-m',
-        'easy_cull',
+        'easy_loupe',
+    ]) == [
+        'EasyLoupe',
+        '-m',
+        'easy_loupe',
     ]
-    assert identity_module.branded_argv([]) == ['EasyCull']
+    assert identity_module.branded_argv([]) == ['EasyLoupe']
 
 
 def test_app_extracts_supported_startup_photo_path(tmp_path: Path) -> None:
@@ -97,7 +101,7 @@ def test_app_extracts_supported_startup_photo_path(tmp_path: Path) -> None:
 
     assert (
         app_module._extract_startup_file([
-            'EasyCull',
+            'EasyLoupe',
             '--some-qt-flag',
             str(photo_path),
         ])
@@ -105,7 +109,7 @@ def test_app_extracts_supported_startup_photo_path(tmp_path: Path) -> None:
     )
     assert (
         app_module._extract_startup_file([
-            'EasyCull',
+            'EasyLoupe',
             str(tmp_path / 'notes.txt'),
         ])
         is None
@@ -119,7 +123,7 @@ def test_app_extracts_multiple_supported_startup_photo_paths(
     Collect every supported startup photo path from argv.
 
     This protects direct launches on Windows and command-line runs where the OS
-    may pass several opened photos to one EasyCull process.
+    may pass several opened photos to one EasyLoupe process.
     """
     first_photo = tmp_path / 'IMG_1000.ARW'
     second_photo = tmp_path / 'IMG_1001.JPG'
@@ -128,7 +132,7 @@ def test_app_extracts_multiple_supported_startup_photo_paths(
         path.write_bytes(b'file')
 
     assert app_module._extract_startup_files([
-        'EasyCull',
+        'EasyLoupe',
         str(first_photo),
         '--some-qt-flag',
         str(notes),
@@ -368,8 +372,8 @@ def test_startup_coordinator_macos_file_open_resolves_launch(
     """
     Prefer a real macOS file-open event over delayed no-file startup.
 
-    This covers the Finder launch race that otherwise creates a second EasyCull
-    window whose initial folder prompt appears behind the photo.
+    This covers the Finder launch race that otherwise creates a second
+    EasyLoupe window whose initial folder prompt appears behind the photo.
     """
     _FakeTimer.instances = []
     photo = tmp_path / 'IMG_1000.JPG'
@@ -515,7 +519,7 @@ def test_main_keeps_pending_file_events_separate_from_argv(
 
     monkeypatch.setattr(app_module, 'prepare_app_identity', lambda: None)
     monkeypatch.setattr(app_module, 'apply_app_identity', lambda _app: None)
-    monkeypatch.setattr(app_module, 'EasyCullApplication', FakeApplication)
+    monkeypatch.setattr(app_module, 'EasyLoupeApplication', FakeApplication)
     monkeypatch.setattr(
         app_module, 'StartupCoordinator', FakeStartupCoordinator
     )
@@ -534,7 +538,7 @@ def test_startup_coordinator_system_open_creates_new_window(
     Handle later system file-open events by creating another window.
 
     This prevents macOS Finder opens from replacing the state of an existing
-    EasyCull photo-viewer window.
+    EasyLoupe photo-viewer window.
     """
     first_photo = tmp_path / 'IMG_1000.JPG'
     second_photo = tmp_path / 'IMG_1001.JPG'
@@ -558,7 +562,7 @@ def test_startup_coordinator_ignores_unsupported_system_open(
     """
     Ignore later system-open events for unsupported file types.
 
-    This keeps non-photo documents from creating empty EasyCull windows when
+    This keeps non-photo documents from creating empty EasyLoupe windows when
     the OS forwards unrelated file-open events.
     """
     first_photo = tmp_path / 'IMG_1000.JPG'
@@ -648,9 +652,9 @@ def test_apply_app_identity_sets_qt_name_and_icon() -> None:
 
     identity_module.apply_app_identity(app)
 
-    assert app.applicationName() == 'EasyCull'
+    assert app.applicationName() == 'EasyLoupe'
     assert app.applicationVersion() == identity_module.APP_VERSION
-    assert app.applicationDisplayName() == 'EasyCull'
-    assert app.organizationName() == 'EasyCull'
-    assert app.desktopFileName() == 'EasyCull'
+    assert app.applicationDisplayName() == 'EasyLoupe'
+    assert app.organizationName() == 'EasyLoupe'
+    assert app.desktopFileName() == 'EasyLoupe'
     assert not app.windowIcon().isNull()

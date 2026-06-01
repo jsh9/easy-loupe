@@ -5,10 +5,10 @@ from xml.dom import Node, minidom  # noqa: S408
 
 import pytest
 
-import easy_cull.operations.xmp as xmp_module
-from easy_cull.core.photo_library import PhotoLibrary
-from easy_cull.operations.common import OperationError, undo_operation
-from easy_cull.operations.xmp import (
+import easy_loupe.operations.xmp as xmp_module
+from easy_loupe.core.photo_library import PhotoLibrary
+from easy_loupe.operations.common import OperationError, undo_operation
+from easy_loupe.operations.xmp import (
     CAP1_NAMESPACE,
     RDF_NAMESPACE,
     XMP_NAMESPACE,

@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QApplication, QDialogButtonBox, QMessageBox
 
-from easy_cull.ui.main_window.dialogs import OrganizerDialog
+from easy_loupe.ui.main_window.dialogs import OrganizerDialog
 
 if TYPE_CHECKING:
     from pathlib import Path

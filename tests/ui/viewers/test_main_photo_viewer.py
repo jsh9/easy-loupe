@@ -6,7 +6,7 @@ import pytest
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 
-from easy_cull.ui.main_window.build import VIEWER_KEYBOARD_PAN_STEP
+from easy_loupe.ui.main_window.build import VIEWER_KEYBOARD_PAN_STEP
 from tests.ui._helpers import (
     create_main_window_with_library,
     trigger_viewer_shortcut,

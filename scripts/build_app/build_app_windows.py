@@ -1,4 +1,4 @@
-"""Build the distributable Windows EasyCull executable with PyInstaller."""
+"""Build the distributable Windows EasyLoupe executable with PyInstaller."""
 
 from __future__ import annotations
 
@@ -20,8 +20,8 @@ APP_NAME = utils.APP_NAME
 EXIFTOOL_VERSION = utils.EXIFTOOL_VERSION
 REPO_ROOT = utils.REPO_ROOT
 ENTRYPOINT = utils.ENTRYPOINT
-ICON_SOURCE = REPO_ROOT / 'easy_cull' / 'ui' / 'assets' / 'EasyCull.png'
-ICON_PATH = REPO_ROOT / 'easy_cull' / 'ui' / 'assets' / 'EasyCull.ico'
+ICON_SOURCE = REPO_ROOT / 'easy_loupe' / 'ui' / 'assets' / 'EasyLoupe.png'
+ICON_PATH = REPO_ROOT / 'easy_loupe' / 'ui' / 'assets' / 'EasyLoupe.ico'
 APP_DIR = REPO_ROOT / 'dist' / APP_NAME
 APP_PATH = REPO_ROOT / 'dist' / APP_NAME / f'{APP_NAME}.exe'
 ONEFILE_PATH = REPO_ROOT / 'dist' / f'{APP_NAME}.exe'
@@ -29,7 +29,7 @@ EXIFTOOL_CACHE_DIR = utils.EXIFTOOL_CACHE_DIR
 EXIFTOOL_STAGE_DIR = REPO_ROOT / 'build' / 'exiftool' / 'windows'
 EXIFTOOL_STAGE_EXE = EXIFTOOL_STAGE_DIR / 'exiftool.exe'
 EXIFTOOL_STAGE_FILES = EXIFTOOL_STAGE_DIR / 'exiftool_files'
-EXIFTOOL_BUNDLE_DIR = 'easy_cull/vendor/exiftool/windows'
+EXIFTOOL_BUNDLE_DIR = 'easy_loupe/vendor/exiftool/windows'
 EXIFTOOL_WINDOWS_URL = (
     'https://sourceforge.net/projects/exiftool/files/'
     f'exiftool-{EXIFTOOL_VERSION}_64.zip/download'
@@ -40,14 +40,14 @@ EXIFTOOL_WINDOWS_ARCHIVE = (
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Build the Windows EasyCull executable or print diagnostics."""
+    """Build the Windows EasyLoupe executable or print diagnostics."""
     parser = argparse.ArgumentParser(
-        description='Build dist/EasyCull/EasyCull.exe with PyInstaller.'
+        description='Build dist/EasyLoupe/EasyLoupe.exe with PyInstaller.'
     )
     parser.add_argument(
         '--onefile',
         action='store_true',
-        help='build a single EasyCull.exe instead of a one-folder app',
+        help='build a single EasyLoupe.exe instead of a one-folder app',
     )
     parser.add_argument(
         '--no-clean',
@@ -221,7 +221,7 @@ def _print_exiftool_diagnostic() -> None:
     exiftool_path = (
         APP_DIR
         / '_internal'
-        / 'easy_cull'
+        / 'easy_loupe'
         / 'vendor'
         / 'exiftool'
         / 'windows'

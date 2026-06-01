@@ -10,8 +10,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
-import easy_cull.core.preview as core_preview_module
-from easy_cull.core.photo_library import PhotoLibrary
+import easy_loupe.core.preview as core_preview_module
+from easy_loupe.core.photo_library import PhotoLibrary
 from tests.core._helpers import (
     assert_color_close,
     create_jpeg,
@@ -154,7 +154,7 @@ def test_raw_viewer_preview_prefers_embedded_thumbnail_and_falls_back_when_missi
             'imread': staticmethod(lambda _path: FakeRaw()),
         },
     )()
-    monkeypatch.setattr('easy_cull.core.preview.rawpy', fake_rawpy)
+    monkeypatch.setattr('easy_loupe.core.preview.rawpy', fake_rawpy)
 
     preview_paths = {
         kind: library.get_preview_path(Path(raw_name).stem, kind)
@@ -289,7 +289,7 @@ def test_photo_library_falls_back_to_temp_cache_dir_when_default_is_not_writable
 
     cache_dir = core_preview_module.make_cache_dir(None)
 
-    assert cache_dir == temp_root / 'easy-cull'
+    assert cache_dir == temp_root / 'easy-loupe'
     assert cache_dir.is_dir()
 
 
@@ -321,7 +321,7 @@ def test_photo_library_falls_back_to_temp_cache_dir_when_existing_default_is_unw
     cache_dir = core_preview_module.make_cache_dir(None)
 
     assert writable_checks == [blocked_cache_dir]
-    assert cache_dir == temp_root / 'easy-cull'
+    assert cache_dir == temp_root / 'easy-loupe'
     assert cache_dir.is_dir()
 
 
@@ -363,9 +363,9 @@ def test_default_cache_dir_prefers_library_directory_when_available(
     cache_dir = core_preview_module._default_cache_dir()
 
     expected = (
-        fake_home / 'Library' / 'Caches' / 'easy-cull'
+        fake_home / 'Library' / 'Caches' / 'easy-loupe'
         if has_library_dir
-        else fake_home / '.cache' / 'easy-cull'
+        else fake_home / '.cache' / 'easy-loupe'
     )
     assert cache_dir == expected
 
@@ -374,7 +374,7 @@ def test_raw_preview_requires_rawpy_when_missing(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     library = load_raw_only_library(tmp_path, monkeypatch, 'IMG_7320.CR3')
-    monkeypatch.setattr('easy_cull.core.preview.rawpy', None)
+    monkeypatch.setattr('easy_loupe.core.preview.rawpy', None)
 
     with pytest.raises(RuntimeError, match='rawpy is required'):
         library.get_preview_path('IMG_7320', 'viewer')
@@ -431,7 +431,7 @@ def test_raw_thumbnail_extraction_handles_non_jpeg_bitmap_format(
             'imread': staticmethod(lambda _path: FakeRaw()),
         },
     )()
-    monkeypatch.setattr('easy_cull.core.preview.rawpy', fake_rawpy)
+    monkeypatch.setattr('easy_loupe.core.preview.rawpy', fake_rawpy)
 
     preview_path = library.get_preview_path('IMG_9030', 'viewer')
 

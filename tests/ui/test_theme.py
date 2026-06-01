@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-import easy_cull.ui.theme as theme_module
+import easy_loupe.ui.theme as theme_module
 from tests.ui._helpers import make_photo_record
 
 

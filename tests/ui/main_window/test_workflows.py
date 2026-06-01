@@ -9,15 +9,15 @@ from PySide6.QtCore import QItemSelectionModel, QPoint, Qt, QThread
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
-import easy_cull.ui.main_window.build as build_module
-import easy_cull.ui.main_window.window as main_window_module
-import easy_cull.ui.main_window.workflows as workflows_module
-import easy_cull.ui.theme as theme_module
-from easy_cull.core.records import METADATA_FILENAME
-from easy_cull.operations.common import OperationSummary, UndoPlan
-from easy_cull.operations.export import OrganizeFilesOptions
-from easy_cull.operations.xmp import WriteXmpOptions
-from easy_cull.ui.main_window.dialogs import OrganizerDialogResult
+import easy_loupe.ui.main_window.build as build_module
+import easy_loupe.ui.main_window.window as main_window_module
+import easy_loupe.ui.main_window.workflows as workflows_module
+import easy_loupe.ui.theme as theme_module
+from easy_loupe.core.records import METADATA_FILENAME
+from easy_loupe.operations.common import OperationSummary, UndoPlan
+from easy_loupe.operations.export import OrganizeFilesOptions
+from easy_loupe.operations.xmp import WriteXmpOptions
+from easy_loupe.ui.main_window.dialogs import OrganizerDialogResult
 from tests.ui._helpers import (
     assert_choose_folder_idle,
     create_jpeg,

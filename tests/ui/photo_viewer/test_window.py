@@ -5,11 +5,11 @@ from typing import TYPE_CHECKING
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-import easy_cull.ui.photo_viewer.window as photo_viewer_window_module
-from easy_cull.core.photo_library import PhotoLibrary
-from easy_cull.ui.launch import CullingLaunchRequest
-from easy_cull.ui.photo_viewer.window import PhotoViewerWindow
-from easy_cull.ui.photo_viewer.workers import PhotoViewerExifResult
+import easy_loupe.ui.photo_viewer.window as photo_viewer_window_module
+from easy_loupe.core.photo_library import PhotoLibrary
+from easy_loupe.ui.launch import CullingLaunchRequest
+from easy_loupe.ui.photo_viewer.window import PhotoViewerWindow
+from easy_loupe.ui.photo_viewer.workers import PhotoViewerExifResult
 from tests.ui._helpers import create_jpeg, stub_read_exif
 
 if TYPE_CHECKING:
@@ -92,17 +92,17 @@ def test_photo_viewer_window_opens_file_and_navigates_adjacent_photos(
     _app, window = _open_viewer(tmp_path, monkeypatch)
 
     assert window.current_photo_id == 'B'
-    assert window.windowTitle() == 'EasyCull - B.JPG (2 / 3)'
+    assert window.windowTitle() == 'EasyLoupe - B.JPG (2 / 3)'
 
     window.navigate(1)
 
     assert window.current_photo_id == 'C'
-    assert window.windowTitle() == 'EasyCull - C.JPG (3 / 3)'
+    assert window.windowTitle() == 'EasyLoupe - C.JPG (3 / 3)'
 
     window.navigate(-1)
 
     assert window.current_photo_id == 'B'
-    assert window.windowTitle() == 'EasyCull - B.JPG (2 / 3)'
+    assert window.windowTitle() == 'EasyLoupe - B.JPG (2 / 3)'
     window.close()
 
 
@@ -140,7 +140,7 @@ def test_photo_viewer_navigation_preview_failure_preserves_current_photo(
     window.navigate(1)
 
     assert window.current_photo_id == 'B'
-    assert window.windowTitle() == 'EasyCull - B.JPG (2 / 3)'
+    assert window.windowTitle() == 'EasyLoupe - B.JPG (2 / 3)'
     assert messages == ['Failed to open photo: corrupt preview']
     window.close()
 

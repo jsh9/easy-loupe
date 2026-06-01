@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 
-import easy_cull.ui.viewers.shell as shell_module
+import easy_loupe.ui.viewers.shell as shell_module
 
 if TYPE_CHECKING:
     from collections.abc import Callable

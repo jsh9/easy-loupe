@@ -3,7 +3,7 @@ build-backend = "setuptools.build_meta"
 requires = ["setuptools>=68.0"]
 
 [project]
-name = "easy-cull"
+name = "easy-loupe"
 version = "1.0.0"
 dependencies = [
   "PySide6>=6.8.0",
@@ -32,10 +32,10 @@ dev = [
 testpaths = ["tests"]
 
 [tool.setuptools.package-data]
-"easy_cull.ui.assets" = ["*.icns", "*.ico", "*.png", "*.svg"]
+"easy_loupe.ui.assets" = ["*.icns", "*.ico", "*.png", "*.svg"]
 
 [tool.setuptools.packages.find]
-include = ["easy_cull*"]
+include = ["easy_loupe*"]
 
 [tool.ty.analysis]
 replace-imports-with-any = ["PySide6.**", "imagehash", "rawpy"]
@@ -45,4 +45,4 @@ python = ".venv"
 python-version = "3.12"
 
 [tool.ty.src]
-include = ["easy_cull"]
+include = ["easy_loupe"]
