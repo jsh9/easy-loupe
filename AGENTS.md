@@ -2,8 +2,8 @@
 
 ## 1. Purpose
 
-This repository is a local desktop photo culling app for JPEG and RAW folders.
-It is organized around a small set of top-level packages:
+This repository is a local desktop photo culling app for JPEG, HEIC/HEIF, and
+RAW folders. It is organized around a small set of top-level packages:
 
 - `easy_cull/core/`: non-UI application logic for the photo library, records,
   EXIF, metadata, previews, and scene detection.
@@ -134,8 +134,19 @@ Notes:
   - `ui/app.py` owns application startup orchestration. `StartupCoordinator`
     resolves argv, queued macOS `FileOpen`, and live system-open events before
     asking `WindowManager` to create windows.
+  - `ui/photo_viewer/` owns the lightweight direct-file-open photo viewer,
+    background folder hydration, neighbor navigation, EXIF/focus loading, and
+    culling-window handoff.
+  - `ui/folder_access.py` owns macOS protected-folder and cloud-storage access
+    prompts used by photo-viewer startup before scanning neighboring files.
+  - `ui/launch.py` defines `CullingLaunchRequest`, the handoff payload used
+    when a photo-viewer window opens the full culling workspace.
   - The UI is split primarily across `ui/main_window/`, `ui/viewers/`,
-    `ui/widgets.py`, `ui/theme.py`, `ui/workers.py`, and `ui/app.py`.
+    `ui/photo_viewer/`, `ui/widgets.py`, `ui/theme.py`, `ui/workers.py`, and
+    `ui/app.py`.
+  - `ui/viewers/shell.py` contains shared viewer-window scaffolding such as
+    zoom/pan shortcut wiring, progress/transient overlays, and screen
+    resolution helpers for same-monitor handoff.
   - `ui/identity.py` owns the user-facing app name, packaged icon lookup, Qt
     app identity, and best-effort macOS process/app-switcher identity hooks.
   - `ui/assets/` contains packaged EasyCull icon assets used by Qt and the
@@ -146,7 +157,12 @@ Notes:
     `navigation.py`, and `presentation.py`.
   - `MainWindow` remains the central stateful UI controller.
 - `easy_cull/ui/viewers/`
-  - Contains `PhotoViewer`, `MainPhotoViewer`, and `ExifOverlayWidget`.
+  - Contains `PhotoViewer`, `MainPhotoViewer`, shared viewer shell helpers, and
+    `ExifOverlayWidget`.
+- `easy_cull/ui/photo_viewer/`
+  - Contains `PhotoViewerWindow` and worker code for file-open photo viewer
+    mode. It is intentionally separate from `MainWindow`; handoff into culling
+    mode goes through `CullingLaunchRequest` and `WindowManager`.
 - `easy_cull/analysis/`
   - Contains the concrete `scenes.py` scene-detection implementation plus
     placeholder `quality.py` and `faces.py` modules for future work.
@@ -242,6 +258,7 @@ product contract and the tests/docs are updated accordingly.
 
 - `PySide6` powers the desktop UI.
 - `Pillow` handles image loading/transforms.
+- `pillow-heif` registers HEIC/HEIF image support for Pillow.
 - `rawpy` is required to render RAW previews.
 - `imagehash` is required for scene detection.
 - `exiftool` is used opportunistically via `subprocess.run(...)` after path
@@ -260,6 +277,8 @@ Important:
   during metadata reads.
 - If `rawpy` or `imagehash` is unavailable and the corresponding feature path
   is exercised, the library raises a runtime error.
+- If `pillow-heif` is unavailable, HEIC/HEIF preview rendering raises a runtime
+  error instead of silently producing an invalid preview.
 
 ## 7. Preview And Cache Behavior
 
@@ -737,6 +756,23 @@ Additional assignment-menu behavior:
   - verify the platform artifact shape: macOS ships `dist/EasyCull.app`, while
     Windows default distribution ships the whole `dist\EasyCull\` folder unless
     `--onefile` is used
+  - verify macOS photo document type registration and protected-folder privacy
+    strings when changing direct-file-open behavior
+- If you change photo-viewer startup or handoff behavior:
+  - test argv, live system-open events, and queued macOS `FileOpen` events
+  - verify multiple opened photos create independent photo-viewer windows
+  - verify `G` and `Enter` wait for folder hydration when needed, then open
+    culling mode for the current photo
+  - verify photo-viewer-to-culling handoff opens the culling window on the same
+    monitor as the photo-viewer window
+  - verify worker signals are routed back to the GUI thread before UI state is
+    rebuilt
+- If you change macOS folder-access behavior:
+  - test protected-folder roots, File Provider roots under
+    `~/Library/CloudStorage`, chooser fallback, denied access, and remembered
+    approved roots
+  - keep real TCC/File Provider access separate from the app's own
+    intent-tracking `QSettings` entries
 - If you change scene detection:
   - test grouping behavior, not just helper functions
   - preserve ordering assumptions based on capture time

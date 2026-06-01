@@ -72,6 +72,12 @@ python -m easy_cull
 Launch the desktop app and use the native folder picker to choose a photo
 folder.
 
+You can also open a supported photo file directly from Finder, Explorer, or an
+argv path. EasyCull starts in a lightweight photo-viewer window for that file,
+loads neighboring photos from the same folder in the background when folder
+access is available, and can enter the full culling workspace with `G` or
+`Enter`.
+
 ## 2. Build App Binary
 
 EasyCull uses PyInstaller for native app bundles. Build on the target operating
@@ -187,6 +193,8 @@ build keeps a terminal attached so startup errors include a normal traceback.
 ## 3. Features
 
 - Opens folders through the native desktop folder picker.
+- Opens individual photo files directly into a lightweight photo-viewer mode
+  with adjacent-folder navigation and handoff into the full culling workspace.
 - Groups JPEG, HEIC/HEIF, and multiple camera RAW formats by shared filename
   stem.
 - Shows view mode, browse mode, and compare mode: view mode uses the vertical
@@ -222,6 +230,10 @@ build keeps a terminal attached so startup errors include a normal traceback.
 
 ## 4. Modes and Transitions
 
+- `Photo viewer mode` opens when a supported photo file is launched directly.
+  It shows the opened photo first, supports neighboring-photo navigation after
+  background folder hydration, and uses `G` or `Enter` to hand off to culling
+  mode on the same monitor.
 - `View mode` is the normal working mode. It shows the left thumbnail strip,
   the main viewer, and the horizontal scene strip when scene detection is
   available for the current photo.
@@ -242,6 +254,8 @@ build keeps a terminal attached so startup errors include a normal traceback.
 
 Common transitions:
 
+- Press `G` or `Enter` in photo viewer mode to enter the full culling workspace
+  for the current folder and photo.
 - Press `G` to enter browse mode from normal view mode.
 - Press `C` to enter compare mode for the current selection when at least two
   photos are selected.
