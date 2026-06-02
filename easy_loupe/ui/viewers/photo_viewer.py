@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPointF, QSize, Qt, Signal
@@ -49,7 +50,15 @@ if TYPE_CHECKING:
     from PySide6.QtGui import QResizeEvent
 
 
-class PhotoViewer(QGraphicsView):
+@dataclass(frozen=True, slots=True)
+class ManualView:
+    """Remembered manual zoom state for a photo."""
+
+    zoom_factor: float
+    center: tuple[float, float] | None
+
+
+class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
     """Photo viewing widget with fit, zoom, pan, and region tracking."""
 
     visible_region_changed = Signal()
@@ -58,7 +67,9 @@ class PhotoViewer(QGraphicsView):
             self,
             parent: QWidget | None = None,
             *,
-            manual_views: dict[str, tuple[float, tuple[float, float]]]
+            manual_views: dict[
+                str, ManualView | tuple[float, tuple[float, float]]
+            ]
             | None = None,
             hold_zoom_enabled: bool = False,
     ) -> None:
@@ -286,7 +297,9 @@ class PhotoViewer(QGraphicsView):
             self.restore_or_focus_manual_view()
             return
 
-        self._store_manual_view()
+        self._store_manual_view(
+            use_focus_center=self._manual_view_uses_focus_center()
+        )
         self.set_fit_view()
 
     def zoom_step(self, multiplier: float) -> None:
@@ -301,14 +314,18 @@ class PhotoViewer(QGraphicsView):
             min(self._max_scale(), self._current_scale * multiplier),
         )
         if next_scale <= self._fit_scale + 0.001:
-            self._store_manual_view()
+            self._store_manual_view(
+                use_focus_center=self._manual_view_uses_focus_center()
+            )
             self.set_fit_view()
             return
 
         self._mode = 'manual'
         self._current_scale = next_scale
         self._apply_transform()
-        self._store_manual_view()
+        self._store_manual_view(
+            use_focus_center=self._manual_view_uses_focus_center()
+        )
 
     def pan_by(self, dx: float, dy: float) -> None:
         """Pan the manual-zoom viewport by the given image-space delta."""
@@ -351,14 +368,43 @@ class PhotoViewer(QGraphicsView):
             focus_center[1] * self._image_size.height(),
         )
         self._apply_transform()
-        self._store_manual_view()
+        self._store_manual_view(use_focus_center=True)
+
+    def recenter_manual_view(self) -> None:
+        """Snap the active manual view to the focus point without rescaling."""
+        if not self.should_preserve_zoom():
+            return
+
+        self._hold_zoom_active = False
+        self._actual_size_zoom_active = False
+        self._mode = 'manual'
+        focus_center = self._focus_center()
+        self._current_scale = min(
+            self._max_scale(),
+            max(
+                self._minimum_scale_for_center(focus_center),
+                self._current_scale,
+            ),
+        )
+        self._center_point = QPointF(
+            focus_center[0] * self._image_size.width(),
+            focus_center[1] * self._image_size.height(),
+        )
+        self._apply_transform()
+        self._store_manual_view(use_focus_center=True)
+
+    def reset_manual_view_centers(self) -> None:
+        """Make all remembered manual views use their photo focus centers."""
+        for image_key, manual_view in list(self._manual_views.items()):
+            zoom_factor, _center = self._manual_view_parts(manual_view)
+            self._manual_views[image_key] = ManualView(zoom_factor, None)
+
+        if self.should_preserve_zoom():
+            self.recenter_manual_view()
 
     def zoom_to_focus_point(self) -> None:
         """Zoom explicitly to the photo's autofocus point."""
-        self.zoom_to_normalized_center((
-            self._focus_point.x(),
-            self._focus_point.y(),
-        ))
+        self.zoom_to_normalized_center(self._focus_center())
 
     def toggle_actual_size_zoom(self) -> None:
         """Toggle between fit view and 100% zoom at the focus point."""
@@ -375,13 +421,12 @@ class PhotoViewer(QGraphicsView):
         # "fit 100% -> 100% inspection -> fit 100%", even though users will not
         # see a visual scale change in that case.
         if self._mode == 'fit':
-            self.zoom_to_actual_size((
-                self._focus_point.x(),
-                self._focus_point.y(),
-            ))
+            self.zoom_to_actual_size(self._focus_center())
             return
 
-        self._store_manual_view()
+        self._store_manual_view(
+            use_focus_center=self._manual_view_uses_focus_center()
+        )
         self.set_fit_view()
 
     def zoom_to_actual_size(self, center: tuple[float, float]) -> None:
@@ -479,6 +524,27 @@ class PhotoViewer(QGraphicsView):
             return None
 
         return (self.current_zoom_factor(), center)
+
+    def current_manual_view_for_handoff(self) -> ManualView | None:
+        """Return manual zoom state, preserving AF-centered intent."""
+        if (
+            self._hold_zoom_active
+            or self._actual_size_zoom_active
+            or not self.should_preserve_zoom()
+        ):
+            return None
+
+        if self._current_image_key is not None:
+            manual_view = self._manual_views.get(self._current_image_key)
+            if manual_view is not None:
+                zoom_factor, center = self._manual_view_parts(manual_view)
+                return ManualView(zoom_factor, center)
+
+        center = self.normalized_viewport_center()
+        if center is None:
+            return None
+
+        return ManualView(self.current_zoom_factor(), center)
 
     def current_zoom_factor(self) -> float:
         """Return the zoom level relative to fit-to-window scale."""
@@ -618,7 +684,7 @@ class PhotoViewer(QGraphicsView):
 
         super().mouseReleaseEvent(event)
 
-    def _store_manual_view(self) -> None:
+    def _store_manual_view(self, *, use_focus_center: bool = False) -> None:
         if (
             self._actual_size_zoom_active
             or self._current_image_key is None
@@ -626,11 +692,13 @@ class PhotoViewer(QGraphicsView):
         ):
             return
 
-        center = self.normalized_viewport_center()
-        if center is None:
+        center = (
+            None if use_focus_center else self.normalized_viewport_center()
+        )
+        if center is None and not use_focus_center:
             return
 
-        self._manual_views[self._current_image_key] = (
+        self._manual_views[self._current_image_key] = ManualView(
             self.current_zoom_factor(),
             center,
         )
@@ -643,7 +711,10 @@ class PhotoViewer(QGraphicsView):
         if manual_view is None:
             return False
 
-        zoom_factor, center = manual_view
+        zoom_factor, center = self._manual_view_parts(manual_view)
+        if center is None:
+            center = self._focus_center()
+
         self._fit_scale = self._compute_fit_scale()
         self._mode = 'manual'
         self._current_scale = min(
@@ -656,6 +727,29 @@ class PhotoViewer(QGraphicsView):
         )
         self._apply_transform_unclamped()
         return True
+
+    @staticmethod
+    def _manual_view_parts(
+            manual_view: ManualView | tuple[float, tuple[float, float]],
+    ) -> tuple[float, tuple[float, float] | None]:
+        if isinstance(manual_view, ManualView):
+            return manual_view.zoom_factor, manual_view.center
+
+        return manual_view
+
+    def _focus_center(self) -> tuple[float, float]:
+        return (self._focus_point.x(), self._focus_point.y())
+
+    def _manual_view_uses_focus_center(self) -> bool:
+        if self._current_image_key is None:
+            return False
+
+        manual_view = self._manual_views.get(self._current_image_key)
+        if manual_view is None:
+            return False
+
+        _zoom_factor, center = self._manual_view_parts(manual_view)
+        return center is None
 
     def _position_focus_point_marker(self) -> None:
         if self._image_size.isEmpty():

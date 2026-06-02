@@ -724,6 +724,12 @@ class MainWindowBuildMixin:
         self.show_af_point_shortcut = self._make_shortcut(
             'F', self._toggle_show_af_point
         )
+        self.recenter_zoom_shortcut = self._make_shortcut(
+            'Shift+F', self._handle_recenter_zoom_shortcut
+        )
+        self.reset_zoom_centers_shortcut = self._make_shortcut(
+            'Ctrl+Shift+F', self._handle_reset_zoom_centers_shortcut
+        )
         self.info_overlay_shortcut = self._make_shortcut(
             'I', self._toggle_info_overlay
         )
@@ -794,6 +800,12 @@ class MainWindowBuildMixin:
         self.compare_mode_shortcut.setEnabled(
             not self._compare_mode and bool(self.library.photos)
         )
+        self.recenter_zoom_shortcut.setEnabled(
+            normal_view_shortcuts_enabled and bool(self.library.photos)
+        )
+        self.reset_zoom_centers_shortcut.setEnabled(
+            normal_view_shortcuts_enabled and bool(self.library.photos)
+        )
         self.info_overlay_shortcut.setEnabled(bool(self.library.photos))
         self.exit_compare_shortcut.setEnabled(
             self._compare_mode or self.transient_message_overlay.isVisible()
@@ -841,6 +853,18 @@ class MainWindowBuildMixin:
             return
 
         self.viewer.toggle_split_view()
+
+    def _handle_recenter_zoom_shortcut(self: MainWindow) -> None:
+        if self._browse_mode or self._compare_mode:
+            return
+
+        self.viewer.recenter_manual_view()
+
+    def _handle_reset_zoom_centers_shortcut(self: MainWindow) -> None:
+        if self._browse_mode or self._compare_mode:
+            return
+
+        self.viewer.reset_manual_view_centers()
 
     def _handle_escape_shortcut(self: MainWindow) -> None:
         if self.transient_message_overlay.isVisible():

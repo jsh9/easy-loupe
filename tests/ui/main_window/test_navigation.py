@@ -170,6 +170,10 @@ def test_main_window_uses_viewer_preview_for_central_image() -> None:
                 'normalized_viewport_center should not be called when zoom is not preserved'
             )
 
+        @staticmethod
+        def current_manual_view_for_handoff() -> None:
+            return None
+
         def set_photo(
                 self,
                 image_path: Path,

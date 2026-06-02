@@ -393,6 +393,101 @@ def test_photo_viewer_remembered_manual_zoom_precedes_af_point_zoom(
     viewer.close()
 
 
+def test_photo_viewer_recenter_manual_view_preserves_zoom_scale(
+        tmp_path: Path,
+) -> None:
+    create_jpeg(tmp_path / 'IMG_7014.JPG', 'white')
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(320, 240)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_photo(tmp_path / 'IMG_7014.JPG', (0.65, 0.35))
+    viewer.toggle_focus_zoom()
+    viewer.zoom_step(1.25)
+    viewer.pan_by(-40, 30)
+    scale_before = viewer._current_scale
+
+    viewer.recenter_manual_view()
+
+    assert viewer._current_scale == pytest.approx(scale_before)
+    assert viewer.normalized_viewport_center() == pytest.approx((0.65, 0.35))
+
+    viewer.close()
+
+
+def test_photo_viewer_pan_after_recenter_restores_explicit_center(
+        tmp_path: Path,
+) -> None:
+    create_jpeg(tmp_path / 'IMG_7015.JPG', 'white')
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(320, 240)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_photo(tmp_path / 'IMG_7015.JPG', (0.65, 0.35))
+    viewer.toggle_focus_zoom()
+    viewer.recenter_manual_view()
+    viewer.pan_by(-40, 30)
+    expected_center = viewer.normalized_viewport_center()
+
+    viewer.set_fit_view()
+    viewer.toggle_focus_zoom()
+
+    assert expected_center is not None
+    assert viewer.normalized_viewport_center() == pytest.approx(
+        expected_center
+    )
+    assert viewer.normalized_viewport_center() != pytest.approx((0.65, 0.35))
+
+    viewer.close()
+
+
+def test_photo_viewer_reset_manual_centers_preserves_zoom_scale(
+        tmp_path: Path,
+) -> None:
+    create_jpeg(tmp_path / 'IMG_7016.JPG', 'white')
+    create_jpeg(tmp_path / 'IMG_7017.JPG', 'blue')
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(320, 240)
+    viewer.show()
+    app.processEvents()
+
+    first_path = tmp_path / 'IMG_7016.JPG'
+    second_path = tmp_path / 'IMG_7017.JPG'
+    viewer.set_photo(first_path, (0.25, 0.75))
+    viewer.toggle_focus_zoom()
+    viewer.zoom_step(1.25)
+    viewer.pan_by(40, -30)
+    first_zoom = viewer.current_zoom_factor()
+
+    viewer.set_photo(second_path, (0.65, 0.35))
+    viewer.toggle_focus_zoom()
+    viewer.zoom_step(1.25)
+    viewer.pan_by(-30, 35)
+    second_zoom = viewer.current_zoom_factor()
+
+    viewer.reset_manual_view_centers()
+
+    assert viewer.current_zoom_factor() == pytest.approx(second_zoom)
+    assert viewer.normalized_viewport_center() == pytest.approx((0.65, 0.35))
+
+    viewer.set_fit_view()
+    viewer.set_photo(first_path, (0.25, 0.75))
+    viewer.toggle_focus_zoom()
+
+    assert viewer.current_zoom_factor() == pytest.approx(first_zoom)
+    assert viewer.normalized_viewport_center() == pytest.approx((0.25, 0.75))
+
+    viewer.close()
+
+
 def test_photo_viewer_hold_zoom_temporarily_zooms_pans_and_restores_fit(
         tmp_path: Path,
 ) -> None:
@@ -596,7 +691,7 @@ def test_photo_viewer_manual_drag_pans_and_stores_view(
     # Verify that the manual view was saved automatically
     saved_view = viewer._manual_views.get(str(image_path))
     assert saved_view is not None
-    assert saved_view[1] == pytest.approx(center_after)
+    assert saved_view.center == pytest.approx(center_after)
 
     QTest.mouseRelease(
         viewer.viewport(),

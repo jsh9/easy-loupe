@@ -463,4 +463,106 @@ def test_viewer_zoom_and_pan_shortcuts_change_scale_and_center(
     center_after = window.viewer.normalized_viewport_center()
     assert center_after[1] < center_before[1]
 
+
+def test_main_window_recenter_zoom_shortcut_targets_single_manual_view(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_8500', 'dimgray')],
+    )
+    window.library.get_photo('IMG_8500').focus_point = (0.65, 0.35)
+    window._display_current_photo()
+
+    window.viewer.toggle_focus_zoom()
+    window.viewer.zoom_step(1.25)
+    window.viewer.pan_by(-40, 30)
+    scale_before = window.viewer._current_scale
+
+    window.recenter_zoom_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.viewer._mode == 'single-manual'
+    assert window.viewer._current_scale == pytest.approx(scale_before)
+    assert window.viewer.normalized_viewport_center() == pytest.approx((
+        0.65,
+        0.35,
+    ))
+
+    window.close()
+
+
+def test_main_window_recenter_zoom_shortcut_targets_split_zoom_pane(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_8501', 'dimgray')],
+    )
+    window.library.get_photo('IMG_8501').focus_point = (0.65, 0.35)
+    window._display_current_photo()
+    window.split_mode_shortcut.activated.emit()
+    app.processEvents()
+
+    window.viewer.zoom_step(1.25)
+    window.viewer.pan_by(-40, 30)
+    scale_before = window.viewer.split_zoom_viewer.current_zoom_factor()
+
+    window.recenter_zoom_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.viewer.is_split_view() is True
+    assert window.viewer.split_fit_viewer.should_preserve_zoom() is False
+    assert window.viewer.split_zoom_viewer.current_zoom_factor() == (
+        pytest.approx(scale_before)
+    )
+    assert window.viewer.normalized_viewport_center() == pytest.approx((
+        0.65,
+        0.35,
+    ))
+
+    window.close()
+
+
+def test_main_window_reset_zoom_centers_shortcut_uses_next_photo_focus_point(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_8502', 'dimgray'), ('IMG_8503', 'blue')],
+    )
+    window.library.get_photo('IMG_8502').focus_point = (0.35, 0.65)
+    window.library.get_photo('IMG_8503').focus_point = (0.65, 0.35)
+    window._display_current_photo()
+
+    window.viewer.toggle_focus_zoom()
+    window.viewer.zoom_step(1.25)
+    window.viewer.pan_by(40, -30)
+    zoom_factor = window.viewer._current_scale
+
+    window.reset_zoom_centers_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.viewer._current_scale == pytest.approx(zoom_factor)
+    assert window.viewer.normalized_viewport_center() == pytest.approx((
+        0.35,
+        0.65,
+    ))
+
+    window.thumbnail_list.setCurrentRow(1)
+    app.processEvents()
+
+    assert window.current_photo_id == 'IMG_8503'
+    assert window.viewer._mode == 'single-manual'
+    assert window.viewer._current_scale == pytest.approx(zoom_factor)
+    assert window.viewer.normalized_viewport_center() == pytest.approx((
+        0.65,
+        0.35,
+    ))
+
+    window.close()
+
     window.close()

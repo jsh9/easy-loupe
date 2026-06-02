@@ -12,7 +12,7 @@ from easy_loupe.ui.theme import (
     THEMES,
     ThemePalette,
 )
-from easy_loupe.ui.viewers.photo_viewer import PhotoViewer
+from easy_loupe.ui.viewers.photo_viewer import ManualView, PhotoViewer
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -25,7 +25,9 @@ class MainPhotoViewer(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._manual_views: dict[str, tuple[float, tuple[float, float]]] = {}
+        self._manual_views: dict[
+            str, ManualView | tuple[float, tuple[float, float]]
+        ] = {}
         self._current_image_path: Path | None = None
         self._current_focus_point = (0.5, 0.5)
         self._current_focus_point_pending = False
@@ -144,6 +146,10 @@ class MainPhotoViewer(QWidget):
         """Return the active zoom viewer's normalized visible rectangle."""
         return self._active_zoom_viewer().visible_region_rect()
 
+    def current_manual_view_for_handoff(self) -> ManualView | None:
+        """Return active manual zoom state for photo-to-photo carryover."""
+        return self._active_zoom_viewer().current_manual_view_for_handoff()
+
     def set_focus_point_marker_visible(self, *, enabled: bool) -> None:
         """Set whether manual zoom panes show the autofocus point marker."""
         self._focus_point_marker_enabled = enabled
@@ -251,13 +257,32 @@ class MainPhotoViewer(QWidget):
         self._sync_mode()
 
     def apply_manual_view(
-            self, zoom_factor: float, center: tuple[float, float]
+            self, zoom_factor: float, center: tuple[float, float] | None
     ) -> None:
         """Apply a manual zoom factor and center to the active zoom pane."""
+        use_focus_center = center is None
+        if center is None:
+            center = self._current_focus_point
+
         self._active_zoom_viewer().zoom_to_normalized_center(
             center, zoom_factor=zoom_factor
         )
+        if use_focus_center:
+            self._active_zoom_viewer().recenter_manual_view()
+
         self._sync_mode()
+
+    def recenter_manual_view(self) -> None:
+        """Recenter the active manual zoom pane on the photo focus point."""
+        self._active_zoom_viewer().recenter_manual_view()
+        self._sync_mode()
+        self.visible_region_changed.emit()
+
+    def reset_manual_view_centers(self) -> None:
+        """Reset remembered centers while preserving zoom levels."""
+        self._active_zoom_viewer().reset_manual_view_centers()
+        self._sync_mode()
+        self.visible_region_changed.emit()
 
     def _active_zoom_viewer(self) -> PhotoViewer:
         return (
