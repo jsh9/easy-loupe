@@ -47,6 +47,7 @@ from easy_loupe.ui.viewers.shell import (
     build_progress_overlay,
     build_transient_message_overlay,
     build_viewer_shortcuts,
+    confirm_reset_zoom_centers,
     exif_overlay_geometry_ready,
     make_window_shortcut,
     update_exif_overlay_geometry,
@@ -307,7 +308,7 @@ class PhotoViewerWindow(QMainWindow):
             'Shift+F', self.viewer.recenter_manual_view
         )
         self.reset_zoom_centers_shortcut = self._make_shortcut(
-            'Ctrl+Shift+F', self.viewer.reset_manual_view_centers
+            'Ctrl+Shift+F', self._handle_reset_zoom_centers_shortcut
         )
         self.info_overlay_shortcut = self._make_shortcut(
             'I', self._toggle_info_overlay
@@ -363,6 +364,12 @@ class PhotoViewerWindow(QMainWindow):
         self.viewer.set_focus_point_marker_visible(
             enabled=self._show_af_point_marker
         )
+
+    def _handle_reset_zoom_centers_shortcut(self) -> None:
+        if not confirm_reset_zoom_centers(self):
+            return
+
+        self.viewer.reset_manual_view_centers()
 
     def open_file(self, file_path: object) -> None:
         """Open a photo file into the lightweight viewer state."""

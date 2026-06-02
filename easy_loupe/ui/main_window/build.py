@@ -51,6 +51,7 @@ from easy_loupe.ui.viewers.shell import (
     build_progress_overlay,
     build_transient_message_overlay,
     build_viewer_shortcuts,
+    confirm_reset_zoom_centers,
     exif_overlay_geometry_ready,
     make_window_shortcut,
     update_exif_overlay_geometry,
@@ -862,6 +863,9 @@ class MainWindowBuildMixin:
 
     def _handle_reset_zoom_centers_shortcut(self: MainWindow) -> None:
         if self._browse_mode or self._compare_mode:
+            return
+
+        if not confirm_reset_zoom_centers(self):
             return
 
         self.viewer.reset_manual_view_centers()

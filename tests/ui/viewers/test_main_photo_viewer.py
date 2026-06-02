@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 import pytest
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QMessageBox
 
 from easy_loupe.ui.main_window.build import VIEWER_KEYBOARD_PAN_STEP
 from tests.ui._helpers import (
@@ -467,6 +468,12 @@ def test_viewer_zoom_and_pan_shortcuts_change_scale_and_center(
 def test_main_window_recenter_zoom_shortcut_targets_single_manual_view(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """
+    Verify Shift+F toggles only the active single-pane view.
+
+    The old remembered pan center must be one shortcut press away after the
+    AF/default snap, otherwise Shift+F becomes a one-way recenter.
+    """
     _, app, window = create_main_window_with_library(
         tmp_path,
         monkeypatch,
@@ -479,6 +486,7 @@ def test_main_window_recenter_zoom_shortcut_targets_single_manual_view(
     window.viewer.zoom_step(1.25)
     window.viewer.pan_by(-40, 30)
     scale_before = window.viewer._current_scale
+    remembered_center = window.viewer.normalized_viewport_center()
 
     window.recenter_zoom_shortcut.activated.emit()
     app.processEvents()
@@ -490,12 +498,26 @@ def test_main_window_recenter_zoom_shortcut_targets_single_manual_view(
         0.35,
     ))
 
+    window.recenter_zoom_shortcut.activated.emit()
+    app.processEvents()
+
+    assert remembered_center is not None
+    assert window.viewer.normalized_viewport_center() == pytest.approx(
+        remembered_center
+    )
+
     window.close()
 
 
 def test_main_window_recenter_zoom_shortcut_targets_split_zoom_pane(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """
+    Verify Shift+F toggles only the right split zoom pane.
+
+    Split-to-single promotion must preserve the pre-existing remembered center
+    after toggling back from a temporary AF/default recenter.
+    """
     _, app, window = create_main_window_with_library(
         tmp_path,
         monkeypatch,
@@ -509,6 +531,7 @@ def test_main_window_recenter_zoom_shortcut_targets_split_zoom_pane(
     window.viewer.zoom_step(1.25)
     window.viewer.pan_by(-40, 30)
     scale_before = window.viewer.split_zoom_viewer.current_zoom_factor()
+    remembered_center = window.viewer.normalized_viewport_center()
 
     window.recenter_zoom_shortcut.activated.emit()
     app.processEvents()
@@ -523,12 +546,82 @@ def test_main_window_recenter_zoom_shortcut_targets_split_zoom_pane(
         0.35,
     ))
 
+    window.recenter_zoom_shortcut.activated.emit()
+    app.processEvents()
+
+    assert remembered_center is not None
+    assert window.viewer.normalized_viewport_center() == pytest.approx(
+        remembered_center
+    )
+
+    window.split_mode_shortcut.activated.emit()
+    window.split_mode_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.viewer.is_split_view() is True
+    assert window.viewer.normalized_viewport_center() == pytest.approx(
+        remembered_center
+    )
+
+    window.close()
+
+
+def test_main_window_recenter_zoom_shortcut_does_not_change_navigation_handoff(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify Shift+F does not alter photo-to-photo zoom carryover.
+
+    Navigation reads handoff state from the viewer, so this guards against the
+    visible AF/default center leaking into the next photo after a temporary
+    recenter.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_8504', 'dimgray'), ('IMG_8505', 'blue')],
+    )
+    window.library.get_photo('IMG_8504').focus_point = (0.35, 0.65)
+    window.library.get_photo('IMG_8505').focus_point = (0.65, 0.35)
+    window._display_current_photo()
+
+    window.viewer.toggle_focus_zoom()
+    window.viewer.zoom_step(1.25)
+    window.viewer.pan_by(40, -30)
+    zoom_factor = window.viewer._current_scale
+    remembered_center = window.viewer.normalized_viewport_center()
+
+    window.recenter_zoom_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.viewer.normalized_viewport_center() == pytest.approx((
+        0.35,
+        0.65,
+    ))
+
+    window.thumbnail_list.setCurrentRow(1)
+    app.processEvents()
+
+    assert remembered_center is not None
+    assert window.current_photo_id == 'IMG_8505'
+    assert window.viewer._mode == 'single-manual'
+    assert window.viewer._current_scale == pytest.approx(zoom_factor)
+    assert window.viewer.normalized_viewport_center() == pytest.approx(
+        remembered_center
+    )
+
     window.close()
 
 
 def test_main_window_reset_zoom_centers_shortcut_uses_next_photo_focus_point(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """
+    Verify Ctrl+Shift+F resets remembered centers for navigation.
+
+    Unlike Shift+F, reset-all is persistent, so the next zoomed photo should
+    use its own AF/default center while keeping the carried zoom scale.
+    """
     _, app, window = create_main_window_with_library(
         tmp_path,
         monkeypatch,
@@ -542,10 +635,47 @@ def test_main_window_reset_zoom_centers_shortcut_uses_next_photo_focus_point(
     window.viewer.zoom_step(1.25)
     window.viewer.pan_by(40, -30)
     zoom_factor = window.viewer._current_scale
+    remembered_center = window.viewer.normalized_viewport_center()
+
+    question_results = [QMessageBox.No, QMessageBox.Yes]
+    question_calls: list[tuple[str, str, object]] = []
+
+    def confirm_reset(
+            _parent: object,
+            title: str,
+            text: str,
+            buttons: object,
+            default_button: object,
+    ) -> object:
+        question_calls.append((title, text, default_button))
+        assert buttons == QMessageBox.Yes | QMessageBox.No
+        return question_results.pop(0)
+
+    monkeypatch.setattr(QMessageBox, 'question', confirm_reset)
 
     window.reset_zoom_centers_shortcut.activated.emit()
     app.processEvents()
 
+    assert remembered_center is not None
+    assert window.viewer.normalized_viewport_center() == pytest.approx(
+        remembered_center
+    )
+
+    window.reset_zoom_centers_shortcut.activated.emit()
+    app.processEvents()
+
+    assert question_calls == [
+        (
+            'Reset Zoom Centers',
+            'Reset all remembered zoom centers to AF points or image centers?',
+            QMessageBox.No,
+        ),
+        (
+            'Reset Zoom Centers',
+            'Reset all remembered zoom centers to AF points or image centers?',
+            QMessageBox.No,
+        ),
+    ]
     assert window.viewer._current_scale == pytest.approx(zoom_factor)
     assert window.viewer.normalized_viewport_center() == pytest.approx((
         0.35,
@@ -562,7 +692,5 @@ def test_main_window_reset_zoom_centers_shortcut_uses_next_photo_focus_point(
         0.65,
         0.35,
     ))
-
-    window.close()
 
     window.close()

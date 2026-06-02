@@ -393,9 +393,15 @@ def test_photo_viewer_remembered_manual_zoom_precedes_af_point_zoom(
     viewer.close()
 
 
-def test_photo_viewer_recenter_manual_view_preserves_zoom_scale(
+def test_photo_viewer_toggle_recenter_current_view_preserves_zoom_scale(
         tmp_path: Path,
 ) -> None:
+    """
+    Verify the view-only recenter toggle keeps the active zoom level.
+
+    This protects Shift+F as a fast inspection aid: it should move the center
+    between AF/default and remembered pan without changing magnification.
+    """
     create_jpeg(tmp_path / 'IMG_7014.JPG', 'white')
 
     app = QApplication.instance() or QApplication([])
@@ -409,18 +415,33 @@ def test_photo_viewer_recenter_manual_view_preserves_zoom_scale(
     viewer.zoom_step(1.25)
     viewer.pan_by(-40, 30)
     scale_before = viewer._current_scale
+    remembered_center = viewer.normalized_viewport_center()
 
-    viewer.recenter_manual_view()
+    viewer.toggle_recenter_current_view()
 
     assert viewer._current_scale == pytest.approx(scale_before)
     assert viewer.normalized_viewport_center() == pytest.approx((0.65, 0.35))
 
+    viewer.toggle_recenter_current_view()
+
+    assert remembered_center is not None
+    assert viewer._current_scale == pytest.approx(scale_before)
+    assert viewer.normalized_viewport_center() == pytest.approx(
+        remembered_center
+    )
+
     viewer.close()
 
 
-def test_photo_viewer_pan_after_recenter_restores_explicit_center(
+def test_photo_viewer_recenter_toggle_does_not_replace_memory(
         tmp_path: Path,
 ) -> None:
+    """
+    Verify the recenter toggle does not overwrite remembered pan state.
+
+    Shift+F temporarily snaps the current viewport to AF/default. Returning to
+    the same photo should still restore the pre-existing manual center.
+    """
     create_jpeg(tmp_path / 'IMG_7015.JPG', 'white')
 
     app = QApplication.instance() or QApplication([])
@@ -431,7 +452,71 @@ def test_photo_viewer_pan_after_recenter_restores_explicit_center(
 
     viewer.set_photo(tmp_path / 'IMG_7015.JPG', (0.65, 0.35))
     viewer.toggle_focus_zoom()
-    viewer.recenter_manual_view()
+    viewer.pan_by(-40, 30)
+    expected_center = viewer.normalized_viewport_center()
+
+    viewer.toggle_recenter_current_view()
+    assert viewer.normalized_viewport_center() == pytest.approx((0.65, 0.35))
+
+    viewer.set_fit_view()
+    viewer.toggle_focus_zoom()
+
+    assert expected_center is not None
+    assert viewer.normalized_viewport_center() == pytest.approx(
+        expected_center
+    )
+
+    viewer.close()
+
+
+def test_photo_viewer_recenter_toggle_without_custom_center_is_safe(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify toggling back with no custom center is a safe no-op.
+
+    A photo may only have AF/default memory. In that case a second Shift+F
+    should not crash or invent a remembered custom center.
+    """
+    create_jpeg(tmp_path / 'IMG_7019.JPG', 'white')
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(320, 240)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_photo(tmp_path / 'IMG_7019.JPG', (0.65, 0.35))
+    viewer.toggle_focus_zoom()
+
+    viewer.toggle_recenter_current_view()
+    viewer.toggle_recenter_current_view()
+
+    assert viewer.normalized_viewport_center() == pytest.approx((0.65, 0.35))
+
+    viewer.close()
+
+
+def test_photo_viewer_pan_after_recenter_toggle_updates_memory(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify panning after the view-only recenter stores a new center.
+
+    This protects the handoff from becoming sticky: Shift+F is temporary until
+    the user pans, at which point the new inspected area is intentional.
+    """
+    create_jpeg(tmp_path / 'IMG_7018.JPG', 'white')
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(320, 240)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_photo(tmp_path / 'IMG_7018.JPG', (0.65, 0.35))
+    viewer.toggle_focus_zoom()
+    viewer.toggle_recenter_current_view()
     viewer.pan_by(-40, 30)
     expected_center = viewer.normalized_viewport_center()
 
@@ -450,6 +535,12 @@ def test_photo_viewer_pan_after_recenter_restores_explicit_center(
 def test_photo_viewer_reset_manual_centers_preserves_zoom_scale(
         tmp_path: Path,
 ) -> None:
+    """
+    Verify reset-all clears remembered centers but keeps zoom levels.
+
+    Ctrl+Shift+F is the persistent memory reset, so previously panned photos
+    should return to AF/default without losing their magnification.
+    """
     create_jpeg(tmp_path / 'IMG_7016.JPG', 'white')
     create_jpeg(tmp_path / 'IMG_7017.JPG', 'blue')
 

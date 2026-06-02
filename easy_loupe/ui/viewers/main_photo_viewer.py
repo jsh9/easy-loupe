@@ -196,7 +196,11 @@ class MainPhotoViewer(QWidget):
             return
 
         if self.is_split_view():
-            manual_view = self.split_zoom_viewer.current_manual_view()
+            # What: promote the right pane's remembered/carryover state.
+            # Why: a temporary Shift+F recenter should not become stored state.
+            manual_view = (
+                self.split_zoom_viewer.current_manual_view_for_handoff()
+            )
             self._layout.setCurrentWidget(self.single_viewer)
             self.single_viewer.set_photo(
                 self._current_image_path,
@@ -205,7 +209,9 @@ class MainPhotoViewer(QWidget):
                 preserve_zoom=False,
             )
             if manual_view is not None:
-                self.single_viewer.set_manual_view(*manual_view)
+                self.apply_manual_view(
+                    manual_view.zoom_factor, manual_view.center
+                )
 
             self._sync_mode()
             self.visible_region_changed.emit()
@@ -221,7 +227,11 @@ class MainPhotoViewer(QWidget):
             return
 
         if self.is_split_view():
-            manual_view = self.split_zoom_viewer.current_manual_view()
+            # What: carry handoff-aware manual state back to single pane.
+            # Why: split toggles should not persist a view-only recenter.
+            manual_view = (
+                self.split_zoom_viewer.current_manual_view_for_handoff()
+            )
             self._layout.setCurrentWidget(self.single_viewer)
             self.single_viewer.set_photo(
                 self._current_image_path,
@@ -230,7 +240,9 @@ class MainPhotoViewer(QWidget):
                 preserve_zoom=False,
             )
             if manual_view is not None:
-                self.single_viewer.set_manual_view(*manual_view)
+                self.apply_manual_view(
+                    manual_view.zoom_factor, manual_view.center
+                )
 
             self._sync_mode()
             self.visible_region_changed.emit()
@@ -273,8 +285,8 @@ class MainPhotoViewer(QWidget):
         self._sync_mode()
 
     def recenter_manual_view(self) -> None:
-        """Recenter the active manual zoom pane on the photo focus point."""
-        self._active_zoom_viewer().recenter_manual_view()
+        """Toggle the active manual pane between stored and focus centers."""
+        self._active_zoom_viewer().toggle_recenter_current_view()
         self._sync_mode()
         self.visible_region_changed.emit()
 
