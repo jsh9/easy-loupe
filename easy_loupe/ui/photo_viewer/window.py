@@ -472,12 +472,12 @@ class PhotoViewerWindow(QMainWindow):
         if self.viewer.is_split_view():
             return ViewerInspectionState(
                 split=True,
-                manual_view=self.viewer.current_manual_view_for_handoff(),
+                manual_view=self.viewer.current_manual_view(),
             )
 
         return ViewerInspectionState(
             split=False,
-            manual_view=self.viewer.current_manual_view_for_handoff(),
+            manual_view=self.viewer.current_manual_view(),
         )
 
     def _display_current_photo(

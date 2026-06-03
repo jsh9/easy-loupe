@@ -392,7 +392,7 @@ class MainWindowNavigationMixin:
             # center or the AF/default-center sentinel. Passing only
             # coordinates would lose reset-center intent and can leak
             # temporary recenter scale into normal navigation.
-            manual_view = self.viewer.current_manual_view_for_handoff()
+            manual_view = self.viewer.current_manual_view()
 
         self.viewer.set_photo(
             image_path,

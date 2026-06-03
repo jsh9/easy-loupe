@@ -150,9 +150,9 @@ class MainPhotoViewer(QWidget):
         """Return the active zoom viewer's normalized visible rectangle."""
         return self._active_zoom_viewer().visible_region_rect()
 
-    def current_manual_view_for_handoff(self) -> ManualView | None:
+    def current_manual_view(self) -> ManualView | None:
         """Return active manual zoom state for photo-to-photo carryover."""
-        return self._active_zoom_viewer().current_manual_view_for_handoff()
+        return self._active_zoom_viewer().current_manual_view()
 
     def set_focus_point_marker_visible(self, *, enabled: bool) -> None:
         """Set whether manual zoom panes show the autofocus point marker."""
@@ -202,9 +202,7 @@ class MainPhotoViewer(QWidget):
         if self.is_split_view():
             # Promote the right pane's remembered view without turning a
             # temporary Shift+F recenter into stored state.
-            manual_view = (
-                self.split_zoom_viewer.current_manual_view_for_handoff()
-            )
+            manual_view = self.split_zoom_viewer.current_manual_view()
             self._layout.setCurrentWidget(self.single_viewer)
             self.single_viewer.set_photo(
                 self._current_image_path,
@@ -233,9 +231,7 @@ class MainPhotoViewer(QWidget):
         if self.is_split_view():
             # Carry the right pane back to single-pane mode while keeping
             # view-only recentering out of persistent manual-view memory.
-            manual_view = (
-                self.split_zoom_viewer.current_manual_view_for_handoff()
-            )
+            manual_view = self.split_zoom_viewer.current_manual_view()
             self._layout.setCurrentWidget(self.single_viewer)
             self.single_viewer.set_photo(
                 self._current_image_path,

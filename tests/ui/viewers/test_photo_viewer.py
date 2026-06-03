@@ -358,8 +358,12 @@ def test_photo_viewer_actual_size_zoom_does_not_replace_manual_view(
 
     assert restored_manual_view is not None
     assert remembered_manual_view is not None
-    assert restored_manual_view[0] == pytest.approx(remembered_manual_view[0])
-    assert restored_manual_view[1] == pytest.approx(remembered_manual_view[1])
+    assert restored_manual_view.zoom_factor == pytest.approx(
+        remembered_manual_view.zoom_factor
+    )
+    assert restored_manual_view.center == pytest.approx(
+        remembered_manual_view.center
+    )
 
     viewer.close()
 
@@ -469,6 +473,101 @@ def test_photo_viewer_recenter_toggle_does_not_replace_memory(
     viewer.close()
 
 
+def test_photo_viewer_edge_recenter_does_not_persist_transient_scale(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify edge AF recentering does not replace remembered zoom.
+
+    Centering an edge focus point can require a much larger live scale than the
+    user's remembered manual view. Returning to fit and back should restore the
+    remembered zoom and pan, not the temporary edge-corrected scale.
+    """
+    create_jpeg(tmp_path / 'IMG_7020.JPG', 'white', size=(2400, 1600))
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(1200, 800)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_photo(tmp_path / 'IMG_7020.JPG', (0.5, 0.5))
+    viewer.set_manual_view(1.25, (0.5, 0.5))
+    viewer.pan_by(24, 0)
+    remembered_view = viewer.current_manual_view()
+
+    viewer.set_focus_point((0.02, 0.5))
+    viewer.toggle_recenter_current_view()
+
+    assert remembered_view is not None
+    assert viewer.current_zoom_factor() > remembered_view.zoom_factor
+    assert viewer.normalized_viewport_center() != pytest.approx(
+        remembered_view.center
+    )
+
+    viewer.toggle_focus_zoom()
+    viewer.toggle_focus_zoom()
+
+    restored_view = viewer.current_manual_view()
+
+    assert restored_view is not None
+    assert restored_view.zoom_factor == pytest.approx(
+        remembered_view.zoom_factor
+    )
+    assert restored_view.center == pytest.approx(remembered_view.center)
+    assert viewer.current_zoom_factor() == pytest.approx(
+        remembered_view.zoom_factor
+    )
+    assert viewer.normalized_viewport_center() == pytest.approx(
+        remembered_view.center
+    )
+
+    viewer.close()
+
+
+def test_photo_viewer_edge_recenter_toggle_restores_original_zoom(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify toggling back from an edge AF snap restores the whole manual view.
+
+    Shift+F may need extra live zoom to center an edge AF point, but a second
+    Shift+F should return to the user's original zoom level and center.
+    """
+    create_jpeg(tmp_path / 'IMG_7024.JPG', 'white', size=(2400, 1600))
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(1200, 800)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_photo(tmp_path / 'IMG_7024.JPG', (0.5, 0.5))
+    viewer.set_manual_view(1.25, (0.5, 0.5))
+    viewer.pan_by(24, 0)
+    remembered_view = viewer.current_manual_view()
+
+    viewer.set_focus_point((0.02, 0.5))
+    viewer.toggle_recenter_current_view()
+
+    assert remembered_view is not None
+    assert viewer.current_zoom_factor() > remembered_view.zoom_factor
+    assert viewer.normalized_viewport_center() != pytest.approx(
+        remembered_view.center
+    )
+
+    viewer.toggle_recenter_current_view()
+
+    assert viewer.current_zoom_factor() == pytest.approx(
+        remembered_view.zoom_factor
+    )
+    assert viewer.normalized_viewport_center() == pytest.approx(
+        remembered_view.center
+    )
+
+    viewer.close()
+
+
 def test_photo_viewer_recenter_toggle_without_custom_center_is_safe(
         tmp_path: Path,
 ) -> None:
@@ -493,6 +592,133 @@ def test_photo_viewer_recenter_toggle_without_custom_center_is_safe(
     viewer.toggle_recenter_current_view()
 
     assert viewer.normalized_viewport_center() == pytest.approx((0.65, 0.35))
+
+    viewer.close()
+
+
+def test_photo_viewer_pending_focus_reset_center_survives_focus_update(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify late AF metadata preserves reset-center zoom memory.
+
+    Ctrl+Shift+F stores ``center=None`` to mean "use this photo's AF/default
+    center". When the real AF point arrives later, the zoom factor should stay
+    remembered and the sentinel should resolve to the new AF point.
+    """
+    image_path = tmp_path / 'IMG_7021.JPG'
+    create_jpeg(image_path, 'white', size=(2400, 1600))
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(1200, 800)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_photo(image_path, (0.5, 0.5), focus_point_pending=True)
+    viewer.toggle_focus_zoom()
+    viewer.zoom_step(2.0)
+    expected_zoom = viewer.current_zoom_factor()
+
+    viewer.reset_manual_view_centers()
+    viewer.set_focus_point((0.2, 0.8))
+
+    stored_view = viewer._manual_views.get(str(image_path))
+
+    assert expected_zoom == pytest.approx(4.0)
+    assert stored_view is not None
+    assert stored_view.zoom_factor == pytest.approx(expected_zoom)
+    assert stored_view.center is None
+
+    viewer.set_fit_view()
+    viewer.toggle_focus_zoom()
+
+    assert viewer.current_zoom_factor() == pytest.approx(expected_zoom)
+    assert viewer.normalized_viewport_center() == pytest.approx((0.2, 0.8))
+
+    viewer.close()
+
+
+def test_photo_viewer_pending_focus_concrete_center_is_cleared_on_focus_update(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify concrete fallback centers do not survive late AF metadata.
+
+    If the user panned while focus was still pending, that center was based on
+    fallback coordinates. Once the real AF point arrives, restoring should use
+    the new AF point rather than the stale fallback-centered pan.
+    """
+    image_path = tmp_path / 'IMG_7022.JPG'
+    create_jpeg(image_path, 'white', size=(2400, 1600))
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(1200, 800)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_photo(image_path, (0.5, 0.5), focus_point_pending=True)
+    viewer.toggle_focus_zoom()
+    viewer.zoom_step(2.0)
+    viewer.pan_by(120, -80)
+    stale_center = viewer.normalized_viewport_center()
+
+    assert viewer._manual_views.get(str(image_path)) is not None
+
+    viewer.set_focus_point((0.2, 0.8))
+
+    assert viewer._manual_views.get(str(image_path)) is None
+
+    viewer.set_fit_view()
+    viewer.toggle_focus_zoom()
+
+    assert stale_center is not None
+    assert viewer.normalized_viewport_center() == pytest.approx((0.2, 0.8))
+    assert viewer.normalized_viewport_center() != pytest.approx(stale_center)
+
+    viewer.close()
+
+
+def test_photo_viewer_transient_recenter_survives_resize_without_storing(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify resize keeps a temporary recenter visible without saving it.
+
+    A geometry change during Shift+F should not snap back to the remembered
+    custom center, and it should not replace the stored manual view.
+    """
+    image_path = tmp_path / 'IMG_7023.JPG'
+    create_jpeg(image_path, 'white', size=(2400, 1600))
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(1200, 800)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_photo(image_path, (0.7, 0.3))
+    viewer.toggle_focus_zoom()
+    viewer.pan_by(200, 100)
+    expected_zoom = viewer.current_zoom_factor()
+    stored_views = dict(viewer._manual_views)
+
+    viewer.toggle_recenter_current_view()
+    viewer.resize(1000, 800)
+    app.processEvents()
+
+    assert viewer.normalized_viewport_center() == pytest.approx((0.7, 0.3))
+    assert viewer._manual_views == stored_views
+
+    viewer.toggle_recenter_current_view()
+
+    stored_view = stored_views[str(image_path)]
+    assert viewer.current_zoom_factor() == pytest.approx(expected_zoom)
+    assert viewer.normalized_viewport_center() == pytest.approx(
+        stored_view.center
+    )
+    assert viewer._manual_views == stored_views
 
     viewer.close()
 
@@ -685,8 +911,12 @@ def test_photo_viewer_hold_zoom_does_not_change_remembered_manual_zoom(
 
     assert restored_manual_view is not None
     assert remembered_manual_view is not None
-    assert restored_manual_view[0] == pytest.approx(remembered_manual_view[0])
-    assert restored_manual_view[1] == pytest.approx(remembered_manual_view[1])
+    assert restored_manual_view.zoom_factor == pytest.approx(
+        remembered_manual_view.zoom_factor
+    )
+    assert restored_manual_view.center == pytest.approx(
+        remembered_manual_view.center
+    )
 
     viewer.close()
 

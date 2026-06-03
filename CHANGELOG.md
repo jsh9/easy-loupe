@@ -3,6 +3,7 @@
 ## [1.0.2] - 2026-06-03
 
 - Added
+
   - `Shift+F` now temporarily recenters the active manual zoom view on the
     photo's AF point or image center, and pressing it again restores the
     remembered manual center when one exists

@@ -171,7 +171,7 @@ def test_main_window_uses_viewer_preview_for_central_image() -> None:
             )
 
         @staticmethod
-        def current_manual_view_for_handoff() -> None:
+        def current_manual_view() -> None:
             return None
 
         def set_photo(
