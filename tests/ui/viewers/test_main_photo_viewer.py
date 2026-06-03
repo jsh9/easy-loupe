@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 import pytest
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QMessageBox
 
 from easy_loupe.ui.main_window.build import VIEWER_KEYBOARD_PAN_STEP
 from tests.ui._helpers import (
@@ -462,5 +463,346 @@ def test_viewer_zoom_and_pan_shortcuts_change_scale_and_center(
     app.processEvents()
     center_after = window.viewer.normalized_viewport_center()
     assert center_after[1] < center_before[1]
+
+
+def test_main_window_recenter_zoom_shortcut_targets_single_manual_view(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify Shift+F toggles only the active single-pane view.
+
+    The old remembered pan center must be one shortcut press away after the
+    AF/default snap, otherwise Shift+F becomes a one-way recenter.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_8500', 'dimgray')],
+    )
+    window.library.get_photo('IMG_8500').focus_point = (0.65, 0.35)
+    window._display_current_photo()
+
+    window.viewer.toggle_focus_zoom()
+    window.viewer.zoom_step(1.25)
+    window.viewer.pan_by(-40, 30)
+    scale_before = window.viewer._current_scale
+    remembered_center = window.viewer.normalized_viewport_center()
+
+    window.recenter_zoom_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.viewer._mode == 'single-manual'
+    assert window.viewer._current_scale == pytest.approx(scale_before)
+    assert window.viewer.normalized_viewport_center() == pytest.approx((
+        0.65,
+        0.35,
+    ))
+
+    window.recenter_zoom_shortcut.activated.emit()
+    app.processEvents()
+
+    assert remembered_center is not None
+    assert window.viewer.normalized_viewport_center() == pytest.approx(
+        remembered_center
+    )
+
+    window.close()
+
+
+def test_main_window_recenter_zoom_shortcut_targets_split_zoom_pane(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify Shift+F toggles only the right split zoom pane.
+
+    Split-to-single promotion must preserve the pre-existing remembered center
+    after toggling back from a temporary AF/default recenter.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_8501', 'dimgray')],
+    )
+    window.library.get_photo('IMG_8501').focus_point = (0.65, 0.35)
+    window._display_current_photo()
+    window.split_mode_shortcut.activated.emit()
+    app.processEvents()
+
+    window.viewer.zoom_step(1.25)
+    window.viewer.pan_by(-40, 30)
+    scale_before = window.viewer.split_zoom_viewer.current_zoom_factor()
+    remembered_center = window.viewer.normalized_viewport_center()
+
+    window.recenter_zoom_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.viewer.is_split_view() is True
+    assert window.viewer.split_fit_viewer.should_preserve_zoom() is False
+    assert window.viewer.split_zoom_viewer.current_zoom_factor() == (
+        pytest.approx(scale_before)
+    )
+    assert window.viewer.normalized_viewport_center() == pytest.approx((
+        0.65,
+        0.35,
+    ))
+
+    window.recenter_zoom_shortcut.activated.emit()
+    app.processEvents()
+
+    assert remembered_center is not None
+    assert window.viewer.normalized_viewport_center() == pytest.approx(
+        remembered_center
+    )
+
+    window.split_mode_shortcut.activated.emit()
+    window.split_mode_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.viewer.is_split_view() is True
+    assert window.viewer.normalized_viewport_center() == pytest.approx(
+        remembered_center
+    )
+
+    window.close()
+
+
+def test_main_window_recenter_zoom_shortcut_does_not_change_navigation_handoff(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify Shift+F does not alter photo-to-photo zoom carryover.
+
+    Navigation reads handoff state from the viewer, so this guards against the
+    visible AF/default center leaking into the next photo after a temporary
+    recenter.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_8504', 'dimgray'), ('IMG_8505', 'blue')],
+    )
+    window.library.get_photo('IMG_8504').focus_point = (0.35, 0.65)
+    window.library.get_photo('IMG_8505').focus_point = (0.65, 0.35)
+    window._display_current_photo()
+
+    window.viewer.toggle_focus_zoom()
+    window.viewer.zoom_step(1.25)
+    window.viewer.pan_by(40, -30)
+    zoom_factor = window.viewer._current_scale
+    remembered_center = window.viewer.normalized_viewport_center()
+
+    window.recenter_zoom_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.viewer.normalized_viewport_center() == pytest.approx((
+        0.35,
+        0.65,
+    ))
+
+    window.thumbnail_list.setCurrentRow(1)
+    app.processEvents()
+
+    assert remembered_center is not None
+    assert window.current_photo_id == 'IMG_8505'
+    assert window.viewer._mode == 'single-manual'
+    assert window.viewer._current_scale == pytest.approx(zoom_factor)
+    assert window.viewer.normalized_viewport_center() == pytest.approx(
+        remembered_center
+    )
+
+    window.close()
+
+
+def test_main_window_reset_zoom_centers_shortcut_uses_next_photo_focus_point(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify Ctrl+Shift+F resets remembered centers for navigation.
+
+    Unlike Shift+F, reset-all is persistent, so the next zoomed photo should
+    use its own AF/default center while keeping the carried zoom scale.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_8502', 'dimgray'), ('IMG_8503', 'blue')],
+    )
+    window.library.get_photo('IMG_8502').focus_point = (0.35, 0.65)
+    window.library.get_photo('IMG_8503').focus_point = (0.65, 0.35)
+    window._display_current_photo()
+
+    window.viewer.toggle_focus_zoom()
+    window.viewer.zoom_step(1.25)
+    window.viewer.pan_by(40, -30)
+    zoom_factor = window.viewer._current_scale
+    remembered_center = window.viewer.normalized_viewport_center()
+
+    question_results = [QMessageBox.No, QMessageBox.Yes]
+    question_calls: list[tuple[str, str, object]] = []
+
+    def confirm_reset(
+            _parent: object,
+            title: str,
+            text: str,
+            buttons: object,
+            default_button: object,
+    ) -> object:
+        question_calls.append((title, text, default_button))
+        assert buttons == QMessageBox.Yes | QMessageBox.No
+        return question_results.pop(0)
+
+    monkeypatch.setattr(QMessageBox, 'question', confirm_reset)
+
+    window.reset_zoom_centers_shortcut.activated.emit()
+    app.processEvents()
+
+    assert remembered_center is not None
+    assert window.viewer.normalized_viewport_center() == pytest.approx(
+        remembered_center
+    )
+
+    window.reset_zoom_centers_shortcut.activated.emit()
+    app.processEvents()
+
+    assert question_calls == [
+        (
+            'Reset Zoom Centers',
+            'Reset all remembered zoom centers to AF points or image centers?',
+            QMessageBox.No,
+        ),
+        (
+            'Reset Zoom Centers',
+            'Reset all remembered zoom centers to AF points or image centers?',
+            QMessageBox.No,
+        ),
+    ]
+    assert window.viewer._current_scale == pytest.approx(zoom_factor)
+    assert window.viewer.normalized_viewport_center() == pytest.approx((
+        0.35,
+        0.65,
+    ))
+
+    window.thumbnail_list.setCurrentRow(1)
+    app.processEvents()
+
+    assert window.current_photo_id == 'IMG_8503'
+    assert window.viewer._mode == 'single-manual'
+    assert window.viewer._current_scale == pytest.approx(zoom_factor)
+    assert window.viewer.normalized_viewport_center() == pytest.approx((
+        0.65,
+        0.35,
+    ))
+
+    window.close()
+
+
+def test_main_window_reset_zoom_centers_survives_multiple_photo_hops(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify AF/default-center memory remains a sentinel across navigation.
+
+    A reset center should not become photo B's concrete focus coordinates when
+    the user continues from B to C.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_8506', 'dimgray'),
+            ('IMG_8507', 'blue'),
+            ('IMG_8508', 'green'),
+        ],
+    )
+    window.library.get_photo('IMG_8506').focus_point = (0.35, 0.65)
+    window.library.get_photo('IMG_8507').focus_point = (0.65, 0.35)
+    window.library.get_photo('IMG_8508').focus_point = (0.20, 0.80)
+    window._display_current_photo()
+
+    window.viewer.toggle_focus_zoom()
+    window.viewer.zoom_step(2.0)
+    window.viewer.pan_by(40, -30)
+
+    monkeypatch.setattr(
+        QMessageBox,
+        'question',
+        lambda *_args, **_kwargs: QMessageBox.Yes,
+    )
+    window.reset_zoom_centers_shortcut.activated.emit()
+    app.processEvents()
+    expected_zoom = window.viewer._current_scale
+
+    assert window.viewer.normalized_viewport_center() == pytest.approx((
+        0.35,
+        0.65,
+    ))
+
+    window.thumbnail_list.setCurrentRow(1)
+    app.processEvents()
+
+    assert window.current_photo_id == 'IMG_8507'
+    assert window.viewer._current_scale == pytest.approx(expected_zoom)
+    assert window.viewer.normalized_viewport_center() == pytest.approx((
+        0.65,
+        0.35,
+    ))
+
+    window.thumbnail_list.setCurrentRow(2)
+    app.processEvents()
+
+    assert window.current_photo_id == 'IMG_8508'
+    assert window.viewer._current_scale == pytest.approx(expected_zoom)
+    assert window.viewer.normalized_viewport_center() == pytest.approx((
+        0.20,
+        0.80,
+    ))
+
+    window.close()
+
+
+def test_main_window_shift_recenter_edge_scale_does_not_leak_to_next_photo(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify temporary edge recenter scale is not used for navigation handoff.
+
+    Centering an edge AF point can require a larger live scale than the
+    remembered custom view. The next photo should receive the remembered view,
+    not that transient edge-corrected scale.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_8509', 'dimgray'), ('IMG_8510', 'blue')],
+    )
+    window.library.get_photo('IMG_8509').focus_point = (0.5, 0.5)
+    window.library.get_photo('IMG_8510').focus_point = (0.65, 0.35)
+    window._display_current_photo()
+
+    window.viewer.apply_manual_view(1.25, (0.5, 0.5))
+    window.viewer.pan_by(24, 0)
+    expected_zoom = window.viewer._current_scale
+    expected_center = window.viewer.normalized_viewport_center()
+
+    window.library.get_photo('IMG_8509').focus_point = (0.02, 0.5)
+    window.viewer.set_focus_point((0.02, 0.5))
+    window.recenter_zoom_shortcut.activated.emit()
+    app.processEvents()
+
+    assert expected_center is not None
+    assert window.viewer._current_scale > expected_zoom
+    assert window.viewer.normalized_viewport_center() != pytest.approx(
+        expected_center
+    )
+
+    window.thumbnail_list.setCurrentRow(1)
+    app.processEvents()
+
+    assert window.current_photo_id == 'IMG_8510'
+    assert window.viewer._mode == 'single-manual'
+    assert window.viewer._current_scale == pytest.approx(expected_zoom)
+    assert window.viewer.normalized_viewport_center() == pytest.approx(
+        expected_center
+    )
 
     window.close()

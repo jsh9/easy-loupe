@@ -170,20 +170,26 @@ def test_main_window_uses_viewer_preview_for_central_image() -> None:
                 'normalized_viewport_center should not be called when zoom is not preserved'
             )
 
+        @staticmethod
+        def current_manual_view() -> None:
+            return None
+
         def set_photo(
                 self,
                 image_path: Path,
                 focus_point: tuple[float, float],
                 *,
                 focus_point_pending: bool,
-                preserve_zoom: bool,
-                preserved_center: tuple[float, float] | None,
+                preserve_zoom: bool = False,
+                preserved_center: tuple[float, float] | None = None,
+                handoff_manual_view: object | None = None,
         ) -> None:
             self.image_path = image_path
             self.focus_point = focus_point
             self.focus_point_pending = focus_point_pending
             self.preserve_zoom = preserve_zoom
             self.preserved_center = preserved_center
+            self.handoff_manual_view = handoff_manual_view
 
         @staticmethod
         def clear_photo() -> Never:
@@ -209,6 +215,7 @@ def test_main_window_uses_viewer_preview_for_central_image() -> None:
     assert fake_window.viewer.focus_point_pending is False
     assert fake_window.viewer.preserve_zoom is False
     assert fake_window.viewer.preserved_center is None
+    assert fake_window.viewer.handoff_manual_view is None
 
 
 def test_main_window_browse_mode_toggles_grid_and_space_behavior(

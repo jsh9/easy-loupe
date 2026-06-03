@@ -47,6 +47,7 @@ from easy_loupe.ui.viewers.shell import (
     build_progress_overlay,
     build_transient_message_overlay,
     build_viewer_shortcuts,
+    confirm_reset_zoom_centers,
     exif_overlay_geometry_ready,
     make_window_shortcut,
     update_exif_overlay_geometry,
@@ -55,6 +56,8 @@ from easy_loupe.ui.widgets import ThumbnailPreviewWidget
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from easy_loupe.ui.viewers.photo_viewer import ManualView
 
 PERCENT_COMPLETE = 100
 EXTENDED_PROGRESS_MAX = 200
@@ -94,7 +97,7 @@ class ViewerInspectionState:
     """Photo-viewer inspection state to carry across photo loads."""
 
     split: bool
-    manual_view: tuple[float, tuple[float, float]] | None
+    manual_view: ManualView | None
 
 
 class FolderHydrationSignalBridge(QObject):
@@ -301,6 +304,12 @@ class PhotoViewerWindow(QMainWindow):
         self.show_af_point_shortcut = self._make_shortcut(
             'F', self._toggle_show_af_point
         )
+        self.recenter_zoom_shortcut = self._make_shortcut(
+            'Shift+F', self.viewer.recenter_manual_view
+        )
+        self.reset_zoom_centers_shortcut = self._make_shortcut(
+            'Ctrl+Shift+F', self._handle_reset_zoom_centers_shortcut
+        )
         self.info_overlay_shortcut = self._make_shortcut(
             'I', self._toggle_info_overlay
         )
@@ -355,6 +364,12 @@ class PhotoViewerWindow(QMainWindow):
         self.viewer.set_focus_point_marker_visible(
             enabled=self._show_af_point_marker
         )
+
+    def _handle_reset_zoom_centers_shortcut(self) -> None:
+        if not confirm_reset_zoom_centers(self):
+            return
+
+        self.viewer.reset_manual_view_centers()
 
     def open_file(self, file_path: object) -> None:
         """Open a photo file into the lightweight viewer state."""
@@ -457,12 +472,12 @@ class PhotoViewerWindow(QMainWindow):
         if self.viewer.is_split_view():
             return ViewerInspectionState(
                 split=True,
-                manual_view=self.viewer.split_zoom_viewer.current_manual_view(),
+                manual_view=self.viewer.current_manual_view(),
             )
 
         return ViewerInspectionState(
             split=False,
-            manual_view=self.viewer.single_viewer.current_manual_view(),
+            manual_view=self.viewer.current_manual_view(),
         )
 
     def _display_current_photo(
@@ -500,7 +515,9 @@ class PhotoViewerWindow(QMainWindow):
 
         manual_view = inspection_state.manual_view
         if manual_view is not None:
-            self.viewer.apply_manual_view(*manual_view)
+            self.viewer.apply_manual_view(
+                manual_view.zoom_factor, manual_view.center
+            )
 
     def _refresh_window_title(self) -> None:
         if self.current_photo_id is None or not self.library.photos:

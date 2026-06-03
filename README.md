@@ -215,7 +215,8 @@ build keeps a terminal attached so startup errors include a normal traceback.
 - Displays metadata in the top bar and thumbnail strips using star ratings, a
   colored label dot, and pick/reject indicators.
 - Supports autofocus-point/manual zoom, split view, per-photo remembered manual
-  zoom state, and `W/A/S/D` panning.
+  zoom state, temporary AF/default recentering with `Shift+F`, reset of
+  remembered zoom centers with `Ctrl+Shift+F`, and `W/A/S/D` panning.
 - Shows the current visible region on strip thumbnails while zoomed in, using a
   red zoom box and a darkened mask outside the box.
 - In scene mode, the visible-region overlay moves to the horizontal scene strip
@@ -280,6 +281,11 @@ Common transitions:
 - Press `Space` in single-pane manual view to return to fit view.
 - Press `Z` in normal view mode as an alternate shortcut for the same
   fit/manual zoom toggle as `Space`.
+- Press `Shift+F` in manual zoom to temporarily recenter the active zoomed view
+  on the photo's AF point or image center; press it again to return to the
+  remembered manual center when one exists.
+- Press `Ctrl+Shift+F` to reset remembered manual zoom centers to each photo's
+  AF point or image center while preserving remembered zoom levels.
 - Press `\` in normal view mode to toggle split view on or off.
 - Press `Space` in split view to promote the right zoomed pane into single-pane
   manual view.
@@ -319,6 +325,8 @@ Common transitions:
   scene-stack rows using an anchored range that releases rows outside the range
   when you reverse direction
 - Zoom and pan: `\` toggles split view, `-` zooms out, `=` / `+` zoom in,
+  `Shift+F` temporarily recenters manual zoom on the AF point or image center,
+  `Ctrl+Shift+F` resets remembered zoom centers while preserving zoom levels,
   `W/A/S/D` pan the active zoomed view or compare pane set, the strip thumbnail
   overlay tracks the current visible region while zoomed, left/right arrows
   move within the current scene in view mode, and arrow keys move the active

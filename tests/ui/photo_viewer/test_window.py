@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -14,8 +15,6 @@ from tests.ui._helpers import create_jpeg, stub_read_exif
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import pytest
 
 
 def _disable_background_startup(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -415,6 +414,171 @@ def test_photo_viewer_manual_zoom_carries_across_navigation(
     center = window.viewer.normalized_viewport_center()
     assert center is not None
     _assert_close_tuple(center, expected_center)
+    window.close()
+
+
+def test_photo_viewer_registers_recenter_zoom_shortcuts(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    _app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+
+    assert (
+        window.recenter_zoom_shortcut.key().toString(QKeySequence.PortableText)
+        == 'Shift+F'
+    )
+    assert (
+        window.reset_zoom_centers_shortcut.key().toString(
+            QKeySequence.PortableText
+        )
+        == 'Ctrl+Shift+F'
+    )
+
+    window.close()
+
+
+def test_photo_viewer_recenter_zoom_shortcut_does_not_change_navigation_handoff(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify Shift+F stays view-only in standalone photo-viewer navigation.
+
+    The file-open viewer captures inspection state before adjacent-photo loads,
+    so this guards against carrying the temporary AF/default recenter to the
+    next photo.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green', size=(2400, 1600))
+    create_jpeg(tmp_path / 'B.JPG', 'blue', size=(2400, 1600))
+    app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+    window.resize(1200, 800)
+    window.library.get_photo('A').focus_point = (0.35, 0.65)
+    window.library.get_photo('B').focus_point = (0.65, 0.35)
+    window._display_current_photo()
+    app.processEvents()
+
+    window.space_shortcut.activated.emit()
+    _trigger_viewer_shortcut(window, '=')
+    _trigger_viewer_shortcut(window, 'D')
+    _trigger_viewer_shortcut(window, 'S')
+    app.processEvents()
+    expected_zoom = window.viewer._current_scale
+    remembered_center = window.viewer.normalized_viewport_center()
+
+    window.recenter_zoom_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.viewer.normalized_viewport_center() == pytest.approx((
+        0.35,
+        0.65,
+    ))
+
+    window.recenter_zoom_shortcut.activated.emit()
+    app.processEvents()
+
+    assert remembered_center is not None
+    assert window.viewer.normalized_viewport_center() == pytest.approx(
+        remembered_center
+    )
+
+    window.recenter_zoom_shortcut.activated.emit()
+    app.processEvents()
+
+    window.navigate(1)
+    app.processEvents()
+
+    assert window.current_photo_id == 'B'
+    assert window.viewer._mode == 'single-manual'
+    assert window.viewer._current_scale == pytest.approx(expected_zoom)
+    assert window.viewer.normalized_viewport_center() == pytest.approx(
+        remembered_center
+    )
+    window.close()
+
+
+def test_photo_viewer_reset_zoom_centers_uses_next_photo_focus_point(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify Ctrl+Shift+F resets standalone viewer navigation centers.
+
+    Reset-all should persist the AF/default-center intent across adjacent-photo
+    navigation while preserving the active zoom scale.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green', size=(2400, 1600))
+    create_jpeg(tmp_path / 'B.JPG', 'blue', size=(2400, 1600))
+    app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+    window.resize(1200, 800)
+    window.library.get_photo('A').focus_point = (0.35, 0.65)
+    window.library.get_photo('B').focus_point = (0.65, 0.35)
+    window._display_current_photo()
+    app.processEvents()
+
+    window.space_shortcut.activated.emit()
+    _trigger_viewer_shortcut(window, '=')
+    _trigger_viewer_shortcut(window, 'D')
+    _trigger_viewer_shortcut(window, 'S')
+    app.processEvents()
+    expected_zoom = window.viewer._current_scale
+    remembered_center = window.viewer.normalized_viewport_center()
+
+    question_results = [QMessageBox.No, QMessageBox.Yes]
+    question_calls: list[tuple[str, str, object]] = []
+
+    def confirm_reset(
+            _parent: object,
+            title: str,
+            text: str,
+            buttons: object,
+            default_button: object,
+    ) -> object:
+        question_calls.append((title, text, default_button))
+        assert buttons == QMessageBox.Yes | QMessageBox.No
+        return question_results.pop(0)
+
+    monkeypatch.setattr(QMessageBox, 'question', confirm_reset)
+
+    window.reset_zoom_centers_shortcut.activated.emit()
+    app.processEvents()
+
+    assert remembered_center is not None
+    assert window.viewer.normalized_viewport_center() == pytest.approx(
+        remembered_center
+    )
+
+    window.reset_zoom_centers_shortcut.activated.emit()
+    app.processEvents()
+
+    assert question_calls == [
+        (
+            'Reset Zoom Centers',
+            'Reset all remembered zoom centers to AF points or image centers?',
+            QMessageBox.No,
+        ),
+        (
+            'Reset Zoom Centers',
+            'Reset all remembered zoom centers to AF points or image centers?',
+            QMessageBox.No,
+        ),
+    ]
+    assert window.viewer._current_scale == pytest.approx(expected_zoom)
+    assert window.viewer.normalized_viewport_center() == pytest.approx((
+        0.35,
+        0.65,
+    ))
+
+    window.navigate(1)
+    app.processEvents()
+
+    assert window.current_photo_id == 'B'
+    assert window.viewer._mode == 'single-manual'
+    assert window.viewer._current_scale == pytest.approx(expected_zoom)
+    assert window.viewer.normalized_viewport_center() == pytest.approx((
+        0.65,
+        0.35,
+    ))
     window.close()
 
 

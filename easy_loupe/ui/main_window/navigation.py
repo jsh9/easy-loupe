@@ -386,18 +386,19 @@ class MainWindowNavigationMixin:
         if force_fit:
             self.viewer.set_fit_view()
 
-        preserve_zoom = (
-            False if force_fit else self.viewer.should_preserve_zoom()
-        )
-        preserved_center = (
-            self.viewer.normalized_viewport_center() if preserve_zoom else None
-        )
+        manual_view = None
+        if not force_fit:
+            # Carry the full manual-view state, including either a concrete
+            # center or the AF/default-center sentinel. Passing only
+            # coordinates would lose reset-center intent and can leak
+            # temporary recenter scale into normal navigation.
+            manual_view = self.viewer.current_manual_view()
+
         self.viewer.set_photo(
             image_path,
             photo.focus_point,
             focus_point_pending=getattr(photo, 'focus_point_pending', False),
-            preserve_zoom=preserve_zoom,
-            preserved_center=preserved_center,
+            handoff_manual_view=manual_view,
         )
         if hasattr(self, '_refresh_info_overlay'):
             self._refresh_info_overlay()

@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QProgressBar,
     QVBoxLayout,
     QWidget,
@@ -79,6 +80,23 @@ def build_viewer_shortcuts[ShortcutT](
         make_shortcut('S', lambda: keyboard_pan_by(0, 1)),
         make_shortcut('D', lambda: keyboard_pan_by(1, 0)),
     ]
+
+
+def confirm_reset_zoom_centers(parent: QWidget) -> bool:
+    """Return whether the user confirmed clearing remembered zoom centers."""
+    return (
+        QMessageBox.question(
+            parent,
+            'Reset Zoom Centers',
+            (
+                'Reset all remembered zoom centers to AF points or '
+                'image centers?'
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        == QMessageBox.Yes
+    )
 
 
 def build_progress_overlay(parent: QWidget) -> ProgressOverlayWidgets:

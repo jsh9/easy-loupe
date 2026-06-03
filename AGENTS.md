@@ -486,6 +486,15 @@ Mode-transition summary:
   strip, browse grid, and compare grid while preserving selected photo IDs
   where those photos still exist.
 - The `F` shortcut toggles `Show AF point`.
+- `Shift+F` in manual zoom temporarily recenters the active zoomed pane on the
+  photo's AF point or image center without replacing remembered manual zoom
+  memory. Pressing `Shift+F` again restores the remembered manual center when
+  one exists. If centering an edge AF point requires extra live zoom, that
+  temporary scale must not be saved unless the user explicitly pans.
+- `Ctrl+Shift+F` resets remembered manual zoom centers to each photo's AF point
+  or image center while preserving remembered zoom levels. This persistent
+  reset intent must survive late-loading AF metadata: a remembered center of
+  `None` means resolve to the current photo's AF/default center.
 - A photo with no remembered manual view enters focus zoom around the extracted
   AF point. Remembered per-photo manual zoom state takes priority when
   returning to a photo.
@@ -699,6 +708,11 @@ Current shortcut coverage in code includes:
 - `C`: enter compare mode
 - `Esc`: exit compare mode and restore the prior selection/view state
 - `F`: toggle the `Show AF point` overlay
+- `Shift+F`: temporarily recenter the active manual zoom view on the AF point
+  or image center, then toggle back to the remembered manual center when one
+  exists
+- `Ctrl+Shift+F`: reset remembered manual zoom centers to AF points or image
+  centers while preserving remembered zoom levels
 - `I`: toggle the normal-view EXIF and RGB histogram overlay
 - `Space`: exit browse mode into fit-to-window view mode, promote split view
   into full zoom, toggle focus zoom while already in single-pane view mode, or
@@ -800,6 +814,10 @@ Additional assignment-menu behavior:
     remains readable when the viewer is resized
   - verify first-time focus zoom uses the AF point while remembered manual zoom
     remains higher priority
+  - verify `Shift+F` is view-only unless the user pans, including edge AF
+    points that require extra live zoom and resize while temporarily recentered
+  - verify `Ctrl+Shift+F` preserves remembered zoom levels, resets centers to
+    photo-relative AF/default centers, and survives late AF metadata loading
   - verify scene-detection completion preserves split view in normal view mode
     but still exits browse mode back to fit view
   - verify metadata refreshes preserve scroll position when the user tags

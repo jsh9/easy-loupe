@@ -12,7 +12,7 @@ from easy_loupe.ui.theme import (
     THEMES,
     ThemePalette,
 )
-from easy_loupe.ui.viewers.photo_viewer import PhotoViewer
+from easy_loupe.ui.viewers.photo_viewer import ManualView, PhotoViewer
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -25,7 +25,9 @@ class MainPhotoViewer(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._manual_views: dict[str, tuple[float, tuple[float, float]]] = {}
+        self._manual_views: dict[
+            str, ManualView | tuple[float, tuple[float, float]]
+        ] = {}
         self._current_image_path: Path | None = None
         self._current_focus_point = (0.5, 0.5)
         self._current_focus_point_pending = False
@@ -90,12 +92,15 @@ class MainPhotoViewer(QWidget):
             focus_point_pending: bool = False,
             preserve_zoom: bool = False,
             preserved_center: tuple[float, float] | None = None,
+            handoff_manual_view: ManualView | None = None,
     ) -> None:
         """Display a photo in the active single-pane or split-view mode."""
         self._current_image_path = image_path
         self._current_focus_point = focus_point
         self._current_focus_point_pending = focus_point_pending
         if self.is_split_view():
+            # Split navigation restores per-photo right-pane memory, so avoid
+            # carrying the previous photo's single-pane handoff view here.
             self._show_split_photo()
         else:
             self.single_viewer.set_photo(
@@ -104,6 +109,7 @@ class MainPhotoViewer(QWidget):
                 focus_point_pending=focus_point_pending,
                 preserve_zoom=preserve_zoom,
                 preserved_center=preserved_center,
+                handoff_manual_view=handoff_manual_view,
             )
 
         self._sync_mode()
@@ -143,6 +149,10 @@ class MainPhotoViewer(QWidget):
     def visible_region_rect(self) -> tuple[float, float, float, float] | None:
         """Return the active zoom viewer's normalized visible rectangle."""
         return self._active_zoom_viewer().visible_region_rect()
+
+    def current_manual_view(self) -> ManualView | None:
+        """Return active manual zoom state for photo-to-photo carryover."""
+        return self._active_zoom_viewer().current_manual_view()
 
     def set_focus_point_marker_visible(self, *, enabled: bool) -> None:
         """Set whether manual zoom panes show the autofocus point marker."""
@@ -190,6 +200,8 @@ class MainPhotoViewer(QWidget):
             return
 
         if self.is_split_view():
+            # Promote the right pane's remembered view without turning a
+            # temporary Shift+F recenter into stored state.
             manual_view = self.split_zoom_viewer.current_manual_view()
             self._layout.setCurrentWidget(self.single_viewer)
             self.single_viewer.set_photo(
@@ -199,7 +211,9 @@ class MainPhotoViewer(QWidget):
                 preserve_zoom=False,
             )
             if manual_view is not None:
-                self.single_viewer.set_manual_view(*manual_view)
+                self.apply_manual_view(
+                    manual_view.zoom_factor, manual_view.center
+                )
 
             self._sync_mode()
             self.visible_region_changed.emit()
@@ -215,6 +229,8 @@ class MainPhotoViewer(QWidget):
             return
 
         if self.is_split_view():
+            # Carry the right pane back to single-pane mode while keeping
+            # view-only recentering out of persistent manual-view memory.
             manual_view = self.split_zoom_viewer.current_manual_view()
             self._layout.setCurrentWidget(self.single_viewer)
             self.single_viewer.set_photo(
@@ -224,7 +240,9 @@ class MainPhotoViewer(QWidget):
                 preserve_zoom=False,
             )
             if manual_view is not None:
-                self.single_viewer.set_manual_view(*manual_view)
+                self.apply_manual_view(
+                    manual_view.zoom_factor, manual_view.center
+                )
 
             self._sync_mode()
             self.visible_region_changed.emit()
@@ -251,13 +269,32 @@ class MainPhotoViewer(QWidget):
         self._sync_mode()
 
     def apply_manual_view(
-            self, zoom_factor: float, center: tuple[float, float]
+            self, zoom_factor: float, center: tuple[float, float] | None
     ) -> None:
         """Apply a manual zoom factor and center to the active zoom pane."""
+        use_focus_center = center is None
+        if center is None:
+            center = self._current_focus_point
+
         self._active_zoom_viewer().zoom_to_normalized_center(
             center, zoom_factor=zoom_factor
         )
+        if use_focus_center:
+            self._active_zoom_viewer().recenter_manual_view()
+
         self._sync_mode()
+
+    def recenter_manual_view(self) -> None:
+        """Toggle the active manual pane between stored and focus centers."""
+        self._active_zoom_viewer().toggle_recenter_current_view()
+        self._sync_mode()
+        self.visible_region_changed.emit()
+
+    def reset_manual_view_centers(self) -> None:
+        """Reset remembered centers while preserving zoom levels."""
+        self._active_zoom_viewer().reset_manual_view_centers()
+        self._sync_mode()
+        self.visible_region_changed.emit()
 
     def _active_zoom_viewer(self) -> PhotoViewer:
         return (

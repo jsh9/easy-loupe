@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from easy_loupe.ui.theme import NO_METADATA_TEXT, THEMES, ThemePalette
-from easy_loupe.ui.viewers.photo_viewer import PhotoViewer
+from easy_loupe.ui.viewers.photo_viewer import ManualView, PhotoViewer
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -75,7 +75,7 @@ class SelectedPhotoViewState:
 
     photo_id: str
     actual_size_active: bool
-    manual_view: tuple[float, tuple[float, float]] | None
+    manual_view: ManualView | None
     center: tuple[float, float] | None
 
 
@@ -437,8 +437,18 @@ class ComparePhotoViewer(QWidget):
         if state.actual_size_active and state.center is not None:
             self.selected_viewer.zoom_to_actual_size(state.center)
         elif state.manual_view is not None:
-            zoom_factor, center = state.manual_view
-            self.selected_viewer.set_manual_view(zoom_factor, center)
+            manual_view = state.manual_view
+            if manual_view.center is None:
+                self.selected_viewer.zoom_to_normalized_center(
+                    photo.focus_point,
+                    zoom_factor=manual_view.zoom_factor,
+                )
+                self.selected_viewer.recenter_manual_view()
+            else:
+                self.selected_viewer.set_manual_view(
+                    manual_view.zoom_factor,
+                    manual_view.center,
+                )
 
         self._set_selected_photo_view_active(active=True)
         self._sync_active_frame_styles()

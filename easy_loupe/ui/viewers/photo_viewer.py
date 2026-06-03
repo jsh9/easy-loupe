@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPointF, QSize, Qt, Signal
@@ -49,7 +50,15 @@ if TYPE_CHECKING:
     from PySide6.QtGui import QResizeEvent
 
 
-class PhotoViewer(QGraphicsView):
+@dataclass(frozen=True, slots=True)
+class ManualView:
+    """Remembered manual zoom state for a photo."""
+
+    zoom_factor: float
+    center: tuple[float, float] | None
+
+
+class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
     """Photo viewing widget with fit, zoom, pan, and region tracking."""
 
     visible_region_changed = Signal()
@@ -58,7 +67,9 @@ class PhotoViewer(QGraphicsView):
             self,
             parent: QWidget | None = None,
             *,
-            manual_views: dict[str, tuple[float, tuple[float, float]]]
+            manual_views: dict[
+                str, ManualView | tuple[float, tuple[float, float]]
+            ]
             | None = None,
             hold_zoom_enabled: bool = False,
     ) -> None:
@@ -107,6 +118,10 @@ class PhotoViewer(QGraphicsView):
         self._hold_zoom_enabled = hold_zoom_enabled
         self._hold_zoom_active = False
         self._actual_size_zoom_active = False
+        # Shift+F recentering is temporary; persistence paths still need the
+        # old remembered center unless the user pans or resets centers.
+        self._transient_recenter_active = False
+        self._transient_recenter_restore_view: ManualView | None = None
         self._last_hold_zoom_pos = QPointF()
         self._pan_drag_active = False
         self._last_pan_drag_pos = QPointF()
@@ -120,12 +135,14 @@ class PhotoViewer(QGraphicsView):
             focus_point_pending: bool = False,
             preserve_zoom: bool = False,
             preserved_center: tuple[float, float] | None = None,
+            handoff_manual_view: ManualView | None = None,
     ) -> None:
         """Load a photo and optionally restore a preserved manual zoom view."""
         zoom_factor = self.current_zoom_factor()
         pixmap = QPixmap(str(image_path))
         self._hold_zoom_active = False
         self._actual_size_zoom_active = False
+        self._clear_transient_recenter()
         self._current_image_key = str(image_path)
         self._pixmap_item.setPixmap(pixmap)
         self._scene.setSceneRect(pixmap.rect())
@@ -133,6 +150,13 @@ class PhotoViewer(QGraphicsView):
         self._focus_point = QPointF(focus_point[0], focus_point[1])
         self._focus_point_pending = focus_point_pending
         self._position_focus_point_marker()
+        # The full handoff path has to run before legacy preserve-zoom
+        # handling, because ``ManualView.center is None`` carries the
+        # "use this photo's focus center" intent across multiple photo hops.
+        if handoff_manual_view is not None and not self._image_size.isEmpty():
+            self._apply_handoff_manual_view(handoff_manual_view)
+            return
+
         if preserve_zoom and not self._image_size.isEmpty():
             self._fit_scale = self._compute_fit_scale()
             self._mode = 'manual'
@@ -156,6 +180,46 @@ class PhotoViewer(QGraphicsView):
 
         self.set_fit_view()
 
+    def _apply_handoff_manual_view(self, manual_view: ManualView) -> None:
+        """
+        Restore a manual zoom view carried from the previously displayed photo.
+
+        A concrete ``manual_view.center`` means reuse that normalized viewport
+        center on this image. A ``None`` center means use this image's focus
+        point instead, and keep storing ``None`` so reset-all zoom centers stay
+        photo-relative across further navigation.
+        """
+        if manual_view.center is None:
+            use_focus_center = True
+            center = self._focus_center()
+        else:
+            use_focus_center = False
+            center = manual_view.center
+
+        self._fit_scale = self._compute_fit_scale()
+        self._mode = 'manual'
+        self._current_scale = min(
+            self._max_scale(),
+            max(
+                self._minimum_scale_for_center(center),
+                self._fit_scale * manual_view.zoom_factor,
+            ),
+        )
+        self._center_point = QPointF(
+            center[0] * self._image_size.width(),
+            center[1] * self._image_size.height(),
+        )
+        if self._current_image_key is not None:
+            # Keep focus-centered views as a sentinel rather than concrete
+            # coordinates, so reset-all remains photo-relative on the next
+            # navigation hop.
+            self._manual_views[self._current_image_key] = ManualView(
+                manual_view.zoom_factor,
+                None if use_focus_center else center,
+            )
+
+        self._apply_transform()
+
     def clear_photo(self) -> None:
         """Clear the current photo and reset viewer state to fit mode."""
         self._pixmap_item.setPixmap(QPixmap())
@@ -169,6 +233,7 @@ class PhotoViewer(QGraphicsView):
         self._focus_point_pending = False
         self._hold_zoom_active = False
         self._actual_size_zoom_active = False
+        self._clear_transient_recenter()
         self.resetTransform()
         self._update_focus_point_marker()
         self.visible_region_changed.emit()
@@ -197,7 +262,11 @@ class PhotoViewer(QGraphicsView):
         self._focus_point = QPointF(focus_point[0], focus_point[1])
         self._focus_point_pending = False
         if was_pending and self._current_image_key is not None:
-            self._manual_views.pop(self._current_image_key, None)
+            manual_view = self._manual_views.get(self._current_image_key)
+            if manual_view is not None:
+                _zoom_factor, center = self._manual_view_parts(manual_view)
+                if center is not None:
+                    self._manual_views.pop(self._current_image_key, None)
 
         self._update_focus_point_marker()
 
@@ -265,6 +334,7 @@ class PhotoViewer(QGraphicsView):
 
         self._hold_zoom_active = False
         self._actual_size_zoom_active = False
+        self._clear_transient_recenter()
         self._mode = 'fit'
         self._current_scale = self._compute_fit_scale()
         self._center_point = QPointF(
@@ -286,7 +356,9 @@ class PhotoViewer(QGraphicsView):
             self.restore_or_focus_manual_view()
             return
 
-        self._store_manual_view()
+        self._store_manual_view(
+            use_focus_center=self._manual_view_uses_focus_center()
+        )
         self.set_fit_view()
 
     def zoom_step(self, multiplier: float) -> None:
@@ -301,14 +373,18 @@ class PhotoViewer(QGraphicsView):
             min(self._max_scale(), self._current_scale * multiplier),
         )
         if next_scale <= self._fit_scale + 0.001:
-            self._store_manual_view()
+            self._store_manual_view(
+                use_focus_center=self._manual_view_uses_focus_center()
+            )
             self.set_fit_view()
             return
 
         self._mode = 'manual'
         self._current_scale = next_scale
         self._apply_transform()
-        self._store_manual_view()
+        self._store_manual_view(
+            use_focus_center=self._manual_view_uses_focus_center()
+        )
 
     def pan_by(self, dx: float, dy: float) -> None:
         """Pan the manual-zoom viewport by the given image-space delta."""
@@ -321,6 +397,7 @@ class PhotoViewer(QGraphicsView):
         self._hold_zoom_active = False
         self._actual_size_zoom_active = False
         self._mode = 'manual'
+        self._clear_transient_recenter()
         self._center_point += QPointF(dx, dy)
         self._apply_transform()
         self._store_manual_view()
@@ -338,9 +415,11 @@ class PhotoViewer(QGraphicsView):
         self._hold_zoom_active = False
         self._actual_size_zoom_active = False
         if self._restore_manual_view():
+            self._clear_transient_recenter()
             return
 
         self._mode = 'manual'
+        self._clear_transient_recenter()
         focus_center = (self._focus_point.x(), self._focus_point.y())
         self._current_scale = min(
             self._max_scale(),
@@ -351,14 +430,69 @@ class PhotoViewer(QGraphicsView):
             focus_center[1] * self._image_size.height(),
         )
         self._apply_transform()
-        self._store_manual_view()
+        self._store_manual_view(use_focus_center=True)
+
+    def recenter_manual_view(self) -> None:
+        """Snap the active manual view to the focus point without rescaling."""
+        self.recenter_current_view()
+        self._store_manual_view(use_focus_center=True)
+        self._clear_transient_recenter()
+
+    def recenter_current_view(self) -> None:
+        """Snap active manual view to the focus point without storing it."""
+        if not self.should_preserve_zoom():
+            return
+
+        restore_center = self.normalized_viewport_center()
+        if restore_center is not None:
+            self._transient_recenter_restore_view = ManualView(
+                self.current_zoom_factor(),
+                restore_center,
+            )
+
+        self._hold_zoom_active = False
+        self._actual_size_zoom_active = False
+        self._mode = 'manual'
+        # Shift+F moves the current viewport only. The remembered manual view
+        # stays intact so the shortcut remains a reversible inspection aid.
+        self._transient_recenter_active = True
+        focus_center = self._focus_center()
+        self._current_scale = min(
+            self._max_scale(),
+            max(
+                self._minimum_scale_for_center(focus_center),
+                self._current_scale,
+            ),
+        )
+        self._center_point = QPointF(
+            focus_center[0] * self._image_size.width(),
+            focus_center[1] * self._image_size.height(),
+        )
+        self._apply_transform()
+
+    def toggle_recenter_current_view(self) -> None:
+        """Toggle active manual view between stored center and focus point."""
+        if not self.should_preserve_zoom():
+            return
+
+        if self._transient_recenter_active:
+            self._restore_transient_recenter_view()
+            return
+
+        self.recenter_current_view()
+
+    def reset_manual_view_centers(self) -> None:
+        """Make all remembered manual views use their photo focus centers."""
+        for image_key, manual_view in list(self._manual_views.items()):
+            zoom_factor, _center = self._manual_view_parts(manual_view)
+            self._manual_views[image_key] = ManualView(zoom_factor, None)
+
+        if self.should_preserve_zoom():
+            self.recenter_manual_view()
 
     def zoom_to_focus_point(self) -> None:
         """Zoom explicitly to the photo's autofocus point."""
-        self.zoom_to_normalized_center((
-            self._focus_point.x(),
-            self._focus_point.y(),
-        ))
+        self.zoom_to_normalized_center(self._focus_center())
 
     def toggle_actual_size_zoom(self) -> None:
         """Toggle between fit view and 100% zoom at the focus point."""
@@ -375,13 +509,12 @@ class PhotoViewer(QGraphicsView):
         # "fit 100% -> 100% inspection -> fit 100%", even though users will not
         # see a visual scale change in that case.
         if self._mode == 'fit':
-            self.zoom_to_actual_size((
-                self._focus_point.x(),
-                self._focus_point.y(),
-            ))
+            self.zoom_to_actual_size(self._focus_center())
             return
 
-        self._store_manual_view()
+        self._store_manual_view(
+            use_focus_center=self._manual_view_uses_focus_center()
+        )
         self.set_fit_view()
 
     def zoom_to_actual_size(self, center: tuple[float, float]) -> None:
@@ -392,6 +525,7 @@ class PhotoViewer(QGraphicsView):
         self._hold_zoom_active = False
         self._fit_scale = self._compute_fit_scale()
         self._mode = 'manual'
+        self._clear_transient_recenter()
         # Actual-size inspection is absolute pixel scale, not a remembered
         # manual zoom factor relative to the current fit-to-window scale.
         self._actual_size_zoom_active = True
@@ -399,9 +533,9 @@ class PhotoViewer(QGraphicsView):
             max(0.0, min(1.0, center[0])),
             max(0.0, min(1.0, center[1])),
         )
-        # What: set actual-size zoom to one image pixel per screen pixel.
-        # Why: viewport-fitting minimums can exceed 1.0 on oversized/offscreen
-        # test viewports, which would make "100%" larger than actual size.
+        # Actual-size inspection should stay at one image pixel per screen
+        # pixel; viewport-fitting minimums can exceed 1.0 on oversized or
+        # offscreen test viewports.
         self._current_scale = min(self._max_scale(), 1.0)
         self._center_point = QPointF(
             normalized_center[0] * self._image_size.width(),
@@ -423,6 +557,7 @@ class PhotoViewer(QGraphicsView):
         self._actual_size_zoom_active = False
         self._fit_scale = self._compute_fit_scale()
         self._mode = 'manual'
+        self._clear_transient_recenter()
         normalized_center = (
             max(0.0, min(1.0, center[0])),
             max(0.0, min(1.0, center[1])),
@@ -454,6 +589,7 @@ class PhotoViewer(QGraphicsView):
         self._actual_size_zoom_active = False
         self._fit_scale = self._compute_fit_scale()
         self._mode = 'manual'
+        self._clear_transient_recenter()
         self._current_scale = min(
             self._max_scale(),
             max(self._fit_scale, self._fit_scale * zoom_factor),
@@ -465,8 +601,8 @@ class PhotoViewer(QGraphicsView):
         self._apply_transform_unclamped()
         self._store_manual_view()
 
-    def current_manual_view(self) -> tuple[float, tuple[float, float]] | None:
-        """Return the current manual zoom factor and normalized center."""
+    def current_manual_view(self) -> ManualView | None:
+        """Return manual zoom state, preserving AF-centered intent."""
         if (
             self._hold_zoom_active
             or self._actual_size_zoom_active
@@ -474,11 +610,17 @@ class PhotoViewer(QGraphicsView):
         ):
             return None
 
+        if self._current_image_key is not None:
+            manual_view = self._manual_views.get(self._current_image_key)
+            if manual_view is not None:
+                zoom_factor, center = self._manual_view_parts(manual_view)
+                return ManualView(zoom_factor, center)
+
         center = self.normalized_viewport_center()
         if center is None:
             return None
 
-        return (self.current_zoom_factor(), center)
+        return ManualView(self.current_zoom_factor(), center)
 
     def current_zoom_factor(self) -> float:
         """Return the zoom level relative to fit-to-window scale."""
@@ -525,6 +667,22 @@ class PhotoViewer(QGraphicsView):
             self._apply_transform()
         elif self._mode == 'fit':
             self.set_fit_view()
+        elif self._transient_recenter_active:
+            center = self.normalized_viewport_center()
+            if center is not None:
+                self._current_scale = min(
+                    self._max_scale(),
+                    max(
+                        self._minimum_scale_for_center(center),
+                        self._current_scale,
+                    ),
+                )
+                self._center_point = QPointF(
+                    center[0] * self._image_size.width(),
+                    center[1] * self._image_size.height(),
+                )
+
+            self._apply_transform()
         elif not self._restore_manual_view():
             self._apply_transform()
             self._store_manual_view()
@@ -545,6 +703,7 @@ class PhotoViewer(QGraphicsView):
             self._last_hold_zoom_pos = event.position()
             self._mode = 'fit'
             self._actual_size_zoom_active = False
+            self._clear_transient_recenter()
             self._current_scale = min(
                 self._max_scale(), max(1.0, self._fit_scale)
             )
@@ -589,6 +748,7 @@ class PhotoViewer(QGraphicsView):
                 delta.x() / max(self._current_scale, 0.001),
                 delta.y() / max(self._current_scale, 0.001),
             )
+            self._clear_transient_recenter()
             self._apply_transform()
             self._store_manual_view()
             event.accept()
@@ -618,7 +778,7 @@ class PhotoViewer(QGraphicsView):
 
         super().mouseReleaseEvent(event)
 
-    def _store_manual_view(self) -> None:
+    def _store_manual_view(self, *, use_focus_center: bool = False) -> None:
         if (
             self._actual_size_zoom_active
             or self._current_image_key is None
@@ -626,14 +786,78 @@ class PhotoViewer(QGraphicsView):
         ):
             return
 
-        center = self.normalized_viewport_center()
-        if center is None:
+        if self._transient_recenter_active and not use_focus_center:
+            # A transient recenter may update magnification, but it should not
+            # replace the remembered center unless the user explicitly pans.
+            self._preserve_previous_manual_view()
             return
 
-        self._manual_views[self._current_image_key] = (
+        center = (
+            None if use_focus_center else self.normalized_viewport_center()
+        )
+        if center is None and not use_focus_center:
+            return
+
+        self._manual_views[self._current_image_key] = ManualView(
             self.current_zoom_factor(),
             center,
         )
+        if use_focus_center:
+            self._clear_transient_recenter()
+
+    def _preserve_previous_manual_view(self) -> None:
+        """Keep stored manual memory unchanged during view-only recentering."""
+        if self._current_image_key is None:
+            return
+
+        manual_view = self._manual_views.get(self._current_image_key)
+        if manual_view is None:
+            return
+
+        zoom_factor, center = self._manual_view_parts(manual_view)
+        self._manual_views[self._current_image_key] = ManualView(
+            zoom_factor,
+            center,
+        )
+
+    def _clear_transient_recenter(self) -> None:
+        self._transient_recenter_active = False
+        self._transient_recenter_restore_view = None
+
+    def _restore_transient_recenter_view(self) -> None:
+        """
+        Restore the view that existed before a temporary AF/default recenter.
+
+        Shift+F does not rewrite manual-view memory when it snaps to the focus
+        point. A second press rebuilds the visible viewport from the stored
+        center so the toggle stays local to the active photo.
+        """
+        # No active image means there is no coordinate space for a center
+        # point.
+        if self._image_size.isEmpty():
+            return
+
+        manual_view = self._transient_recenter_restore_view
+        # Without a snapshot, the AF/default recenter is already the only known
+        # view, so toggling back is intentionally a no-op.
+        if manual_view is None or manual_view.center is None:
+            return
+
+        center = manual_view.center
+        self._fit_scale = self._compute_fit_scale()
+        self._current_scale = min(
+            self._max_scale(),
+            max(
+                self._minimum_scale_for_center(center),
+                self._fit_scale * manual_view.zoom_factor,
+            ),
+        )
+        self._center_point = QPointF(
+            center[0] * self._image_size.width(),
+            center[1] * self._image_size.height(),
+        )
+        self._clear_transient_recenter()
+        self._apply_transform()
 
     def _restore_manual_view(self) -> bool:
         if self._current_image_key is None or self._image_size.isEmpty():
@@ -643,7 +867,10 @@ class PhotoViewer(QGraphicsView):
         if manual_view is None:
             return False
 
-        zoom_factor, center = manual_view
+        zoom_factor, center = self._manual_view_parts(manual_view)
+        if center is None:
+            center = self._focus_center()
+
         self._fit_scale = self._compute_fit_scale()
         self._mode = 'manual'
         self._current_scale = min(
@@ -656,6 +883,29 @@ class PhotoViewer(QGraphicsView):
         )
         self._apply_transform_unclamped()
         return True
+
+    @staticmethod
+    def _manual_view_parts(
+            manual_view: ManualView | tuple[float, tuple[float, float]],
+    ) -> tuple[float, tuple[float, float] | None]:
+        if isinstance(manual_view, ManualView):
+            return manual_view.zoom_factor, manual_view.center
+
+        return manual_view
+
+    def _focus_center(self) -> tuple[float, float]:
+        return (self._focus_point.x(), self._focus_point.y())
+
+    def _manual_view_uses_focus_center(self) -> bool:
+        if self._current_image_key is None:
+            return False
+
+        manual_view = self._manual_views.get(self._current_image_key)
+        if manual_view is None:
+            return False
+
+        _zoom_factor, center = self._manual_view_parts(manual_view)
+        return center is None
 
     def _position_focus_point_marker(self) -> None:
         if self._image_size.isEmpty():
