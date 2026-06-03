@@ -1,5 +1,15 @@
 # Change Log
 
+## [1.0.2] - 2026-06-03
+
+- Added
+  - `Shift+F` now temporarily recenters the active manual zoom view on the
+    photo's AF point or image center, and pressing it again restores the
+    remembered manual center when one exists
+  - `Ctrl+Shift+F` now resets remembered zoom centers to each photo's AF point
+    or image center while preserving remembered zoom levels across culling and
+    standalone photo-viewer navigation
+
 ## [1.0.1] = 2026-06-01
 
 - Changed
