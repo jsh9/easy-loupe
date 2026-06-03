@@ -388,16 +388,17 @@ class MainWindowNavigationMixin:
 
         manual_view = None
         if not force_fit:
+            # Carry the full manual-view state, including either a concrete
+            # center or the AF/default-center sentinel. Passing only
+            # coordinates would lose reset-center intent and can leak
+            # temporary recenter scale into normal navigation.
             manual_view = self.viewer.current_manual_view_for_handoff()
 
         self.viewer.set_photo(
             image_path,
             photo.focus_point,
             focus_point_pending=getattr(photo, 'focus_point_pending', False),
-            preserve_zoom=manual_view is not None,
-            preserved_center=(
-                None if manual_view is None else manual_view.center
-            ),
+            handoff_manual_view=manual_view,
         )
         if hasattr(self, '_refresh_info_overlay'):
             self._refresh_info_overlay()

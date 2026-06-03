@@ -118,8 +118,8 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
         self._hold_zoom_enabled = hold_zoom_enabled
         self._hold_zoom_active = False
         self._actual_size_zoom_active = False
-        # What: mark Shift+F-style recenter as temporary.
-        # Why: later persistence paths must preserve the old remembered center.
+        # Shift+F recentering is temporary; persistence paths still need the
+        # old remembered center unless the user pans or resets centers.
         self._transient_recenter_active = False
         self._last_hold_zoom_pos = QPointF()
         self._pan_drag_active = False
@@ -134,6 +134,7 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
             focus_point_pending: bool = False,
             preserve_zoom: bool = False,
             preserved_center: tuple[float, float] | None = None,
+            handoff_manual_view: ManualView | None = None,
     ) -> None:
         """Load a photo and optionally restore a preserved manual zoom view."""
         zoom_factor = self.current_zoom_factor()
@@ -148,6 +149,13 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
         self._focus_point = QPointF(focus_point[0], focus_point[1])
         self._focus_point_pending = focus_point_pending
         self._position_focus_point_marker()
+        # The full handoff path has to run before legacy preserve-zoom
+        # handling, because ``ManualView.center is None`` carries the
+        # "use this photo's focus center" intent across multiple photo hops.
+        if handoff_manual_view is not None and not self._image_size.isEmpty():
+            self._apply_handoff_manual_view(handoff_manual_view)
+            return
+
         if preserve_zoom and not self._image_size.isEmpty():
             self._fit_scale = self._compute_fit_scale()
             self._mode = 'manual'
@@ -170,6 +178,46 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
             return
 
         self.set_fit_view()
+
+    def _apply_handoff_manual_view(self, manual_view: ManualView) -> None:
+        """
+        Restore a manual zoom view carried from the previously displayed photo.
+
+        A concrete ``manual_view.center`` means reuse that normalized viewport
+        center on this image. A ``None`` center means use this image's focus
+        point instead, and keep storing ``None`` so reset-all zoom centers stay
+        photo-relative across further navigation.
+        """
+        if manual_view.center is None:
+            use_focus_center = True
+            center = self._focus_center()
+        else:
+            use_focus_center = False
+            center = manual_view.center
+
+        self._fit_scale = self._compute_fit_scale()
+        self._mode = 'manual'
+        self._current_scale = min(
+            self._max_scale(),
+            max(
+                self._minimum_scale_for_center(center),
+                self._fit_scale * manual_view.zoom_factor,
+            ),
+        )
+        self._center_point = QPointF(
+            center[0] * self._image_size.width(),
+            center[1] * self._image_size.height(),
+        )
+        if self._current_image_key is not None:
+            # Keep focus-centered views as a sentinel rather than concrete
+            # coordinates, so reset-all remains photo-relative on the next
+            # navigation hop.
+            self._manual_views[self._current_image_key] = ManualView(
+                manual_view.zoom_factor,
+                None if use_focus_center else center,
+            )
+
+        self._apply_transform()
 
     def clear_photo(self) -> None:
         """Clear the current photo and reset viewer state to fit mode."""
@@ -391,8 +439,8 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
         self._hold_zoom_active = False
         self._actual_size_zoom_active = False
         self._mode = 'manual'
-        # What: move the viewport but keep manual-view memory unchanged.
-        # Why: Shift+F is a one-photo inspection aid, not a memory reset.
+        # Shift+F moves the current viewport only. The remembered manual view
+        # stays intact so the shortcut remains a reversible inspection aid.
         self._transient_recenter_active = True
         focus_center = self._focus_center()
         self._current_scale = min(
@@ -471,9 +519,9 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
             max(0.0, min(1.0, center[0])),
             max(0.0, min(1.0, center[1])),
         )
-        # What: set actual-size zoom to one image pixel per screen pixel.
-        # Why: viewport-fitting minimums can exceed 1.0 on oversized/offscreen
-        # test viewports, which would make "100%" larger than actual size.
+        # Actual-size inspection should stay at one image pixel per screen
+        # pixel; viewport-fitting minimums can exceed 1.0 on oversized or
+        # offscreen test viewports.
         self._current_scale = min(self._max_scale(), 1.0)
         self._center_point = QPointF(
             normalized_center[0] * self._image_size.width(),
@@ -724,9 +772,8 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
             return
 
         if self._transient_recenter_active and not use_focus_center:
-            # What: keep the prior center while updating the zoom factor.
-            # Why: exiting or carrying a transient recenter must not persist
-            # it.
+            # A transient recenter may update magnification, but it should not
+            # replace the remembered center unless the user explicitly pans.
             self._store_manual_view_with_previous_center()
             return
 

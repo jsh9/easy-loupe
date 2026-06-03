@@ -92,12 +92,15 @@ class MainPhotoViewer(QWidget):
             focus_point_pending: bool = False,
             preserve_zoom: bool = False,
             preserved_center: tuple[float, float] | None = None,
+            handoff_manual_view: ManualView | None = None,
     ) -> None:
         """Display a photo in the active single-pane or split-view mode."""
         self._current_image_path = image_path
         self._current_focus_point = focus_point
         self._current_focus_point_pending = focus_point_pending
         if self.is_split_view():
+            # Split navigation restores per-photo right-pane memory, so avoid
+            # carrying the previous photo's single-pane handoff view here.
             self._show_split_photo()
         else:
             self.single_viewer.set_photo(
@@ -106,6 +109,7 @@ class MainPhotoViewer(QWidget):
                 focus_point_pending=focus_point_pending,
                 preserve_zoom=preserve_zoom,
                 preserved_center=preserved_center,
+                handoff_manual_view=handoff_manual_view,
             )
 
         self._sync_mode()
@@ -196,8 +200,8 @@ class MainPhotoViewer(QWidget):
             return
 
         if self.is_split_view():
-            # What: promote the right pane's remembered/carryover state.
-            # Why: a temporary Shift+F recenter should not become stored state.
+            # Promote the right pane's remembered view without turning a
+            # temporary Shift+F recenter into stored state.
             manual_view = (
                 self.split_zoom_viewer.current_manual_view_for_handoff()
             )
@@ -227,8 +231,8 @@ class MainPhotoViewer(QWidget):
             return
 
         if self.is_split_view():
-            # What: carry handoff-aware manual state back to single pane.
-            # Why: split toggles should not persist a view-only recenter.
+            # Carry the right pane back to single-pane mode while keeping
+            # view-only recentering out of persistent manual-view memory.
             manual_view = (
                 self.split_zoom_viewer.current_manual_view_for_handoff()
             )

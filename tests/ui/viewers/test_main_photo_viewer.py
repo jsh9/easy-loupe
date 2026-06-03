@@ -694,3 +694,115 @@ def test_main_window_reset_zoom_centers_shortcut_uses_next_photo_focus_point(
     ))
 
     window.close()
+
+
+def test_main_window_reset_zoom_centers_survives_multiple_photo_hops(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify AF/default-center memory remains a sentinel across navigation.
+
+    A reset center should not become photo B's concrete focus coordinates when
+    the user continues from B to C.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_8506', 'dimgray'),
+            ('IMG_8507', 'blue'),
+            ('IMG_8508', 'green'),
+        ],
+    )
+    window.library.get_photo('IMG_8506').focus_point = (0.35, 0.65)
+    window.library.get_photo('IMG_8507').focus_point = (0.65, 0.35)
+    window.library.get_photo('IMG_8508').focus_point = (0.20, 0.80)
+    window._display_current_photo()
+
+    window.viewer.toggle_focus_zoom()
+    window.viewer.zoom_step(2.0)
+    window.viewer.pan_by(40, -30)
+
+    monkeypatch.setattr(
+        QMessageBox,
+        'question',
+        lambda *_args, **_kwargs: QMessageBox.Yes,
+    )
+    window.reset_zoom_centers_shortcut.activated.emit()
+    app.processEvents()
+    expected_zoom = window.viewer._current_scale
+
+    assert window.viewer.normalized_viewport_center() == pytest.approx((
+        0.35,
+        0.65,
+    ))
+
+    window.thumbnail_list.setCurrentRow(1)
+    app.processEvents()
+
+    assert window.current_photo_id == 'IMG_8507'
+    assert window.viewer._current_scale == pytest.approx(expected_zoom)
+    assert window.viewer.normalized_viewport_center() == pytest.approx((
+        0.65,
+        0.35,
+    ))
+
+    window.thumbnail_list.setCurrentRow(2)
+    app.processEvents()
+
+    assert window.current_photo_id == 'IMG_8508'
+    assert window.viewer._current_scale == pytest.approx(expected_zoom)
+    assert window.viewer.normalized_viewport_center() == pytest.approx((
+        0.20,
+        0.80,
+    ))
+
+    window.close()
+
+
+def test_main_window_shift_recenter_edge_scale_does_not_leak_to_next_photo(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify temporary edge recenter scale is not used for navigation handoff.
+
+    Centering an edge AF point can require a larger live scale than the
+    remembered custom view. The next photo should receive the remembered view,
+    not that transient edge-corrected scale.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_8509', 'dimgray'), ('IMG_8510', 'blue')],
+    )
+    window.library.get_photo('IMG_8509').focus_point = (0.5, 0.5)
+    window.library.get_photo('IMG_8510').focus_point = (0.65, 0.35)
+    window._display_current_photo()
+
+    window.viewer.apply_manual_view(1.25, (0.5, 0.5))
+    window.viewer.pan_by(24, 0)
+    expected_zoom = window.viewer._current_scale
+    expected_center = window.viewer.normalized_viewport_center()
+
+    window.library.get_photo('IMG_8509').focus_point = (0.02, 0.5)
+    window.viewer.set_focus_point((0.02, 0.5))
+    window.recenter_zoom_shortcut.activated.emit()
+    app.processEvents()
+
+    assert expected_center is not None
+    assert window.viewer._current_scale > expected_zoom
+    assert window.viewer.normalized_viewport_center() != pytest.approx(
+        expected_center
+    )
+
+    window.thumbnail_list.setCurrentRow(1)
+    app.processEvents()
+
+    assert window.current_photo_id == 'IMG_8510'
+    assert window.viewer._mode == 'single-manual'
+    assert window.viewer._current_scale == pytest.approx(expected_zoom)
+    assert window.viewer.normalized_viewport_center() == pytest.approx(
+        expected_center
+    )
+
+    window.close()
