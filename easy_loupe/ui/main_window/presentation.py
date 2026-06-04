@@ -290,20 +290,30 @@ class MainWindowPresentationMixin:
             not self.library.scene_detection_done
             or self.current_photo_id is None
         ):
+            # Clear stale scene items without letting Qt emit selection changes
+            # from rows that no longer belong to active scene mode.
+            self.scene_list.blockSignals(True)
             self.scene_list.clear()
+            self.scene_list.blockSignals(False)
             self.scene_list.setVisible(False)
             self._scene_photo_rows = {}
             self._scene_list_scene_id = None
             self._scene_overlay_photo_id = None
+            self._refresh_visible_region_overlay(force_full=True)
             return
 
         current_scene = self._current_scene()
         if current_scene is None:
+            # Same stale-row protection as above: rebuilding overlay ownership
+            # must not navigate through an obsolete scene-list selection.
+            self.scene_list.blockSignals(True)
             self.scene_list.clear()
+            self.scene_list.blockSignals(False)
             self.scene_list.setVisible(False)
             self._scene_photo_rows = {}
             self._scene_list_scene_id = None
             self._scene_overlay_photo_id = None
+            self._refresh_visible_region_overlay(force_full=True)
             return
 
         self.scene_list.blockSignals(True)
@@ -734,14 +744,12 @@ class MainWindowPresentationMixin:
             if self._browse_mode or self._compare_mode
             else self.viewer.visible_region_rect()
         )
+        # In scene mode the vertical strip item is the scene cover, while the
+        # horizontal strip below still targets the exact current photo.
         thumb_photo_id = (
             None
-            if (
-                self._browse_mode
-                or self._compare_mode
-                or self.library.scene_detection_done
-            )
-            else self.current_photo_id
+            if self._browse_mode or self._compare_mode
+            else self._left_photo_id_for_photo(self.current_photo_id)
         )
         scene_photo_id = (
             self.current_photo_id

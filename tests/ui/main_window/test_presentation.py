@@ -92,9 +92,15 @@ def test_current_thumbnail_has_visible_border_without_resizing_selection(
     window.close()
 
 
-def test_main_window_scene_mode_shows_visible_region_on_horizontal_strip_only(
+def test_main_window_scene_mode_shows_visible_region_on_both_strips(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """
+    Verify scene-mode minimap overlays update on both visible strips.
+
+    The vertical strip represents scene stacks while the horizontal strip
+    represents exact photos, so both widgets need their own overlay target.
+    """
     _, app, window = create_main_window_with_library(
         tmp_path,
         monkeypatch,
@@ -113,20 +119,26 @@ def test_main_window_scene_mode_shows_visible_region_on_horizontal_strip_only(
     window.viewer.zoom_step(1.25)
     app.processEvents()
 
-    left_overlay = thumbnail_overlay(window.thumbnail_list, 0)
+    left_overlay_before = thumbnail_overlay(window.thumbnail_list, 0)
     scene_overlay_before = thumbnail_overlay(window.scene_list, 0)
 
-    assert left_overlay is None
+    assert left_overlay_before is not None
     assert scene_overlay_before is not None
+    assert thumbnail_overlay(window.thumbnail_list, 1) is None
+    assert thumbnail_overlay(window.scene_list, 1) is None
 
     trigger_viewer_shortcut(window, 'D')
     app.processEvents()
 
+    left_overlay_after = thumbnail_overlay(window.thumbnail_list, 0)
     scene_overlay_after = thumbnail_overlay(window.scene_list, 0)
 
+    assert left_overlay_after is not None
+    assert left_overlay_after[0] > left_overlay_before[0]
     assert scene_overlay_after is not None
     assert scene_overlay_after[0] > scene_overlay_before[0]
-    assert thumbnail_overlay(window.thumbnail_list, 0) is None
+    assert thumbnail_overlay(window.thumbnail_list, 1) is None
+    assert thumbnail_overlay(window.scene_list, 1) is None
 
     window.close()
 
@@ -135,12 +147,12 @@ def test_scene_mode_visible_region_overlay_survives_vertical_navigation(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """
-    Verify the minimap box appears after moving between scene stacks.
+    Verify minimap overlays survive moving between scene stacks.
 
     A user can press Space to zoom into IMG_8180, then move down in the
-    vertical strip to the IMG_8182/IMG_8183 scene. The red visible-region box
-    should show on IMG_8182 in the horizontal strip immediately, without
-    needing another Space, +, or - press.
+    vertical strip to the IMG_8182/IMG_8183 scene. The red visible-region
+    boxes should move to the new vertical stack and exact horizontal photo
+    immediately, without needing another Space, +, or - press.
     """
     _, app, window = create_main_window_with_library(
         tmp_path,
@@ -177,6 +189,58 @@ def test_scene_mode_visible_region_overlay_survives_vertical_navigation(
         visible_region
     )
     assert thumbnail_overlay(window.thumbnail_list, 0) is None
+    assert thumbnail_overlay(window.thumbnail_list, 1) == pytest.approx(
+        visible_region
+    )
+
+    window.close()
+
+
+def test_scene_mode_visible_region_overlay_moves_to_vertical_strip_when_scenes_clear(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify clearing scenes does not lose the zoom minimap overlay.
+
+    Removing scene mode rebuilds both thumbnail strips. This guards the subtle
+    Qt timing path where stale scene-list selection signals could change the
+    current photo before the overlay is reassigned to the vertical strip.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_8195', 'dimgray'), ('IMG_8196', 'blue')],
+        scene_groups=[['IMG_8195', 'IMG_8196']],
+    )
+
+    assert window.thumbnail_list.count() == 1
+    assert window.scene_list.count() == 2
+
+    window.viewer.toggle_focus_zoom()
+    window.viewer.zoom_step(1.25)
+    app.processEvents()
+
+    visible_region = window.viewer.visible_region_rect()
+
+    assert visible_region is not None
+    assert thumbnail_overlay(window.thumbnail_list, 0) == pytest.approx(
+        visible_region
+    )
+    assert thumbnail_overlay(window.scene_list, 0) == pytest.approx(
+        visible_region
+    )
+
+    window.library.set_scene_group_photo_ids([], scene_source=None)
+    window._after_scene_change(selected_photo_ids=['IMG_8195'])
+    app.processEvents()
+
+    assert window.library.scene_detection_done is False
+    assert window.scene_list.count() == 0
+    assert window.scene_list.isVisible() is False
+    assert window.thumbnail_list.count() == 2
+    assert thumbnail_overlay(window.thumbnail_list, 0) == pytest.approx(
+        window.viewer.visible_region_rect()
+    )
     assert thumbnail_overlay(window.thumbnail_list, 1) is None
 
     window.close()
