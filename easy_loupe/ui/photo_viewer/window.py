@@ -697,7 +697,6 @@ class PhotoViewerWindow(QMainWindow):
             if self._photo_viewer_exif_worker is not None:
                 self._photo_viewer_exif_worker.cancel()
 
-            self._photo_viewer_exif_thread.quit()
             return
 
         try:

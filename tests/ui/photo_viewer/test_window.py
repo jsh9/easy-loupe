@@ -857,6 +857,119 @@ def test_photo_viewer_exif_success_replaces_loading_placeholders(
     window.close()
 
 
+def test_photo_viewer_exif_refresh_waits_for_active_thread(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify rapid navigation does not quit an active EXIF thread early.
+
+    The old worker should be canceled and allowed to finish naturally so Qt
+    owns the thread and worker teardown order.
+    """
+
+    class FakeExifThread:
+        def __init__(self) -> None:
+            self.quit_calls = 0
+
+        def quit(self) -> None:
+            self.quit_calls += 1
+
+    class FakeExifWorker:
+        def __init__(self) -> None:
+            self.cancel_calls = 0
+
+        def cancel(self) -> None:
+            self.cancel_calls += 1
+
+    original_start = PhotoViewerWindow._start_photo_viewer_exif_refresh
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    _app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+    monkeypatch.setattr(
+        window,
+        '_start_photo_viewer_exif_refresh',
+        original_start.__get__(window, PhotoViewerWindow),
+    )
+    fake_thread = FakeExifThread()
+    fake_worker = FakeExifWorker()
+    window._photo_viewer_exif_thread = fake_thread
+    window._photo_viewer_exif_worker = fake_worker
+    window._photo_viewer_exif_request_id = 4
+
+    window._start_photo_viewer_exif_refresh()
+
+    assert window._photo_viewer_exif_request_id == 5
+    assert window._photo_viewer_exif_refresh_pending is True
+    assert fake_worker.cancel_calls == 1
+    assert fake_thread.quit_calls == 0
+    assert window._photo_viewer_exif_thread is fake_thread
+    assert window._photo_viewer_exif_worker is fake_worker
+
+    window._photo_viewer_exif_thread = None
+    window._photo_viewer_exif_worker = None
+    window._photo_viewer_exif_refresh_pending = False
+    window.close()
+
+
+def test_photo_viewer_exif_clear_starts_one_pending_refresh(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify pending EXIF refresh starts only after thread cleanup."""
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    _app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+    finished_thread = object()
+    finished_worker = object()
+    start_calls: list[str] = []
+    monkeypatch.setattr(
+        window,
+        '_start_photo_viewer_exif_refresh',
+        lambda: start_calls.append('start'),
+    )
+    window._photo_viewer_exif_thread = finished_thread
+    window._photo_viewer_exif_worker = finished_worker
+    window._photo_viewer_exif_refresh_pending = True
+
+    window._clear_photo_viewer_exif_worker(finished_thread, finished_worker)
+
+    assert window._photo_viewer_exif_thread is None
+    assert window._photo_viewer_exif_worker is None
+    assert window._photo_viewer_exif_refresh_pending is False
+    assert start_calls == ['start']
+    window.close()
+
+
+def test_photo_viewer_exif_clear_skips_pending_refresh_while_closing(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify closing viewer windows do not start replacement EXIF work."""
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    _app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+    finished_thread = object()
+    finished_worker = object()
+    start_calls: list[str] = []
+    monkeypatch.setattr(
+        window,
+        '_start_photo_viewer_exif_refresh',
+        lambda: start_calls.append('start'),
+    )
+    window._photo_viewer_exif_thread = finished_thread
+    window._photo_viewer_exif_worker = finished_worker
+    window._photo_viewer_exif_refresh_pending = True
+    window._closing = True
+
+    window._clear_photo_viewer_exif_worker(finished_thread, finished_worker)
+
+    assert window._photo_viewer_exif_thread is None
+    assert window._photo_viewer_exif_worker is None
+    assert start_calls == []
+
+    window._photo_viewer_exif_refresh_pending = False
+    window._closing = False
+    window.close()
+
+
 def test_photo_viewer_denied_access_blocks_navigation_and_handoff(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,

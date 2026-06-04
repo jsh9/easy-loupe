@@ -1,5 +1,14 @@
 # Change Log
 
+## [1.0.4] - 2026-06-04
+
+- Fixed
+
+  - Standalone photo-viewer fast navigation no longer requests early EXIF
+    worker-thread shutdown while a previous EXIF refresh may still be running,
+    reducing the risk of native Qt/PySide teardown crashes when navigating
+    photos very rapidly
+
 ## [1.0.3] - 2026-06-04
 
 - Changed
