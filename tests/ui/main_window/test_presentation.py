@@ -131,6 +131,57 @@ def test_main_window_scene_mode_shows_visible_region_on_horizontal_strip_only(
     window.close()
 
 
+def test_scene_mode_visible_region_overlay_survives_vertical_navigation(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify the minimap box appears after moving between scene stacks.
+
+    A user can press Space to zoom into IMG_8180, then move down in the
+    vertical strip to the IMG_8182/IMG_8183 scene. The red visible-region box
+    should show on IMG_8182 in the horizontal strip immediately, without
+    needing another Space, +, or - press.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_8180', 'dimgray'),
+            ('IMG_8181', 'green'),
+            ('IMG_8182', 'blue'),
+            ('IMG_8183', 'purple'),
+        ],
+        scene_groups=[
+            ['IMG_8180', 'IMG_8181'],
+            ['IMG_8182', 'IMG_8183'],
+        ],
+    )
+
+    assert window.thumbnail_list.count() == 2
+    assert window.scene_list.count() == 2
+
+    window.viewer.toggle_focus_zoom()
+    window.viewer.zoom_step(1.25)
+    app.processEvents()
+
+    window.thumbnail_list.setCurrentRow(1)
+    app.processEvents()
+
+    visible_region = window.viewer.visible_region_rect()
+
+    assert window.current_photo_id == 'IMG_8182'
+    assert visible_region is not None
+    assert window.scene_list.count() == 2
+    assert window.scene_list.currentRow() == 0
+    assert thumbnail_overlay(window.scene_list, 0) == pytest.approx(
+        visible_region
+    )
+    assert thumbnail_overlay(window.thumbnail_list, 0) is None
+    assert thumbnail_overlay(window.thumbnail_list, 1) is None
+
+    window.close()
+
+
 def test_main_window_visible_region_overlay_clears_in_fit_and_browse_and_tracks_split_view(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

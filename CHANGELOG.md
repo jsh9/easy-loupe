@@ -1,5 +1,13 @@
 # Change Log
 
+## [1.0.5] - 2026-06-04
+
+- Fixed
+
+  - In culling scene mode, the red visible-region box no longer disappears
+    from the horizontal scene strip after navigating with the vertical
+    scene-stack strip while zoomed in
+
 ## [1.0.4] - 2026-06-04
 
 - Fixed

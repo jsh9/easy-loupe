@@ -294,6 +294,7 @@ class MainWindowPresentationMixin:
             self.scene_list.setVisible(False)
             self._scene_photo_rows = {}
             self._scene_list_scene_id = None
+            self._scene_overlay_photo_id = None
             return
 
         current_scene = self._current_scene()
@@ -302,12 +303,16 @@ class MainWindowPresentationMixin:
             self.scene_list.setVisible(False)
             self._scene_photo_rows = {}
             self._scene_list_scene_id = None
+            self._scene_overlay_photo_id = None
             return
 
         self.scene_list.blockSignals(True)
         self.scene_list.clear()
         self._scene_photo_rows = {}
         self._scene_list_scene_id = current_scene.scene_id
+        # Clearing the list discards the widget that owns the overlay. Reset
+        # the cached owner so the rebuilt strip is painted from scratch.
+        self._scene_overlay_photo_id = None
         for index, photo_id in enumerate(current_scene.photo_ids):
             photo = self.library.get_photo(photo_id)
             self._add_photo_item(
@@ -323,6 +328,9 @@ class MainWindowPresentationMixin:
         self.scene_list.setVisible(
             not self._browse_mode and not self._compare_mode
         )
+        # Photo loading can emit the visible-region signal before this rebuilt
+        # strip exists, so reapply the current viewer rectangle now.
+        self._refresh_visible_region_overlay(force_full=True)
 
     def _toggle_theme_checked(
             self: MainWindow,
