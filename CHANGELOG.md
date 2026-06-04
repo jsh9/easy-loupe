@@ -1,5 +1,13 @@
 # Change Log
 
+## [1.0.3] - 2026-06-04
+
+- Changed
+
+  - The AF point marker now starts hidden by default in culling and standalone
+    photo-viewer modes; press `F` or use `Show AF point` in culling mode to
+    show it
+
 ## [1.0.2] - 2026-06-03
 
 - Added

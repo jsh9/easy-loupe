@@ -61,6 +61,40 @@ def _smallest_limit_for_count(photo_count: int) -> int:
     return max(COMPARE_PHOTO_LIMIT_OPTIONS)
 
 
+def test_compare_photo_viewer_defaults_to_hidden_af_marker(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify compare panes inherit the hidden AF-marker default.
+
+    MainWindow normally pushes this setting into compare mode, but direct
+    widget construction is easy to miss. This keeps future compare panes and
+    selected-photo view from drifting back to visible markers by default.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    create_jpeg(tmp_path / 'B.JPG', 'blue')
+    app = QApplication.instance() or QApplication([])
+    viewer = ComparePhotoViewer()
+
+    assert (
+        viewer.selected_viewer._focus_point_marker_enabled
+        is viewer._focus_point_marker_enabled
+    )
+    assert viewer._focus_point_marker_enabled is False
+    assert viewer.selected_viewer._focus_point_marker_enabled is False
+
+    viewer.set_photos([
+        ComparePhoto('A', tmp_path / 'A.JPG', (0.25, 0.5)),
+        ComparePhoto('B', tmp_path / 'B.JPG', (0.75, 0.5)),
+    ])
+
+    assert [pane._focus_point_marker_enabled for pane in viewer._viewers] == [
+        False,
+        False,
+    ]
+    _close_viewer(viewer, app)
+
+
 @pytest.mark.parametrize(
     ('photo_count', 'vertical_count', 'expected_shape'),
     [

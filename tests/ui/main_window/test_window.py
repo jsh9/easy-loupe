@@ -150,7 +150,7 @@ def _create_sorting_window(
     return theme_module, app, window
 
 
-def test_main_window_registers_open_detect_and_organize_actions() -> None:
+def test_main_window_registers_open_detect_and_organize_actions() -> None:  # noqa: PLR0915
     app = QApplication.instance() or QApplication([])
     window = main_window_module.MainWindow()
 
@@ -280,7 +280,7 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:
         )
     )
     assert window.show_af_point_toggle.text() == 'Show AF point'
-    assert window.show_af_point_toggle.isChecked() is True
+    assert window.show_af_point_toggle.isChecked() is False
     assert (
         window.show_af_point_toggle.toolTip()
         == main_window_module.MainWindow._shortcut_tooltip(
@@ -288,11 +288,6 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:
         )
     )
     assert not hasattr(window, 'zoom_to_af_point_toggle')
-    assert window.viewer._focus_point_marker_enabled is True
-    assert window.viewer.single_viewer._focus_point_marker_enabled is True
-
-    window.show_af_point_toggle.setChecked(False)
-
     assert window.viewer._focus_point_marker_enabled is False
     assert window.viewer.single_viewer._focus_point_marker_enabled is False
     assert window.viewer.split_fit_viewer._focus_point_marker_enabled is False
@@ -305,6 +300,13 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:
     assert window.viewer.single_viewer._focus_point_marker_enabled is True
     assert window.viewer.split_fit_viewer._focus_point_marker_enabled is True
     assert window.viewer.split_zoom_viewer._focus_point_marker_enabled is True
+
+    window.show_af_point_toggle.setChecked(False)
+
+    assert window.viewer._focus_point_marker_enabled is False
+    assert window.viewer.single_viewer._focus_point_marker_enabled is False
+    assert window.viewer.split_fit_viewer._focus_point_marker_enabled is False
+    assert window.viewer.split_zoom_viewer._focus_point_marker_enabled is False
     assert (
         window.metadata_label.text()
         == f'Metadata: {theme_module.NO_METADATA_TEXT}'

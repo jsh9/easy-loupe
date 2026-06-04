@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QSplitter, QStackedLayout, QWidget
 
+from easy_loupe.ui.defaults import DEFAULT_SHOW_AF_POINT
 from easy_loupe.ui.theme import (
     SPLIT_VIEW_PANE_COUNT,
     THEMES,
@@ -31,7 +32,7 @@ class MainPhotoViewer(QWidget):
         self._current_image_path: Path | None = None
         self._current_focus_point = (0.5, 0.5)
         self._current_focus_point_pending = False
-        self._focus_point_marker_enabled = True
+        self._focus_point_marker_enabled = DEFAULT_SHOW_AF_POINT
         self._mode = 'single-fit'
 
         self.single_viewer = PhotoViewer(

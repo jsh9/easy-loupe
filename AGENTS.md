@@ -468,7 +468,7 @@ Mode-transition summary:
 - Manual zoom state is remembered per photo. Returning to the same photo
   restores its last manual zoom center and scale; a different photo gets its
   own remembered state or falls back to the extracted AF point.
-- The top bar includes `Show AF point`, checked by default. When checked, the
+- The top bar includes `Show AF point`, unchecked by default. When checked, the
   main viewer shows a fixed-screen-size red square at the photo's extracted AF
   point in fit view, manual/focus zoom, and both panes of split view.
 - The `I` shortcut toggles a floating EXIF and RGB histogram overlay in normal
@@ -663,8 +663,9 @@ Keep these expectations intact unless intentionally redesigning the UI:
   all-pane compare zoom in the grid and toggles fit/100% in selected-photo
   compare view. The default compare limit is 8, configurable from
   `Compare > Limit` with options 2, 3, 4, 6, 8, 10, 12, 16, and 20.
-- When `Show AF point` is checked, the main viewer shows the fixed-size red AF
-  point marker in fit view, manual/focus zoom, and both split-view panes.
+- `Show AF point` is unchecked by default. When checked, the main viewer shows
+  the fixed-size red AF point marker in fit view, manual/focus zoom, and both
+  split-view panes.
 - Pressing `I` toggles the viewer info overlay for the current normal-view
   photo. It shows load-time EXIF display rows and an RGB histogram when
   available, and is hidden during browse mode, compare mode, and busy/progress

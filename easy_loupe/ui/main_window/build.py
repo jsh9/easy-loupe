@@ -37,6 +37,7 @@ from easy_loupe.core.folder_loading import (
     normalize_sort_reversed,
 )
 from easy_loupe.core.histogram import compute_rgb_histogram
+from easy_loupe.ui.defaults import DEFAULT_SHOW_AF_POINT
 from easy_loupe.ui.identity import APP_NAME, APP_VERSION
 from easy_loupe.ui.theme import NO_METADATA_TEXT
 from easy_loupe.ui.viewers.compare_photo_viewer import (
@@ -132,7 +133,7 @@ class MainWindowBuildMixin:
         top_bar.addSpacing(6)
 
         self.show_af_point_toggle = QCheckBox('Show AF point')
-        self.show_af_point_toggle.setChecked(True)
+        self.show_af_point_toggle.setChecked(DEFAULT_SHOW_AF_POINT)
         self.show_af_point_toggle.setToolTip(
             self._shortcut_tooltip('Show AF point', 'F')
         )

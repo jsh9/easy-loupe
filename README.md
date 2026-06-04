@@ -215,8 +215,9 @@ build keeps a terminal attached so startup errors include a normal traceback.
 - Displays metadata in the top bar and thumbnail strips using star ratings, a
   colored label dot, and pick/reject indicators.
 - Supports autofocus-point/manual zoom, split view, per-photo remembered manual
-  zoom state, temporary AF/default recentering with `Shift+F`, reset of
-  remembered zoom centers with `Ctrl+Shift+F`, and `W/A/S/D` panning.
+  zoom state, an AF point marker that is hidden by default and toggled with
+  `F`, temporary AF/default recentering with `Shift+F`, reset of remembered
+  zoom centers with `Ctrl+Shift+F`, and `W/A/S/D` panning.
 - Shows the current visible region on strip thumbnails while zoomed in, using a
   red zoom box and a darkened mask outside the box.
 - In scene mode, the visible-region overlay moves to the horizontal scene strip
@@ -232,9 +233,10 @@ build keeps a terminal attached so startup errors include a normal traceback.
 ## 4. Modes and Transitions
 
 - `Photo viewer mode` opens when a supported photo file is launched directly.
-  It shows the opened photo first, supports neighboring-photo navigation after
-  background folder hydration, and uses `G` or `Enter` to hand off to culling
-  mode on the same monitor.
+  It shows the opened photo first, keeps the AF point marker hidden until `F`
+  is pressed, supports neighboring-photo navigation after background folder
+  hydration, and uses `G` or `Enter` to hand off to culling mode on the same
+  monitor.
 - `View mode` is the normal working mode. It shows the left thumbnail strip,
   the main viewer, and the horizontal scene strip when scene detection is
   available for the current photo.
@@ -324,13 +326,14 @@ Common transitions:
   horizontal scene-strip selection and `Shift+Up` / `Shift+Down` extends across
   scene-stack rows using an anchored range that releases rows outside the range
   when you reverse direction
-- Zoom and pan: `\` toggles split view, `-` zooms out, `=` / `+` zoom in,
-  `Shift+F` temporarily recenters manual zoom on the AF point or image center,
-  `Ctrl+Shift+F` resets remembered zoom centers while preserving zoom levels,
-  `W/A/S/D` pan the active zoomed view or compare pane set, the strip thumbnail
-  overlay tracks the current visible region while zoomed, left/right arrows
-  move within the current scene in view mode, and arrow keys move the active
-  pane in compare mode
+- Zoom and pan: `\` toggles split view, `F` toggles the AF point marker from
+  its hidden default, `-` zooms out, `=` / `+` zoom in, `Shift+F` temporarily
+  recenters manual zoom on the AF point or image center, `Ctrl+Shift+F` resets
+  remembered zoom centers while preserving zoom levels, `W/A/S/D` pan the
+  active zoomed view or compare pane set, the strip thumbnail overlay tracks
+  the current visible region while zoomed, left/right arrows move within the
+  current scene in view mode, and arrow keys move the active pane in compare
+  mode
 
 ## 6. Metadata File
 
