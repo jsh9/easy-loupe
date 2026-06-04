@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from easy_loupe.ui.defaults import DEFAULT_SHOW_AF_POINT
 from easy_loupe.ui.theme import NO_METADATA_TEXT, THEMES, ThemePalette
 from easy_loupe.ui.viewers.photo_viewer import ManualView, PhotoViewer
 
@@ -206,7 +207,7 @@ class ComparePhotoViewer(QWidget):
         self.set_photo_limit(photo_limit)
         self._theme = THEMES['light']
         self._locked_zoom = True
-        self._focus_point_marker_enabled = True
+        self._focus_point_marker_enabled = DEFAULT_SHOW_AF_POINT
         self._active_index = 0
         self._rows = 1
         self._columns = 1
@@ -247,6 +248,9 @@ class ComparePhotoViewer(QWidget):
         selected_layout.setContentsMargins(0, 0, 0, 0)
         selected_layout.setSpacing(4)
         self.selected_viewer = PhotoViewer(self.selected_widget)
+        self.selected_viewer.set_focus_point_marker_visible(
+            enabled=self._focus_point_marker_enabled
+        )
         self.selected_metadata_label = QLabel(self.selected_widget)
         self.selected_metadata_label.setObjectName('compareMetadataLabel')
         self.selected_metadata_label.setAlignment(Qt.AlignCenter)

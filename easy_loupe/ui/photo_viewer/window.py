@@ -30,6 +30,7 @@ from easy_loupe.core.folder_loading import (
 )
 from easy_loupe.core.histogram import compute_rgb_histogram
 from easy_loupe.core.photo_library import PhotoLibrary
+from easy_loupe.ui.defaults import DEFAULT_SHOW_AF_POINT
 from easy_loupe.ui.folder_access import FolderAccessManager
 from easy_loupe.ui.identity import APP_NAME, easy_loupe_icon
 from easy_loupe.ui.launch import CullingLaunchRequest
@@ -174,7 +175,7 @@ class PhotoViewerWindow(QMainWindow):
         self._photo_viewer_exif_refresh_pending = False
         self._viewer_prefetch_thread: QThread | None = None
         self._viewer_prefetch_worker: ViewerPrefetchWorker | None = None
-        self._show_af_point_marker = True
+        self._show_af_point_marker = DEFAULT_SHOW_AF_POINT
         self._info_overlay_enabled = False
         self._info_overlay_refresh_deferred = False
         self._minimap_photo_id: str | None = None
@@ -199,7 +200,9 @@ class PhotoViewerWindow(QMainWindow):
         stack_layout = QVBoxLayout(self.viewer_stack_widget)
         stack_layout.setContentsMargins(0, 0, 0, 0)
         self.viewer = MainPhotoViewer(self.viewer_stack_widget)
-        self.viewer.set_focus_point_marker_visible(enabled=True)
+        self.viewer.set_focus_point_marker_visible(
+            enabled=DEFAULT_SHOW_AF_POINT
+        )
         self.viewer.visible_region_changed.connect(
             self._refresh_visible_region_overlay
         )

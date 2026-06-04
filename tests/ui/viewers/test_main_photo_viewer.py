@@ -5,9 +5,10 @@ from typing import TYPE_CHECKING
 import pytest
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from easy_loupe.ui.main_window.build import VIEWER_KEYBOARD_PAN_STEP
+from easy_loupe.ui.viewers.main_photo_viewer import MainPhotoViewer
 from tests.ui._helpers import (
     create_main_window_with_library,
     trigger_viewer_shortcut,
@@ -15,6 +16,25 @@ from tests.ui._helpers import (
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+def test_main_photo_viewer_defaults_to_hidden_af_marker() -> None:
+    """
+    Verify single and split panes inherit the hidden AF-marker default.
+
+    Host windows also apply the setting, but direct ``MainPhotoViewer``
+    construction should stay aligned so future callers cannot accidentally
+    restore visible markers by default.
+    """
+    app = QApplication.instance() or QApplication([])
+    viewer = MainPhotoViewer()
+
+    assert viewer._focus_point_marker_enabled is False
+    assert viewer.single_viewer._focus_point_marker_enabled is False
+    assert viewer.split_fit_viewer._focus_point_marker_enabled is False
+    assert viewer.split_zoom_viewer._focus_point_marker_enabled is False
+    viewer.close()
+    app.processEvents()
 
 
 def test_main_window_split_shortcut_enters_and_exits_split_with_preserved_manual_view(
@@ -28,6 +48,9 @@ def test_main_window_split_shortcut_enters_and_exits_split_with_preserved_manual
 
     assert window.viewer._mode == 'single-fit'
     assert window.viewer.is_split_view() is False
+    assert window.show_af_point_toggle.isChecked() is False
+
+    window.show_af_point_toggle.setChecked(True)
 
     window.split_mode_shortcut.activated.emit()
     app.processEvents()

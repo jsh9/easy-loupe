@@ -710,12 +710,6 @@ def test_photo_viewer_shortcuts_toggle_af_marker_and_info_overlay(
     window._photo_viewer_exif_request_id = 5
     window._handle_photo_viewer_exif_failed(5, 'exif failed')
     app.processEvents()
-    assert window.viewer.single_viewer._focus_point_marker.isVisible() is True
-
-    window.show_af_point_shortcut.activated.emit()
-    app.processEvents()
-
-    assert window._show_af_point_marker is False
     assert window.viewer.single_viewer._focus_point_marker.isVisible() is False
 
     window.show_af_point_shortcut.activated.emit()
@@ -724,11 +718,66 @@ def test_photo_viewer_shortcuts_toggle_af_marker_and_info_overlay(
     assert window._show_af_point_marker is True
     assert window.viewer.single_viewer._focus_point_marker.isVisible() is True
 
+    window.show_af_point_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._show_af_point_marker is False
+    assert window.viewer.single_viewer._focus_point_marker.isVisible() is False
+
     window.info_overlay_shortcut.activated.emit()
     app.processEvents()
 
     assert window._info_overlay_enabled is False
     assert window.exif_overlay.isHidden() is True
+    window.close()
+
+
+def test_photo_viewer_af_marker_toggle_persists_through_pending_navigation(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify ``F`` enables AF display through pending EXIF and navigation."""
+    create_jpeg(tmp_path / 'A.JPG', 'green', size=(2000, 1500))
+    create_jpeg(tmp_path / 'B.JPG', 'blue', size=(2000, 1500))
+    app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+
+    assert window._show_af_point_marker is False
+    assert window.viewer.single_viewer._focus_point_marker.isVisible() is False
+
+    window.show_af_point_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._show_af_point_marker is True
+    assert window.viewer.single_viewer._focus_point_marker.isVisible() is False
+
+    window._photo_viewer_exif_request_id = 6
+    window._handle_photo_viewer_exif_finished(
+        6,
+        'A',
+        PhotoViewerExifResult(
+            focus_point=(0.25, 0.6),
+            exif_display={},
+            capture_at=None,
+            image_width=1000,
+            image_height=500,
+        ),
+    )
+    app.processEvents()
+
+    assert window.viewer.single_viewer._focus_point_marker.isVisible() is True
+
+    window.navigate(1)
+    app.processEvents()
+
+    assert window.current_photo_id == 'B'
+    assert window._show_af_point_marker is True
+    assert window.viewer.single_viewer._focus_point_marker.isVisible() is False
+
+    window._photo_viewer_exif_request_id = 7
+    window._handle_photo_viewer_exif_failed(7, 'exif failed')
+    app.processEvents()
+
+    assert window.viewer.single_viewer._focus_point_marker.isVisible() is True
     window.close()
 
 
@@ -804,7 +853,7 @@ def test_photo_viewer_exif_success_replaces_loading_placeholders(
         'Camera Model': 'Z 8',
         'ISO': '800',
     }
-    assert window.viewer.single_viewer._focus_point_marker.isVisible() is True
+    assert window.viewer.single_viewer._focus_point_marker.isVisible() is False
     window.close()
 
 
@@ -860,15 +909,15 @@ def test_photo_viewer_denied_access_blocks_navigation_and_handoff(
     window.close()
 
 
-def test_photo_viewer_exif_failure_reveals_fallback_focus_marker(
+def test_photo_viewer_exif_failure_clears_pending_fallback_focus_marker(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
     Verify EXIF failure clears the pending focus-point state.
 
-    Without this fallback, the AF marker remains hidden forever even though the
-    viewer has a usable center-point fallback for focus zoom.
+    The marker remains hidden by default, but once the user enables AF display
+    the cleared pending state lets the usable center-point fallback appear.
     """
     create_jpeg(tmp_path / 'A.JPG', 'green', size=(2000, 1500))
     app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
@@ -887,8 +936,13 @@ def test_photo_viewer_exif_failure_reveals_fallback_focus_marker(
 
     assert photo.focus_point_pending is False
     assert window.viewer.single_viewer._focus_point_pending is False
-    assert window.viewer.single_viewer._focus_point_marker.isVisible() is True
+    assert window.viewer.single_viewer._focus_point_marker.isVisible() is False
     assert window.exif_overlay.exif_display() == {'File Size': 'JPG: 47 KB'}
+
+    window.show_af_point_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.viewer.single_viewer._focus_point_marker.isVisible() is True
     window.close()
 
 
