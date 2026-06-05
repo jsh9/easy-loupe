@@ -4,8 +4,9 @@
 
 - Fixed
 
-  - In culling scene mode, red visible-region boxes now stay visible on both
-    the vertical scene-stack strip and horizontal scene strip while zoomed in
+  - In culling scene mode, red visible-region boxes now stay visible on the
+    horizontal scene strip and on the vertical scene-stack strip when the
+    current photo is the scene cover
 
 ## [1.0.4] - 2026-06-04
 

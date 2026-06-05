@@ -70,6 +70,34 @@ class MainWindowPresentationMixin:
 
         return scene.photo_ids[0]
 
+    def _thumbnail_overlay_owner_photo_id(self: MainWindow) -> str | None:
+        """
+        Return the exact photo allowed to paint the vertical strip overlay.
+
+        Scene-mode rows display cover photos, not every exact photo in the
+        scene. Non-cover photos therefore keep their minimap on the horizontal
+        strip only, so their visible region is not drawn on the wrong preview.
+        """
+        if (
+            self._browse_mode
+            or self._compare_mode
+            or self.current_photo_id is None
+        ):
+            return None
+
+        if not self.library.scene_detection_done:
+            return self.current_photo_id
+
+        current_scene = self._current_scene()
+        if current_scene is None or not current_scene.photo_ids:
+            return None
+
+        cover_photo_id = current_scene.photo_ids[0]
+        if self.current_photo_id != cover_photo_id:
+            return None
+
+        return self.current_photo_id
+
     def _thumbnail_row_for_photo(
             self: MainWindow, photo_id: str | None
     ) -> int | None:
@@ -299,7 +327,10 @@ class MainWindowPresentationMixin:
             self._scene_photo_rows = {}
             self._scene_list_scene_id = None
             self._scene_overlay_photo_id = None
-            self._refresh_visible_region_overlay(force_full=True)
+            # The scene strip was removed, so clear only the cached scene
+            # overlay owner and let the incremental path preserve any valid
+            # vertical thumbnail overlay without scanning the browse grid.
+            self._refresh_visible_region_overlay()
             return
 
         current_scene = self._current_scene()
@@ -313,7 +344,10 @@ class MainWindowPresentationMixin:
             self._scene_photo_rows = {}
             self._scene_list_scene_id = None
             self._scene_overlay_photo_id = None
-            self._refresh_visible_region_overlay(force_full=True)
+            # The scene strip was removed, so clear only the cached scene
+            # overlay owner and let the incremental path preserve any valid
+            # vertical thumbnail overlay without scanning the browse grid.
+            self._refresh_visible_region_overlay()
             return
 
         self.scene_list.blockSignals(True)
@@ -338,9 +372,10 @@ class MainWindowPresentationMixin:
         self.scene_list.setVisible(
             not self._browse_mode and not self._compare_mode
         )
-        # Photo loading can emit the visible-region signal before this rebuilt
-        # strip exists, so reapply the current viewer rectangle now.
-        self._refresh_visible_region_overlay(force_full=True)
+        # Rebuilding replaced the widgets that can own scene-strip overlays.
+        # Reapply the viewer rectangle through the incremental path so scene
+        # navigation does not perform a full browse-grid overlay pass.
+        self._refresh_visible_region_overlay()
 
     def _toggle_theme_checked(
             self: MainWindow,
@@ -739,18 +774,19 @@ class MainWindowPresentationMixin:
     def _refresh_visible_region_overlay(
             self: MainWindow, *, force_full: bool = False
     ) -> None:
+        """
+        Refresh strip minimap overlays after viewer or list state changes.
+
+        ``force_full`` is reserved for broad restyles/rebuilds where any list
+        item may hold stale overlay state. Normal scene-strip rebuilds use the
+        cached-owner path to clear and repaint only affected rows.
+        """
         visible_region = (
             None
             if self._browse_mode or self._compare_mode
             else self.viewer.visible_region_rect()
         )
-        # In scene mode the vertical strip item is the scene cover, while the
-        # horizontal strip below still targets the exact current photo.
-        thumb_photo_id = (
-            None
-            if self._browse_mode or self._compare_mode
-            else self._left_photo_id_for_photo(self.current_photo_id)
-        )
+        thumb_photo_id = self._thumbnail_overlay_owner_photo_id()
         scene_photo_id = (
             self.current_photo_id
             if (
