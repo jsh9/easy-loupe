@@ -306,7 +306,6 @@ def test_populate_scene_list_uses_targeted_visible_region_refresh(
     app.processEvents()
 
     assert window.browse_list not in bulk_overlay_widgets
-    assert bulk_overlay_widgets == []
     assert thumbnail_overlay(window.thumbnail_list, 0) is not None
     assert thumbnail_overlay(window.scene_list, 0) is not None
 

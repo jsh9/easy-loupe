@@ -313,41 +313,47 @@ class MainWindowPresentationMixin:
             if item is not None:
                 self.browse_list.scrollToItem(item)
 
+    def _clear_scene_list_for_current_state(self: MainWindow) -> None:
+        """
+        Clear scene-strip widgets after scene mode becomes ineligible.
+
+        Signals are blocked because stale scene rows can otherwise emit
+        selection changes while the list no longer represents the active state.
+        The incremental overlay refresh preserves any valid vertical minimap
+        while clearing the scene-strip overlay owner.
+        """
+        # Clear stale scene items without letting Qt emit selection changes
+        # from rows that no longer belong to active scene mode.
+        self.scene_list.blockSignals(True)
+        self.scene_list.clear()
+        self.scene_list.blockSignals(False)
+        self.scene_list.setVisible(False)
+        self._scene_photo_rows = {}
+        self._scene_list_scene_id = None
+        self._scene_overlay_photo_id = None
+        # The scene strip was removed, so clear only the cached scene overlay
+        # owner and let the incremental path preserve any valid vertical
+        # thumbnail overlay without scanning the browse grid.
+        self._refresh_visible_region_overlay()
+
     def _populate_scene_list(self: MainWindow) -> None:
+        """
+        Rebuild the horizontal strip for the current detected scene.
+
+        The scene strip owns exact in-scene photo rows, so it must be rebuilt
+        when the current scene changes. Overlay ownership is refreshed after
+        rebuilding because the old thumbnail widgets have been discarded.
+        """
         if (
             not self.library.scene_detection_done
             or self.current_photo_id is None
         ):
-            # Clear stale scene items without letting Qt emit selection changes
-            # from rows that no longer belong to active scene mode.
-            self.scene_list.blockSignals(True)
-            self.scene_list.clear()
-            self.scene_list.blockSignals(False)
-            self.scene_list.setVisible(False)
-            self._scene_photo_rows = {}
-            self._scene_list_scene_id = None
-            self._scene_overlay_photo_id = None
-            # The scene strip was removed, so clear only the cached scene
-            # overlay owner and let the incremental path preserve any valid
-            # vertical thumbnail overlay without scanning the browse grid.
-            self._refresh_visible_region_overlay()
+            self._clear_scene_list_for_current_state()
             return
 
         current_scene = self._current_scene()
         if current_scene is None:
-            # Same stale-row protection as above: rebuilding overlay ownership
-            # must not navigate through an obsolete scene-list selection.
-            self.scene_list.blockSignals(True)
-            self.scene_list.clear()
-            self.scene_list.blockSignals(False)
-            self.scene_list.setVisible(False)
-            self._scene_photo_rows = {}
-            self._scene_list_scene_id = None
-            self._scene_overlay_photo_id = None
-            # The scene strip was removed, so clear only the cached scene
-            # overlay owner and let the incremental path preserve any valid
-            # vertical thumbnail overlay without scanning the browse grid.
-            self._refresh_visible_region_overlay()
+            self._clear_scene_list_for_current_state()
             return
 
         self.scene_list.blockSignals(True)
