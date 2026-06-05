@@ -220,8 +220,9 @@ build keeps a terminal attached so startup errors include a normal traceback.
   zoom centers with `Ctrl+Shift+F`, and `W/A/S/D` panning.
 - Shows the current visible region on strip thumbnails while zoomed in, using a
   red zoom box and a darkened mask outside the box.
-- In scene mode, the visible-region overlay moves to the horizontal scene strip
-  rather than the left scene-stack strip.
+- In scene mode, the visible-region overlay appears on the horizontal scene
+  strip and, when the current photo is the scene cover, on the matching
+  vertical scene-stack row.
 - Keeps split view active when scene detection finishes in view mode, while
   still exiting browse mode back to a fit view.
 - Uses a progress overlay during long-running work such as folder loading and

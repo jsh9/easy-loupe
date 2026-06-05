@@ -70,6 +70,34 @@ class MainWindowPresentationMixin:
 
         return scene.photo_ids[0]
 
+    def _thumbnail_overlay_owner_photo_id(self: MainWindow) -> str | None:
+        """
+        Return the exact photo allowed to paint the vertical strip overlay.
+
+        Scene-mode rows display cover photos, not every exact photo in the
+        scene. Non-cover photos therefore keep their minimap on the horizontal
+        strip only, so their visible region is not drawn on the wrong preview.
+        """
+        if (
+            self._browse_mode
+            or self._compare_mode
+            or self.current_photo_id is None
+        ):
+            return None
+
+        if not self.library.scene_detection_done:
+            return self.current_photo_id
+
+        current_scene = self._current_scene()
+        if current_scene is None or not current_scene.photo_ids:
+            return None
+
+        cover_photo_id = current_scene.photo_ids[0]
+        if self.current_photo_id != cover_photo_id:
+            return None
+
+        return self.current_photo_id
+
     def _thumbnail_row_for_photo(
             self: MainWindow, photo_id: str | None
     ) -> int | None:
@@ -285,29 +313,56 @@ class MainWindowPresentationMixin:
             if item is not None:
                 self.browse_list.scrollToItem(item)
 
+    def _clear_scene_list_for_current_state(self: MainWindow) -> None:
+        """
+        Clear scene-strip widgets after scene mode becomes ineligible.
+
+        Signals are blocked because stale scene rows can otherwise emit
+        selection changes while the list no longer represents the active state.
+        The incremental overlay refresh preserves any valid vertical minimap
+        while clearing the scene-strip overlay owner.
+        """
+        # Clear stale scene items without letting Qt emit selection changes
+        # from rows that no longer belong to active scene mode.
+        self.scene_list.blockSignals(True)
+        self.scene_list.clear()
+        self.scene_list.blockSignals(False)
+        self.scene_list.setVisible(False)
+        self._scene_photo_rows = {}
+        self._scene_list_scene_id = None
+        self._scene_overlay_photo_id = None
+        # The scene strip was removed, so clear only the cached scene overlay
+        # owner and let the incremental path preserve any valid vertical
+        # thumbnail overlay without scanning the browse grid.
+        self._refresh_visible_region_overlay()
+
     def _populate_scene_list(self: MainWindow) -> None:
+        """
+        Rebuild the horizontal strip for the current detected scene.
+
+        The scene strip owns exact in-scene photo rows, so it must be rebuilt
+        when the current scene changes. Overlay ownership is refreshed after
+        rebuilding because the old thumbnail widgets have been discarded.
+        """
         if (
             not self.library.scene_detection_done
             or self.current_photo_id is None
         ):
-            self.scene_list.clear()
-            self.scene_list.setVisible(False)
-            self._scene_photo_rows = {}
-            self._scene_list_scene_id = None
+            self._clear_scene_list_for_current_state()
             return
 
         current_scene = self._current_scene()
         if current_scene is None:
-            self.scene_list.clear()
-            self.scene_list.setVisible(False)
-            self._scene_photo_rows = {}
-            self._scene_list_scene_id = None
+            self._clear_scene_list_for_current_state()
             return
 
         self.scene_list.blockSignals(True)
         self.scene_list.clear()
         self._scene_photo_rows = {}
         self._scene_list_scene_id = current_scene.scene_id
+        # Clearing the list discards the widget that owns the overlay. Reset
+        # the cached owner so the rebuilt strip is painted from scratch.
+        self._scene_overlay_photo_id = None
         for index, photo_id in enumerate(current_scene.photo_ids):
             photo = self.library.get_photo(photo_id)
             self._add_photo_item(
@@ -323,6 +378,10 @@ class MainWindowPresentationMixin:
         self.scene_list.setVisible(
             not self._browse_mode and not self._compare_mode
         )
+        # Rebuilding replaced the widgets that can own scene-strip overlays.
+        # Reapply the viewer rectangle through the incremental path so scene
+        # navigation does not perform a full browse-grid overlay pass.
+        self._refresh_visible_region_overlay()
 
     def _toggle_theme_checked(
             self: MainWindow,
@@ -721,20 +780,19 @@ class MainWindowPresentationMixin:
     def _refresh_visible_region_overlay(
             self: MainWindow, *, force_full: bool = False
     ) -> None:
+        """
+        Refresh strip minimap overlays after viewer or list state changes.
+
+        ``force_full`` is reserved for broad restyles/rebuilds where any list
+        item may hold stale overlay state. Normal scene-strip rebuilds use the
+        cached-owner path to clear and repaint only affected rows.
+        """
         visible_region = (
             None
             if self._browse_mode or self._compare_mode
             else self.viewer.visible_region_rect()
         )
-        thumb_photo_id = (
-            None
-            if (
-                self._browse_mode
-                or self._compare_mode
-                or self.library.scene_detection_done
-            )
-            else self.current_photo_id
-        )
+        thumb_photo_id = self._thumbnail_overlay_owner_photo_id()
         scene_photo_id = (
             self.current_photo_id
             if (
