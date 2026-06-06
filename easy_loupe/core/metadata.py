@@ -15,9 +15,13 @@ from easy_loupe.core.records import (
     PhotoRecord,
     SceneGroup,
 )
-from easy_loupe.core.recursive_loading import normalize_photo_identifier
+from easy_loupe.core.recursive_loading import (
+    normalize_photo_identifier,
+    normalize_photo_identifier_for_valid_ids,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from pathlib import Path
 
 
@@ -40,8 +44,24 @@ def read_folder_metadata(folder: Path) -> dict[str, Any]:
     return data
 
 
-def normalize_metadata_entries(data: Any) -> dict[str, dict[str, Any]]:
-    """Normalize persisted metadata into the current in-memory schema."""
+def normalize_metadata_entries(
+        data: Any, *, valid_photo_ids: Iterable[str] | None = None
+) -> dict[str, dict[str, Any]]:
+    """
+    Normalize persisted photo metadata into the current in-memory schema.
+
+    Saved metadata has existed in multiple key shapes over time: current
+    extensionless photo IDs, older filename keys with extensions, and Windows
+    separator variants. When ``valid_photo_ids`` is provided, keys are resolved
+    against the IDs that were actually loaded from the current folder. That
+    lets the loader prefer exact IDs such as ``IMG.0001`` before falling back
+    to legacy extension stripping for keys such as ``IMG_0001.JPG``.
+
+    Callers that do not have a loaded photo set can omit ``valid_photo_ids``;
+    the function then keeps the historical generic normalization behavior.
+    Invalid metadata values are ignored so corrupt or stale entries do not
+    prevent the folder from loading.
+    """
     if not isinstance(data, dict):
         return {}
 
@@ -50,11 +70,23 @@ def normalize_metadata_entries(data: Any) -> dict[str, dict[str, Any]]:
         return {}
 
     normalized: dict[str, dict[str, Any]] = {}
+    valid_photo_id_set = (
+        set(valid_photo_ids) if valid_photo_ids is not None else None
+    )
     for key, value in photos.items():
         if not isinstance(value, dict):
             continue
 
-        photo_id = normalize_photo_identifier(key)
+        # Loaded IDs are the only reliable way to tell a current dotted stem
+        # such as IMG.0001 from a legacy filename key that needs suffix
+        # stripping.
+        photo_id = (
+            normalize_photo_identifier(key)
+            if valid_photo_id_set is None
+            else normalize_photo_identifier_for_valid_ids(
+                key, valid_photo_id_set
+            )
+        )
         if photo_id is None:
             continue
 
@@ -83,7 +115,19 @@ def normalize_metadata_entries(data: Any) -> dict[str, dict[str, Any]]:
 def normalize_scene_groups(
         data: Any, photo_ids: list[str]
 ) -> tuple[str | None, list[SceneGroup]]:
-    """Normalize persisted scene groups for the current folder contents."""
+    """
+    Normalize persisted scene groups for the current folder contents.
+
+    Scene groups reference photo IDs directly, so they must be repaired when a
+    folder changes or when older metadata used filename-like keys. The
+    ``photo_ids`` argument is the authoritative loaded order for this folder:
+    it is used to discard missing/stale IDs, deduplicate repeated IDs, repair
+    legacy keys, and append any newly discovered photos as singleton scenes.
+
+    Exact loaded IDs are preferred before extension stripping for the same
+    reason as per-photo metadata: dotted stems such as ``IMG.0001`` are valid
+    current IDs and must not be shortened to ``IMG``.
+    """
     if not isinstance(data, dict):
         return None, []
 
@@ -110,7 +154,11 @@ def normalize_scene_groups(
 
         group_photo_ids: list[str] = []
         for raw_photo_id in raw_group:
-            photo_id = normalize_photo_identifier(raw_photo_id)
+            # Resolve against the loaded photo set so exact current IDs win
+            # over legacy filename stripping.
+            photo_id = normalize_photo_identifier_for_valid_ids(
+                raw_photo_id, valid_photo_ids
+            )
             if photo_id is None:
                 continue
 

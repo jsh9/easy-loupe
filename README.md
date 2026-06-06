@@ -17,6 +17,7 @@ ______________________________________________________________________
 - [4. Modes and Transitions](#4-modes-and-transitions)
 - [5. Keyboard Shortcuts](#5-keyboard-shortcuts)
 - [6. Metadata File](#6-metadata-file)
+- [7. Maintenance Roadmaps](#7-maintenance-roadmaps)
 
 ______________________________________________________________________
 
@@ -199,7 +200,8 @@ build keeps a terminal attached so startup errors include a normal traceback.
 - Shows a `No Eligible Photos` dialog when a manual folder load succeeds but
   the active scan mode finds no supported photos.
 - Opens individual photo files directly into a lightweight photo-viewer mode
-  with adjacent-folder navigation and handoff into the full culling workspace.
+  with adjacent-photo navigation within the opened file's folder and handoff
+  into the full culling workspace.
 - Groups JPEG, HEIC/HEIF, and multiple camera RAW formats by shared filename
   stem, with subfolder-relative IDs keeping same-named photos in different
   folders distinct.
@@ -242,9 +244,10 @@ build keeps a terminal attached so startup errors include a normal traceback.
 
 - `Photo viewer mode` opens when a supported photo file is launched directly.
   It shows the opened photo first, keeps the AF point marker hidden until `F`
-  is pressed, supports neighboring-photo navigation after background folder
-  hydration, and uses `G` or `Enter` to hand off to culling mode on the same
-  monitor.
+  is pressed, supports neighboring-photo navigation within the opened file's
+  folder, and uses `G` or `Enter` to hand off to culling mode on the same
+  monitor. Background hydration can prepare the recursive culling library, but
+  it does not expand standalone viewer navigation into subfolders.
 - `View mode` is the normal working mode. It shows the left thumbnail strip,
   the main viewer, and the horizontal scene strip when scene detection is
   available for the current photo.
@@ -349,7 +352,8 @@ The app stores per-photo metadata in `easy-loupe.json` inside the selected
 folder under a top-level `photos` object. Root-folder photo keys use the
 visible photo stem, not the filename with extension. Photos loaded from
 subfolders use folder-relative POSIX stems such as `subfolder_1/IMG_1234`,
-including on Windows.
+including on Windows. Valid dotted stems such as `IMG.0001` are preserved as
+photo IDs instead of being treated as filename extensions.
 
 You can also export the current rating, color label, and pick/reject state to
 shared uppercase `PHOTO_ID.XMP` sidecars through `Organize Photos`. For
@@ -379,6 +383,12 @@ Example:
   }
 }
 ```
+
+## 7. Maintenance Roadmaps
+
+Feature-level maintenance maps live under `docs/roadmaps/`. Start with
+`docs/roadmaps/README.md` when you need to find the modules, tests, and
+behavior contracts for a major app feature.
 
 Rules:
 

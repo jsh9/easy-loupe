@@ -220,6 +220,8 @@ product contract and the tests/docs are updated accordingly.
   and may include a top-level `scenes` object with `source` and `groups`.
 - Saved metadata keys use the folder-relative visible stem format, for example
   `IMG_2000` or `subfolder/IMG_2000`, not `IMG_2000.JPG`.
+- Valid dotted stems such as `IMG.0001` are current photo IDs and must be
+  matched exactly before applying legacy extension-stripping migration.
 - When reading metadata, legacy forms are normalized:
   - keys with extensions are reduced to stem
   - Windows separators are converted to `/`
@@ -244,7 +246,8 @@ product contract and the tests/docs are updated accordingly.
 - Culling folder loads include subfolders by default. The top-bar
   `Include subfolders` checkbox is grouped with `Open Folder`, persisted via
   `photos/load_recursively`, and reloads an already loaded folder only after
-  user confirmation.
+  user confirmation. If a confirmed reload succeeds but the active scan mode
+  finds no eligible photos, the normal `No Eligible Photos` dialog is shown.
 - Photos default to sorting by EXIF capture timestamp when available, then by
   display name. Users can change the global sort preference from the top-bar
   `Sort by:` visual group, which contains a segmented control between
@@ -352,9 +355,12 @@ Mode summary:
   the top bar, and metadata/scene controls.
 - `Photo viewer mode` is the lightweight startup mode used when a specific file
   is opened from Finder, Explorer, or argv. It shows only the opened photo
-  fit-to-window at first, supports adjacent-folder navigation, and keeps the
-  normal culling chrome and scene strips hidden until the user presses `G` or
-  `Enter` to enter culling mode.
+  fit-to-window at first, supports adjacent-photo navigation within the opened
+  file's immediate folder, and keeps the normal culling chrome and scene strips
+  hidden until the user presses `G` or `Enter` to enter culling mode.
+- Photo-viewer background hydration may prepare a larger recursive library for
+  culling handoff, but it must not replace the standalone viewer's active
+  direct-folder library or expand viewer navigation into subfolders.
 - Multiple system-opened photos create multiple independent EasyLoupe windows.
   Each photo-viewer window owns its own `MainWindow`, `PhotoLibrary`,
   background workers, folder hydration, close lifecycle, title, and mode state.
@@ -797,6 +803,8 @@ Additional assignment-menu behavior:
   - verify multiple opened photos create independent photo-viewer windows
   - verify `G` and `Enter` wait for folder hydration when needed, then open
     culling mode for the current photo
+  - verify background hydration does not expand standalone viewer navigation
+    beyond the opened file's immediate folder
   - verify photo-viewer-to-culling handoff opens the culling window on the same
     monitor as the photo-viewer window
   - verify worker signals are routed back to the GUI thread before UI state is

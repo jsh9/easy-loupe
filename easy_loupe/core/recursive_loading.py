@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import os
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Container
 
 DEFAULT_LOAD_RECURSIVELY = True
 WINDOWS_DRIVE_PART_LENGTH = 2
@@ -144,6 +147,47 @@ def relative_photo_id(folder: Path, path: Path) -> str:
     return relative_path
 
 
+def relative_photo_group_key(folder: Path, path: Path) -> tuple[str, str]:
+    """
+    Return the grouping key for related files in one relative folder.
+
+    Folder loading groups companion files such as JPEG+RAW pairs before it
+    creates one :class:`PhotoRecord`. That grouping must be case-insensitive
+    for the final stem so ``IMG_1000.JPG`` and ``img_1000.CR3`` can represent
+    the same photo. It must not case-fold the folder path, because recursive
+    loading can scan case-sensitive filesystems where ``Trip/IMG_1000`` and
+    ``trip/IMG_1000`` are different photos.
+
+    The returned key therefore preserves the relative parent path exactly and
+    case-folds only the extensionless filename.
+
+    Parameters
+    ----------
+    folder : Path
+        Resolved root folder that owns the loaded photo set.
+    path : Path
+        Photo file path under ``folder``.
+
+    Returns
+    -------
+    tuple[str, str]
+        ``(relative_parent, casefolded_stem)``. Root-level photos use an empty
+        string for ``relative_parent``.
+
+    Raises
+    ------
+    ValueError
+        Raised by :func:`relative_photo_id` if ``path`` is not under
+        ``folder``.
+    """
+    photo_id = PurePosixPath(relative_photo_id(folder, path))
+    parent = photo_id.parent.as_posix()
+    if parent == '.':
+        parent = ''
+
+    return parent, photo_id.name.casefold()
+
+
 def normalize_photo_identifier(value: object) -> str | None:
     """
     Normalize a persisted photo id/key while preserving subfolders.
@@ -162,6 +206,52 @@ def normalize_photo_identifier(value: object) -> str | None:
         path components.
     """
     return _normalize_posix_path(value, strip_suffix=True)
+
+
+def normalize_photo_identifier_for_valid_ids(
+        value: object, valid_photo_ids: Container[str]
+) -> str | None:
+    """
+    Resolve a persisted photo identifier against current loaded photo IDs.
+
+    This helper is used when the caller already knows which photo IDs exist in
+    the loaded folder. That extra context lets migration logic distinguish a
+    current extensionless ID from an old filename-style key.
+
+    Resolution order is intentionally conservative:
+
+    1. Normalize separators and validate path safety without stripping a
+       suffix; accept the value only if it exactly matches a loaded photo ID.
+    2. Fall back to :func:`normalize_photo_identifier`, which strips a final
+       suffix for legacy keys such as ``IMG_0001.JPG``.
+
+    The exact-match step is necessary for valid dotted stems such as
+    ``IMG.0001``. Without the loaded-ID check, generic suffix stripping would
+    reduce that ID to ``IMG`` and make saved metadata or scene groups vanish.
+
+    Parameters
+    ----------
+    value : object
+        Persisted photo ID, legacy filename key, or scene photo ID to resolve.
+        Windows separators are accepted and converted to ``/``.
+    valid_photo_ids : Container[str]
+        Current loaded photo IDs that are safe to return.
+
+    Returns
+    -------
+    str | None
+        Matching current photo ID, or ``None`` when ``value`` is unsafe or does
+        not resolve to a loaded photo ID.
+    """
+    exact = _normalize_posix_path(value, strip_suffix=False)
+    if exact is not None and exact in valid_photo_ids:
+        return exact
+
+    legacy = normalize_photo_identifier(value)
+    if legacy is not None and legacy in valid_photo_ids:
+        return legacy
+
+    return None
 
 
 def normalize_relative_file_path(value: object) -> str | None:

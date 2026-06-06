@@ -133,6 +133,38 @@ def test_recursive_metadata_uses_posix_relative_photo_ids(
     }
 
 
+def test_load_folder_preserves_dotted_photo_id_metadata(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify dotted stems are treated as photo IDs before legacy filenames.
+
+    A saved key such as ``IMG.0001`` is already an extensionless current photo
+    ID and should not be stripped to ``IMG`` during metadata loading.
+    """
+    create_jpeg(tmp_path / 'IMG.0001.JPG', 'green')
+    metadata_path = tmp_path / METADATA_FILENAME
+    metadata_path.write_text(
+        json.dumps({
+            'photos': {
+                'IMG.0001': {
+                    'rating': 5,
+                    'flag': 'picked',
+                }
+            }
+        }),
+        encoding='utf-8',
+    )
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+
+    photo = library.get_photo('IMG.0001')
+    assert photo.rating == 5
+    assert photo.flag == 'picked'
+
+
 def test_metadata_normalization_and_serialization() -> None:
     normalized = normalize_metadata_entries({
         'photos': {
@@ -226,6 +258,27 @@ def test_scene_group_normalization_preserves_relative_photo_ids() -> None:
     assert [scene.photo_ids for scene in scenes] == [
         ['subfolder_1/IMG_1000', 'IMG_1001']
     ]
+
+
+def test_scene_group_normalization_preserves_dotted_photo_ids() -> None:
+    """
+    Verify saved scene IDs with dotted stems are not extension-stripped.
+
+    Dotted camera sequence names such as ``IMG.0001`` are valid current photo
+    IDs, so they should match exactly before legacy filename fallback runs.
+    """
+    source, scenes = normalize_scene_groups(
+        {
+            'scenes': {
+                'source': 'manual',
+                'groups': [['IMG.0001', 'IMG.0002']],
+            }
+        },
+        ['IMG.0001', 'IMG.0002'],
+    )
+
+    assert source == 'manual'
+    assert [scene.photo_ids for scene in scenes] == [['IMG.0001', 'IMG.0002']]
 
 
 def test_scene_group_normalization_rejects_only_missing_photo_ids() -> None:

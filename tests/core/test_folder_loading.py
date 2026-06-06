@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import easy_loupe.core.folder_loading as folder_loading_module
 from easy_loupe.core.folder_loading import PHOTO_SORT_MODE_FILENAME
+from easy_loupe.core.recursive_loading import relative_photo_group_key
 from tests.core._helpers import create_jpeg
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def test_folder_loading_module_exports_load_folder_state() -> None:
@@ -187,6 +185,28 @@ def test_folder_loading_recursive_scan_uses_posix_relative_ids(
     ]
     assert nested.has_jpeg is True
     assert nested.has_raw is True
+
+
+def test_recursive_group_key_preserves_case_distinct_parent_paths() -> None:
+    """
+    Verify recursive pairing keeps case-only folder names separate.
+
+    The helper-level check is portable on case-insensitive filesystems where
+    creating ``Trip`` and ``trip`` as real sibling directories is impossible.
+    """
+    root = Path('/photos')
+
+    assert relative_photo_group_key(root, root / 'Trip' / 'IMG_1000.JPG') == (
+        'Trip',
+        'img_1000',
+    )
+    assert relative_photo_group_key(root, root / 'trip' / 'IMG_1000.CR3') == (
+        'trip',
+        'img_1000',
+    )
+    assert relative_photo_group_key(
+        root, root / 'IMG_1000.JPG'
+    ) == relative_photo_group_key(root, root / 'img_1000.CR3')
 
 
 def test_folder_loading_recursive_exif_lookup_uses_path_keys(

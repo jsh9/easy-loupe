@@ -590,6 +590,11 @@ class MainWindowWorkflowMixin:
         self._hide_progress()
         self._refresh_ui()
         self._restore_active_navigation_focus(defer=True)
+        # Unlike cancel/failure paths, this is a successful reload that found
+        # no eligible photos under the new direct-vs-recursive setting. Reuse
+        # the normal empty-folder dialog so the blank UI has an explanation.
+        if not self.library.photos:
+            self._show_no_eligible_photos_dialog()
 
     def _rebuild_loaded_views(
             self: MainWindow,
