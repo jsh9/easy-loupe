@@ -1,5 +1,16 @@
 # Change Log
 
+## [1.1.1] - 2026-06-06
+
+- Fixed
+
+  - Breaking a scene into individual photos from the context menu no longer
+    leaves keyboard navigation and viewer shortcuts inert until the next mouse
+    click
+  - Breaking a visible scene stack now preserves the vertical thumbnail strip
+    position instead of jumping the first split photo to the bottom of the
+    viewport
+
 ## [1.1.0] - 2026-06-06
 
 - Added
