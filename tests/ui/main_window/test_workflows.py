@@ -780,6 +780,97 @@ def test_break_scene_from_vertical_context_menu_saves_and_undoes(
     del app
 
 
+@pytest.mark.parametrize(
+    'menu_source',
+    [
+        pytest.param('thumbnail', id='vertical-thumbnail-strip'),
+        pytest.param('scene-strip', id='horizontal-scene-strip'),
+    ],
+)
+def test_break_scene_context_menu_defers_break_until_menu_closes(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, menu_source: str
+) -> None:
+    """
+    Run scene breaking after the context-menu handler has returned.
+
+    Rebuilding the scene lists during native menu action dispatch can leave
+    macOS focus stale. The menu handler therefore waits for ``QMenu.exec`` to
+    return, then schedules the break on the event loop.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7484', 'dimgray'),
+            ('IMG_7485', 'blue'),
+            ('IMG_7486', 'green'),
+            ('IMG_7487', 'white'),
+        ],
+        scene_groups=[
+            ['IMG_7484', 'IMG_7485', 'IMG_7486'],
+            ['IMG_7487'],
+        ],
+    )
+    handler_returned = {'value': False}
+    break_calls: list[str] = []
+
+    class FakeAction:
+        def __init__(self, text: str) -> None:
+            self._text = text
+
+        def text(self) -> str:
+            return self._text
+
+    class FakeMenu:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            self.actions: list[FakeAction] = []
+
+        def addAction(self, text: str) -> FakeAction:  # noqa: N802 - Qt API
+            action = FakeAction(text)
+            self.actions.append(action)
+            return action
+
+        def exec(self, *_args: object, **_kwargs: object) -> FakeAction:
+            assert len(self.actions) == 1
+            assert self.actions[0].text() == 'Break Scene into Single Photos'
+            return self.actions[0]
+
+    def record_break_scene(scene_id: str) -> None:
+        assert handler_returned['value'] is True
+        break_calls.append(scene_id)
+
+    monkeypatch.setattr(workflows_module, 'QMenu', FakeMenu)
+    monkeypatch.setattr(
+        window, '_break_scene_into_singletons', record_break_scene
+    )
+
+    if menu_source == 'thumbnail':
+        scene = window._context_scene_from_thumbnail_position(
+            _item_center(window.thumbnail_list, 0)
+        )
+        assert scene is not None
+        expected_scene_id = scene.scene_id
+
+        window._show_thumbnail_context_menu(
+            _item_center(window.thumbnail_list, 0)
+        )
+    else:
+        scene = window._context_scene_from_scene_strip()
+        assert scene is not None
+        expected_scene_id = scene.scene_id
+
+        window._show_scene_context_menu(_item_center(window.scene_list, 0))
+
+    assert break_calls == []
+    handler_returned['value'] = True
+    app.processEvents()
+
+    assert break_calls == [expected_scene_id]
+
+    window.close()
+    del app
+
+
 def test_break_scene_from_horizontal_context_menu_uses_current_scene(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -815,6 +906,65 @@ def test_break_scene_from_horizontal_context_menu_uses_current_scene(
         ['IMG_7491'],
     ]
     assert window.current_photo_id == 'IMG_7489'
+
+    window.close()
+    del app
+
+
+def test_break_visible_scene_stack_preserves_strip_position(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Keep the split scene cover in place after expanding it to singletons.
+
+    Scene splitting rebuilds the vertical strip with more rows than before. The
+    rebuild must preserve the visible cover row position so the first split
+    photo does not jump to the bottom of the viewport.
+    """
+    scene_groups = [[f'IMG_{index:04d}'] for index in range(10)]
+    scene_groups.append([f'IMG_{index:04d}' for index in range(10, 15)])
+    scene_groups.extend([[f'IMG_{index:04d}'] for index in range(15, 40)])
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[(f'IMG_{index:04d}', 'dimgray') for index in range(40)],
+        scene_groups=scene_groups,
+    )
+    window.resize(1200, 800)
+    app.processEvents()
+    _confirm_next_break_scene(monkeypatch, accept=True)
+
+    scene = window._scene_for_photo_id('IMG_0010')
+    assert scene is not None
+    target_row = window._thumbnail_row_for_photo('IMG_0010')
+    assert target_row is not None
+
+    scrollbar = window.thumbnail_list.verticalScrollBar()
+    assert scrollbar.maximum() > 0
+    _set_list_item_viewport_top(window.thumbnail_list, target_row, 160)
+    app.processEvents()
+
+    cover_item = window.thumbnail_list.item(target_row)
+    assert cover_item is not None
+    before_top = window.thumbnail_list.visualItemRect(cover_item).top()
+    assert 0 <= before_top < window.thumbnail_list.viewport().height()
+
+    window._break_scene_into_singletons(scene.scene_id)
+    app.processEvents()
+
+    assert window.current_photo_id == 'IMG_0010'
+    assert window.thumbnail_list.currentRow() == target_row
+    split_item = window.thumbnail_list.item(target_row)
+    assert split_item is not None
+    after_top = window.thumbnail_list.visualItemRect(split_item).top()
+    assert abs(after_top - before_top) <= 1
+    assert [scene.photo_ids for scene in window.library.scenes][10:15] == [
+        ['IMG_0010'],
+        ['IMG_0011'],
+        ['IMG_0012'],
+        ['IMG_0013'],
+        ['IMG_0014'],
+    ]
 
     window.close()
     del app

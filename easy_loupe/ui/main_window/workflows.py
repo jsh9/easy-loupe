@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QPoint, QThread
+from PySide6.QtCore import QPoint, QThread, QTimer
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -816,10 +816,17 @@ class MainWindowWorkflowMixin:
 
         menu = QMenu(self)
         action = menu.addAction('Break Scene into Single Photos')
-        action.triggered.connect(
-            lambda *_: self._break_scene_into_singletons(scene.scene_id)
+        scene_id = str(scene.scene_id)
+        selected_action = menu.exec(
+            self.thumbnail_list.viewport().mapToGlobal(position)
         )
-        menu.exec(self.thumbnail_list.viewport().mapToGlobal(position))
+        if selected_action is action:
+            # Run the scene rebuild after QMenu.exec has unwound. Rebuilding
+            # while the native menu is dispatching the action can leave macOS
+            # focus stale, leaving shortcuts inert until a mouse click.
+            QTimer.singleShot(
+                0, lambda: self._break_scene_into_singletons(scene_id)
+            )
 
     def _show_scene_context_menu(self: MainWindow, position: QPoint) -> None:
         scene = self._context_scene_from_scene_strip()
@@ -828,10 +835,17 @@ class MainWindowWorkflowMixin:
 
         menu = QMenu(self)
         action = menu.addAction('Break Scene into Single Photos')
-        action.triggered.connect(
-            lambda *_: self._break_scene_into_singletons(scene.scene_id)
+        scene_id = str(scene.scene_id)
+        selected_action = menu.exec(
+            self.scene_list.viewport().mapToGlobal(position)
         )
-        menu.exec(self.scene_list.viewport().mapToGlobal(position))
+        if selected_action is action:
+            # Run the scene rebuild after QMenu.exec has unwound. Rebuilding
+            # while the native menu is dispatching the action can leave macOS
+            # focus stale, leaving shortcuts inert until a mouse click.
+            QTimer.singleShot(
+                0, lambda: self._break_scene_into_singletons(scene_id)
+            )
 
     def _context_scene_from_thumbnail_position(
             self: MainWindow, position: QPoint
@@ -885,6 +899,9 @@ class MainWindowWorkflowMixin:
         if not self._confirm_break_scene():
             return
 
+        thumbnail_anchor = self._capture_thumbnail_scroll_anchor(
+            scene.photo_ids[0]
+        )
         before_groups = self.library.scene_group_photo_ids()
         before_source = self.library.scene_source
         after_groups: list[list[str]] = []
@@ -914,7 +931,10 @@ class MainWindowWorkflowMixin:
         )
         self._metadata_redo_stack.clear()
         self.library.save_metadata()
-        self._after_scene_change(selected_photo_ids=[scene.photo_ids[0]])
+        self._after_scene_change(
+            selected_photo_ids=[scene.photo_ids[0]],
+            thumbnail_anchor=thumbnail_anchor,
+        )
         self._refresh_metadata_history_actions()
 
     def _confirm_break_scene(self: MainWindow) -> bool:
