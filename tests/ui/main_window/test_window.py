@@ -39,6 +39,12 @@ def assert_default_photo_sort_control(window: Any) -> None:
     assert '&View' not in menu_titles
     assert not hasattr(window, 'view_menu')
     assert not hasattr(window, 'photo_sort_actions')
+    assert window.photo_open_group.objectName() == 'photoOpenGroup'
+    assert window.open_button.parentWidget() is window.photo_open_group
+    assert (
+        window.photo_load_recursively_checkbox.parentWidget()
+        is window.photo_open_group
+    )
     assert window.photo_sort_group.objectName() == 'photoSortGroup'
     assert window.sort_label.parentWidget() is window.photo_sort_group
     assert window.photo_sort_segment.parentWidget() is window.photo_sort_group
@@ -148,6 +154,32 @@ def _create_sorting_window(
     window.show()
     app.processEvents()
     return theme_module, app, window
+
+
+def _create_recursive_loading_window(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Any, Any]:
+    create_jpeg(tmp_path / 'ROOT.JPG', 'blue')
+    subfolder = tmp_path / 'subfolder_1'
+    subfolder.mkdir()
+    create_jpeg(subfolder / 'NESTED.JPG', 'green')
+    stub_read_exif(monkeypatch, {})
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache-recursive')
+    library.load_folder(tmp_path)
+
+    app = QApplication.instance() or QApplication([])
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    window.library = library
+    window.current_photo_id = 'subfolder_1/NESTED'
+    window._populate_thumbnail_list()
+    window._populate_browse_list()
+    window._populate_scene_list()
+    window._display_current_photo()
+    window._refresh_ui()
+    window.show()
+    app.processEvents()
+    return app, window
 
 
 def test_main_window_registers_open_detect_and_organize_actions() -> None:  # noqa: PLR0915
@@ -529,6 +561,67 @@ def test_main_window_photo_sort_control_persists_selection() -> None:
     del app
 
 
+def test_main_window_recursive_loading_control_persists_selection() -> None:
+    """
+    Verify Include subfolders is a persisted app-level preference.
+
+    This protects startup from losing the user's scan-mode choice between
+    main-window instances.
+    """
+    app = QApplication.instance() or QApplication([])
+    settings = QSettings(identity_module.APP_NAME, identity_module.APP_NAME)
+    window = main_window_module.MainWindow()
+
+    assert window.photo_load_recursively_checkbox.text() == (
+        'Include subfolders'
+    )
+    assert window.photo_load_recursively_checkbox.isChecked() is True
+    assert window.library.load_recursively is True
+
+    window.photo_load_recursively_checkbox.setChecked(False)
+
+    assert window.library.load_recursively is False
+    assert window.photo_load_recursively_checkbox.isChecked() is False
+    assert (
+        build_module.normalize_load_recursively(
+            settings.value(build_module.PHOTO_LOAD_RECURSIVELY_SETTINGS_KEY)
+        )
+        is False
+    )
+
+    window.close()
+
+    restored_window = main_window_module.MainWindow()
+
+    assert restored_window.library.load_recursively is False
+    assert restored_window.photo_load_recursively_checkbox.isChecked() is False
+
+    restored_window.close()
+    del app
+
+
+def test_main_window_invalid_stored_recursive_loading_uses_default() -> None:
+    """
+    Verify invalid persisted recursive settings fall back to checked.
+
+    Manually edited settings should not disable recursive loading by accident.
+    """
+    app = QApplication.instance() or QApplication([])
+    settings = QSettings(identity_module.APP_NAME, identity_module.APP_NAME)
+    settings.setValue(
+        build_module.PHOTO_LOAD_RECURSIVELY_SETTINGS_KEY, 'not-a-bool'
+    )
+    settings.sync()
+
+    window = main_window_module.MainWindow()
+
+    assert window.library.load_recursively is True
+    assert window.photo_load_recursively_checkbox.isChecked() is True
+
+    window.close()
+    del app
+
+
 def test_main_window_invalid_stored_photo_sort_uses_default() -> None:
     """
     Verify stale or manually edited sort settings fall back to capture time.
@@ -549,6 +642,98 @@ def test_main_window_invalid_stored_photo_sort_uses_default() -> None:
     assert window.library.sort_reversed is False
     assert window.photo_sort_buttons[PHOTO_SORT_MODE_CAPTURE_TIME].isChecked()
     assert not window.photo_sort_reverse_checkbox.isChecked()
+
+    window.close()
+    del app
+
+
+def test_main_window_recursive_loading_cancel_reverts_toggle(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Canceling the reload prompt leaves loaded state and setting unchanged.
+
+    This guards the Qt toggle timing where the checkbox changes visually before
+    the app knows whether the user accepted the required folder reload.
+    """
+    app, window = _create_recursive_loading_window(tmp_path, monkeypatch)
+    clicked_button: dict[str, object | None] = {'button': None}
+
+    def fake_exec(message_box: QMessageBox) -> int:
+        clicked_button['button'] = message_box.button(
+            QMessageBox.StandardButton.Cancel
+        )
+        return 0
+
+    monkeypatch.setattr(QMessageBox, 'exec', fake_exec)
+    monkeypatch.setattr(
+        QMessageBox,
+        'clickedButton',
+        lambda _message_box: clicked_button['button'],
+    )
+
+    window.photo_load_recursively_checkbox.setChecked(False)
+    app.processEvents()
+
+    settings = QSettings(identity_module.APP_NAME, identity_module.APP_NAME)
+    assert window.library.load_recursively is True
+    assert window.photo_load_recursively_checkbox.isChecked() is True
+    assert [photo.photo_id for photo in window.library.photos] == [
+        'ROOT',
+        'subfolder_1/NESTED',
+    ]
+    assert not settings.contains(
+        build_module.PHOTO_LOAD_RECURSIVELY_SETTINGS_KEY
+    )
+
+    window.close()
+    del app
+
+
+def test_main_window_recursive_loading_reload_applies_to_current_folder(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify confirming the reload prompt rescans with the new preference.
+
+    The current photo may disappear when subfolders are excluded, so the reload
+    path must choose a valid selection after rebuilding all lists.
+    """
+    app, window = _create_recursive_loading_window(tmp_path, monkeypatch)
+    clicked_button: dict[str, object | None] = {'button': None}
+
+    def fake_exec(message_box: QMessageBox) -> int:
+        reload_button = next(
+            button
+            for button in message_box.buttons()
+            if button.text() == 'Reload'
+        )
+        clicked_button['button'] = reload_button
+        return 0
+
+    monkeypatch.setattr(QMessageBox, 'exec', fake_exec)
+    monkeypatch.setattr(
+        QMessageBox,
+        'clickedButton',
+        lambda _message_box: clicked_button['button'],
+    )
+
+    window.photo_load_recursively_checkbox.setChecked(False)
+    app.processEvents()
+
+    settings = QSettings(identity_module.APP_NAME, identity_module.APP_NAME)
+    assert window.library.load_recursively is False
+    assert window.photo_load_recursively_checkbox.isChecked() is False
+    assert [photo.photo_id for photo in window.library.photos] == ['ROOT']
+    assert window.current_photo_id == 'ROOT'
+    assert (
+        build_module.normalize_load_recursively(
+            settings.value(build_module.PHOTO_LOAD_RECURSIVELY_SETTINGS_KEY)
+        )
+        is False
+    )
 
     window.close()
     del app

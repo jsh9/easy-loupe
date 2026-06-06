@@ -3,9 +3,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from PySide6.QtCore import QSettings
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+import easy_loupe.ui.identity as identity_module
+import easy_loupe.ui.main_window.build as build_module
 import easy_loupe.ui.photo_viewer.window as photo_viewer_window_module
 from easy_loupe.core.photo_library import PhotoLibrary
 from easy_loupe.ui.launch import CullingLaunchRequest
@@ -102,6 +105,33 @@ def test_photo_viewer_window_opens_file_and_navigates_adjacent_photos(
 
     assert window.current_photo_id == 'B'
     assert window.windowTitle() == 'EasyLoupe - B.JPG (2 / 3)'
+    window.close()
+
+
+def test_photo_viewer_culling_hydration_uses_recursive_preference(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify culling handoff hydration reads the recursive preference.
+
+    Standalone viewer navigation remains immediate-folder based, but the
+    hydrated culling library should honor the culling workspace setting.
+    """
+    create_jpeg(tmp_path / 'B.JPG', 'blue')
+    settings = QSettings(identity_module.APP_NAME, identity_module.APP_NAME)
+    settings.setValue(build_module.PHOTO_LOAD_RECURSIVELY_SETTINGS_KEY, False)
+    settings.sync()
+
+    _app, window = _open_viewer(tmp_path, monkeypatch)
+
+    assert window._load_culling_recursive_preference() is False
+
+    settings.setValue(build_module.PHOTO_LOAD_RECURSIVELY_SETTINGS_KEY, True)
+    settings.sync()
+
+    assert window._load_culling_recursive_preference() is True
+
     window.close()
 
 

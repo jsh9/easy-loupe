@@ -239,6 +239,12 @@ def test_photo_viewer_exif_worker_cancel_suppresses_focus_result(
 def test_folder_hydration_worker_loads_and_warms_folder(
         tmp_path: Path, monkeypatch: Any
 ) -> None:
+    """
+    Verify hydration builds a library with caller-provided scan preferences.
+
+    The worker runs before photo-viewer handoff, so it must pass the recursive
+    setting into the preloaded culling library it returns.
+    """
     progress_events: list[tuple[str, int]] = []
     finished_results: list[object] = []
 
@@ -253,10 +259,12 @@ def test_folder_hydration_worker_loads_and_warms_folder(
                 cache_dir: object,
                 sort_mode: str,
                 sort_reversed: bool,
+                load_recursively: bool,
         ) -> None:
             self.cache_dir = cache_dir
             self.sort_mode = sort_mode
             self.sort_reversed = sort_reversed
+            self.load_recursively = load_recursively
             self.preview_calls: list[tuple[str, str]] = []
 
         def load_folder(
@@ -280,6 +288,7 @@ def test_folder_hydration_worker_loads_and_warms_folder(
         cache_dir=tmp_path / '.cache',
         sort_mode='filename',
         sort_reversed=True,
+        load_recursively=False,
     )
     worker.progress.connect(
         lambda _request_id, _folder, message, progress: (
@@ -295,6 +304,7 @@ def test_folder_hydration_worker_loads_and_warms_folder(
     assert progress_events[0] == ('Scanning folder', 5)
     assert progress_events[-1] == ('Preparing photo viewer cache', 200)
     assert len(finished_results) == 1
+    assert finished_results[0].load_recursively is False
     assert finished_results[0].preview_calls == [
         ('A', 'thumb'),
         ('A', 'viewer'),
@@ -319,8 +329,9 @@ def test_folder_hydration_worker_cancel_skips_preview_warming(
                 cache_dir: object,
                 sort_mode: str,
                 sort_reversed: bool,
+                load_recursively: bool,
         ) -> None:
-            del cache_dir, sort_mode, sort_reversed
+            del cache_dir, sort_mode, sort_reversed, load_recursively
             self.preview_calls: list[tuple[str, str]] = []
 
         def load_folder(
@@ -343,6 +354,7 @@ def test_folder_hydration_worker_cancel_skips_preview_warming(
         cache_dir=tmp_path / '.cache',
         sort_mode='filename',
         sort_reversed=False,
+        load_recursively=True,
     )
     worker.finished.connect(
         lambda _request_id, _folder, library: finished_results.append(library)

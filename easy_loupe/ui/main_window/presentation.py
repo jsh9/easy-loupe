@@ -503,6 +503,7 @@ class MainWindowPresentationMixin:
             sort_inactive_text = '#4f5a66'
 
         sort_group_style = f"""
+        QFrame#photoOpenGroup,
         QFrame#photoSortGroup {{
             background-color: {sort_group_background};
             border: 2px solid {sort_group_border};
@@ -537,6 +538,7 @@ class MainWindowPresentationMixin:
         self.open_button.setStyleSheet(button_style)
         self.detect_button.setStyleSheet(button_style)
         self.organize_button.setStyleSheet(button_style)
+        self.photo_open_group.setStyleSheet(sort_group_style)
         self.photo_sort_group.setStyleSheet(sort_group_style)
         self.sort_label.setStyleSheet(label_style)
         self.photo_sort_segment.setStyleSheet(sort_segment_style)
@@ -601,6 +603,9 @@ class MainWindowPresentationMixin:
             """
         )
         self.show_af_point_toggle.setStyleSheet(self.theme_toggle.styleSheet())
+        self.photo_load_recursively_checkbox.setStyleSheet(
+            self.theme_toggle.styleSheet()
+        )
         self.photo_sort_reverse_checkbox.setStyleSheet(
             self.theme_toggle.styleSheet()
         )

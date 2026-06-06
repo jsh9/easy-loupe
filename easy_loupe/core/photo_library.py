@@ -42,6 +42,12 @@ from easy_loupe.core.metadata import (
 from easy_loupe.core.metadata import (
     write_folder_metadata as _write_folder_metadata,
 )
+from easy_loupe.core.recursive_loading import (
+    DEFAULT_LOAD_RECURSIVELY,
+)
+from easy_loupe.core.recursive_loading import (
+    normalize_load_recursively as _normalize_load_recursively,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -66,10 +72,12 @@ class PhotoLibrary:
             *,
             sort_mode: str = DEFAULT_PHOTO_SORT_MODE,
             sort_reversed: bool = DEFAULT_PHOTO_SORT_REVERSED,
+            load_recursively: bool = DEFAULT_LOAD_RECURSIVELY,
     ) -> None:
         self.cache_dir = _preview_module.make_cache_dir(cache_dir)
         self.sort_mode = _normalize_sort_mode(sort_mode)
         self.sort_reversed = _normalize_sort_reversed(sort_reversed)
+        self.load_recursively = _normalize_load_recursively(load_recursively)
         self.current_folder: Path | None = None
         self.folder_label: str | None = None
         self.photos: list[PhotoRecord] = []
@@ -94,6 +102,7 @@ class PhotoLibrary:
             progress_callback=progress_callback,
             sort_mode=self.sort_mode,
             sort_reversed=self.sort_reversed,
+            load_recursively=self.load_recursively,
             read_exif_metadata_fn=_exif_module.read_exif_metadata,
         )
         self.current_folder = loaded_state.current_folder
@@ -127,6 +136,10 @@ class PhotoLibrary:
         self.scenes = loaded_state.scenes
         self.scene_source = loaded_state.scene_source
         self.scene_detection_done = loaded_state.scene_detection_done
+
+    def set_load_recursively(self, load_recursively: object) -> None:
+        """Set whether culling folder loads include subfolders."""
+        self.load_recursively = _normalize_load_recursively(load_recursively)
 
     def set_sort_mode(self, sort_mode: object) -> None:
         """Set photo sort mode and reorder already-loaded state in place."""

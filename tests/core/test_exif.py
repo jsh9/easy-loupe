@@ -300,10 +300,16 @@ def test_read_exif_metadata_returns_empty_for_missing_and_failed_exiftool_paths(
     assert core_exif_module.read_exif_metadata([source]) == {}
 
 
-def test_read_exif_metadata_returns_records_keyed_by_filename(
+def test_read_exif_metadata_returns_records_keyed_by_path_and_filename(
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
 ) -> None:
+    """
+    Verify EXIF results are keyed by resolved path and basename.
+
+    Recursive scans need path keys for duplicate filenames, while basename keys
+    preserve existing flat-folder callers and test stubs.
+    """
     first = tmp_path / 'IMG_6100.JPG'
     second = tmp_path / 'IMG_6101.JPG'
     first.write_bytes(b'jpeg')
@@ -348,7 +354,12 @@ def test_read_exif_metadata_returns_records_keyed_by_filename(
     )
 
     assert core_exif_module.read_exif_metadata([first, second]) == {
+        str(first.resolve()): {'SourceFile': str(first), 'Make': 'Canon'},
         'IMG_6100.JPG': {'SourceFile': str(first), 'Make': 'Canon'},
+        str(second.resolve()): {
+            'SourceFile': str(second),
+            'Make': 'NIKON CORPORATION',
+        },
         'IMG_6101.JPG': {
             'SourceFile': str(second),
             'Make': 'NIKON CORPORATION',

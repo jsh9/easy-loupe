@@ -1,5 +1,22 @@
 # Change Log
 
+## [1.1.0] - 2026-06-06
+
+- Added
+
+  - Folder loading now includes subfolders by default and has a persisted
+    `Include subfolders` toggle next to `Open Folder` in the top bar
+  - Empty manual folder loads now show a `No Eligible Photos` dialog when the
+    selected folder contains no supported photos for the active scan mode
+
+- Changed
+
+  - `easy-loupe.json` now stores subfolder photos with folder-relative POSIX
+    photo IDs such as `subfolder_1/IMG_1234`, while root-folder photos keep
+    flat IDs such as `IMG_5678`
+  - Reorganizing photos and writing shared XMP sidecars now preserve relative
+    subfolder paths so same-named photos in different folders do not collide
+
 ## [1.0.5] - 2026-06-04
 
 - Fixed

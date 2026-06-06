@@ -193,10 +193,16 @@ build keeps a terminal attached so startup errors include a normal traceback.
 ## 3. Features
 
 - Opens folders through the native desktop folder picker.
+- Includes subfolders by default when loading culling folders. The persisted
+  `Include subfolders` toggle beside `Open Folder` can switch a manual folder
+  load to direct-folder-only scanning.
+- Shows a `No Eligible Photos` dialog when a manual folder load succeeds but
+  the active scan mode finds no supported photos.
 - Opens individual photo files directly into a lightweight photo-viewer mode
   with adjacent-folder navigation and handoff into the full culling workspace.
 - Groups JPEG, HEIC/HEIF, and multiple camera RAW formats by shared filename
-  stem.
+  stem, with subfolder-relative IDs keeping same-named photos in different
+  folders distinct.
 - Shows view mode, browse mode, and compare mode: view mode uses the vertical
   thumbnail strip, central photo viewer, optional split view, and scene strip;
   browse mode shows a full-photo grid; compare mode displays up to the
@@ -212,6 +218,7 @@ build keeps a terminal attached so startup errors include a normal traceback.
   `Ctrl+Shift+E` to either reorganize files by one tag criterion or write
   shared XMP sidecars for Lightroom/Capture One style metadata exchange, then
   immediately undo the completed operation from the finished dialog if needed.
+  Reorganized outputs preserve source subfolder paths inside each tag bucket.
 - Displays metadata in the top bar and thumbnail strips using star ratings, a
   colored label dot, and pick/reject indicators.
 - Supports autofocus-point/manual zoom, split view, per-photo remembered manual
@@ -339,11 +346,14 @@ Common transitions:
 ## 6. Metadata File
 
 The app stores per-photo metadata in `easy-loupe.json` inside the selected
-folder under a top-level `photos` object. Photo keys use the visible photo
-stem, not the filename with extension.
+folder under a top-level `photos` object. Root-folder photo keys use the
+visible photo stem, not the filename with extension. Photos loaded from
+subfolders use folder-relative POSIX stems such as `subfolder_1/IMG_1234`,
+including on Windows.
 
 You can also export the current rating, color label, and pick/reject state to
-shared uppercase `PHOTO_ID.XMP` sidecars through `Organize Photos`.
+shared uppercase `PHOTO_ID.XMP` sidecars through `Organize Photos`. For
+subfolder photos, the sidecar is written beside the source photo group.
 
 Example:
 
@@ -354,12 +364,16 @@ Example:
       "rating": 4,
       "color_label": "red",
       "flag": "picked"
+    },
+    "subfolder_1/IMG_3000": {
+      "rating": 5,
+      "flag": "picked"
     }
   },
   "scenes": {
     "source": "manual",
     "groups": [
-      ["IMG_2000", "IMG_2001"],
+      ["IMG_2000", "subfolder_1/IMG_3000"],
       ["IMG_2002"]
     ]
   }
