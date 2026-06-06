@@ -20,6 +20,13 @@ from easy_loupe.core.records import (
     PhotoRecord,
     SceneGroup,
 )
+from easy_loupe.core.recursive_loading import (
+    DEFAULT_LOAD_RECURSIVELY,
+    discover_photo_files,
+    exif_metadata_for_path,
+    relative_photo_id,
+    relative_posix_path,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -67,6 +74,7 @@ def load_folder_state(
         progress_callback: Callable[[str, int], None] | None = None,
         sort_mode: str = DEFAULT_PHOTO_SORT_MODE,
         sort_reversed: bool = DEFAULT_PHOTO_SORT_REVERSED,
+        load_recursively: bool = DEFAULT_LOAD_RECURSIVELY,
         read_exif_metadata_fn: Callable[
             [list[Path]], dict[str, dict[str, Any]]
         ],
@@ -79,18 +87,17 @@ def load_folder_state(
     if progress_callback:
         progress_callback('Scanning folder', 5)
 
-    files = sorted(
-        [
-            path
-            for path in folder.iterdir()
-            if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS
-        ],
-        key=lambda path: path.name.lower(),
+    files = discover_photo_files(
+        folder,
+        SUPPORTED_EXTENSIONS,
+        load_recursively=load_recursively,
     )
 
     groups: dict[str, list[Path]] = {}
     for path in files:
-        groups.setdefault(path.stem.lower(), []).append(path)
+        groups.setdefault(
+            relative_photo_id(folder, path).casefold(), []
+        ).append(path)
 
     if progress_callback:
         progress_callback('Reading metadata', 20)
@@ -108,7 +115,7 @@ def load_folder_state(
     total_groups = max(len(sorted_groups), 1)
     for index, (_, grouped_files) in enumerate(sorted_groups, start=1):
         photo = _build_photo_record(
-            grouped_files, exif_map, normalized_metadata
+            folder, grouped_files, exif_map, normalized_metadata
         )
         records.append(photo)
         if progress_callback:
@@ -176,6 +183,7 @@ def load_viewer_folder_state(
     )
     records = [
         _build_photo_record(
+            folder,
             grouped_files,
             {},
             normalized_metadata,
@@ -202,6 +210,7 @@ def load_viewer_folder_state(
 
 
 def _build_photo_record(
+        folder: Path,
         grouped_files: list[Path],
         exif_map: dict[str, dict[str, Any]],
         normalized_metadata: dict[str, dict[str, Any]],
@@ -239,11 +248,11 @@ def _build_photo_record(
         preview_source = raw_files[0]
 
     metadata_source = raw_files[0] if raw_files else preview_source
-    shared_stem = preview_source.stem
+    shared_stem = relative_photo_id(folder, preview_source)
 
     source_metadata = (
-        exif_map.get(metadata_source.name)
-        or exif_map.get(preview_source.name)
+        exif_metadata_for_path(exif_map, metadata_source)
+        or exif_metadata_for_path(exif_map, preview_source)
         or {}
     )
     exif_display = build_photo_exif_display(
@@ -264,7 +273,9 @@ def _build_photo_record(
     return PhotoRecord(
         photo_id=shared_stem,
         display_name=shared_stem,
-        files=[path.name for path in sorted_group_files],
+        files=[
+            relative_posix_path(folder, path) for path in sorted_group_files
+        ],
         has_jpeg=bool(jpeg_files),
         has_raw=bool(raw_files),
         preview_source=preview_source,

@@ -342,6 +342,41 @@ def test_write_xmp_sidecars_rolls_back_partial_failures(
     assert (source_folder / 'IMG_8301.XMP').exists() is False
 
 
+def test_write_xmp_sidecars_writes_nested_sidecar_beside_photo(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify XMP sidecars for recursive photos are written beside the source.
+
+    The relative photo ID includes folders for metadata, but the filesystem
+    sidecar still belongs next to the grouped photo files.
+    """
+    source_folder = tmp_path / 'nested-xmp'
+    nested = source_folder / 'subfolder_1'
+    nested.mkdir(parents=True)
+    create_jpeg(nested / 'IMG_8400.JPG', 'red')
+    stub_read_exif(monkeypatch, {})
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache-nested-xmp')
+    library.load_folder(source_folder)
+    library.update_metadata(
+        'subfolder_1/IMG_8400',
+        rating=4,
+        fields={'rating'},
+    )
+
+    summary = write_xmp_sidecars(
+        source_folder,
+        library.get_photos(),
+        WriteXmpOptions(merge_policy='preserve'),
+    )
+
+    sidecar_path = nested / 'IMG_8400.XMP'
+    assert summary.written_sidecars == 1
+    assert sidecar_path.exists()
+    description = _description_for(sidecar_path)
+    assert _element_text(description, XMP_NAMESPACE, 'Rating') == '4'
+
+
 def _make_library(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,

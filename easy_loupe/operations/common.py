@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from easy_loupe.core.recursive_loading import resolve_relative_path
+
 if TYPE_CHECKING:
     from easy_loupe.core.records import PhotoRecord
 
@@ -83,7 +85,7 @@ class OperationError(RuntimeError):
 
 def sidecar_path_for_photo(current_folder: Path, photo: PhotoRecord) -> Path:
     """Return the shared uppercase XMP sidecar path for a photo stem."""
-    return current_folder / f'{photo.photo_id}.XMP'
+    return resolve_relative_path(current_folder, f'{photo.photo_id}.XMP')
 
 
 def ensure_directory(path: Path, undo_plan: UndoPlan | None = None) -> None:

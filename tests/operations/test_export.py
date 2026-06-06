@@ -320,6 +320,49 @@ def test_organize_photos_rolls_back_partial_failures(
     assert output_parent.exists() is False
 
 
+def test_organize_photos_preserves_relative_subfolder_paths(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify organizer output keeps recursive source subfolders under buckets.
+
+    Without the relative path, two nested photos with the same filename could
+    collide in the same tag folder.
+    """
+    source_folder = tmp_path / 'source'
+    nested = source_folder / 'subfolder_1'
+    nested.mkdir(parents=True)
+    create_jpeg(nested / 'IMG_A.JPG', 'red')
+    (nested / 'IMG_A.XMP').write_text('<xmp/>', encoding='utf-8')
+    stub_read_exif(monkeypatch, {})
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache-recursive')
+    library.load_folder(source_folder)
+    library.update_metadata(
+        'subfolder_1/IMG_A',
+        flag='picked',
+        fields={'flag'},
+    )
+
+    output_parent = tmp_path / 'organized'
+    summary = organize_photos(
+        source_folder,
+        library.get_photos(),
+        OrganizeFilesOptions(
+            criterion='flag',
+            action='copy',
+            output_parent=output_parent,
+            include_untagged=False,
+            conflict_policy='fail',
+            include_sidecars=True,
+        ),
+    )
+
+    assert summary.copied_files == 2
+    assert (output_parent / 'Picked' / 'subfolder_1' / 'IMG_A.JPG').exists()
+    assert (output_parent / 'Picked' / 'subfolder_1' / 'IMG_A.XMP').exists()
+    assert (source_folder / 'Picked').exists() is False
+
+
 def _make_library(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[Path, PhotoLibrary]:

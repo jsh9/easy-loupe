@@ -81,6 +81,58 @@ def test_save_metadata_uses_visible_stem_key_format(
     }
 
 
+def test_recursive_metadata_uses_posix_relative_photo_ids(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify recursive metadata reads legacy separators and writes POSIX IDs.
+
+    Saved metadata must be portable across platforms while still identifying
+    nested photos unambiguously.
+    """
+    subfolder = tmp_path / 'subfolder_1'
+    subfolder.mkdir()
+    create_jpeg(subfolder / 'IMG_1234.JPG', 'green')
+    metadata_path = tmp_path / METADATA_FILENAME
+    metadata_path.write_text(
+        json.dumps({
+            'photos': {
+                'subfolder_1\\IMG_1234.JPG': {
+                    'rating': 5,
+                    'flag': 'picked',
+                }
+            }
+        }),
+        encoding='utf-8',
+    )
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+
+    photo = library.get_photo('subfolder_1/IMG_1234')
+    assert photo.rating == 5
+    assert photo.flag == 'picked'
+
+    library.update_metadata(
+        'subfolder_1/IMG_1234',
+        color_label='blue',
+        fields={'color_label'},
+    )
+    library.save_metadata()
+
+    data = json.loads(metadata_path.read_text(encoding='utf-8'))
+    assert data == {
+        'photos': {
+            'subfolder_1/IMG_1234': {
+                'color_label': 'blue',
+                'flag': 'picked',
+                'rating': 5,
+            }
+        }
+    }
+
+
 def test_metadata_normalization_and_serialization() -> None:
     normalized = normalize_metadata_entries({
         'photos': {
@@ -150,6 +202,29 @@ def test_scene_group_normalization_repairs_folder_changes() -> None:
         ['IMG_1000', 'IMG_1001'],
         ['IMG_1002'],
         ['IMG_1003'],
+    ]
+
+
+def test_scene_group_normalization_preserves_relative_photo_ids() -> None:
+    """
+    Verify saved scene groups normalize subfolder IDs without flattening them.
+
+    Scene edits are persisted by photo ID, so recursive scenes need the same
+    portable path normalization as per-photo metadata.
+    """
+    source, scenes = normalize_scene_groups(
+        {
+            'scenes': {
+                'source': 'manual',
+                'groups': [['subfolder_1\\IMG_1000.JPG', 'IMG_1001.JPG']],
+            }
+        },
+        ['subfolder_1/IMG_1000', 'IMG_1001'],
+    )
+
+    assert source == 'manual'
+    assert [scene.photo_ids for scene in scenes] == [
+        ['subfolder_1/IMG_1000', 'IMG_1001']
     ]
 
 

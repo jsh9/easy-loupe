@@ -189,6 +189,12 @@ def test_main_window_choose_folder_cancel_and_failure_paths_restore_ui(
         load_behavior: str,
         expected_errors: list[tuple[str, str]],
 ) -> None:
+    """
+    Verify abandoned or failed folder loads restore controls without noise.
+
+    The empty-folder dialog is reserved for successful scans that find zero
+    photos, so cancel and failure paths must not show it while unwinding.
+    """
     app = QApplication.instance() or QApplication([])
     window = main_window_module.MainWindow()
     window._initial_folder_prompt_pending = False
@@ -206,6 +212,15 @@ def test_main_window_choose_folder_cancel_and_failure_paths_restore_ui(
         'critical',
         lambda _parent, title, text: errors.append((title, text)),
     )
+    empty_dialogs: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        'information',
+        lambda _parent, title, text, *_args: empty_dialogs.append((
+            title,
+            text,
+        )),
+    )
 
     if load_behavior == 'raise':
 
@@ -220,9 +235,85 @@ def test_main_window_choose_folder_cancel_and_failure_paths_restore_ui(
     window.choose_folder()
 
     assert errors == expected_errors
+    assert empty_dialogs == []
     assert_choose_folder_idle(window)
     assert window.open_button.isEnabled() is True
     assert window.detect_button.isEnabled() is False
+
+    window.close()
+    del app
+
+
+@pytest.mark.parametrize(
+    ('load_recursively', 'nested_photo'),
+    [
+        pytest.param(True, False, id='recursive-empty-folder'),
+        pytest.param(False, True, id='direct-only-ignores-subfolder-photo'),
+    ],
+)
+def test_main_window_choose_folder_empty_load_shows_no_eligible_photos_dialog(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        load_recursively: bool,
+        nested_photo: bool,
+) -> None:
+    """
+    Verify manual empty folder loads explain why no photos appeared.
+
+    The dialog is based on the loaded photo count, so it must appear for a
+    truly empty recursive scan and for a direct-only scan where eligible files
+    exist only in subfolders.
+    """
+    if nested_photo:
+        nested = tmp_path / 'nested'
+        nested.mkdir()
+        create_jpeg(nested / 'IMG_9000.JPG', 'blue')
+
+    monkeypatch.setattr(
+        QFileDialog,
+        'getExistingDirectory',
+        lambda *_args, **_kwargs: str(tmp_path),
+    )
+    captured_dialogs: list[dict[str, object]] = []
+
+    def fake_information(
+            _parent: object,
+            title: str,
+            text: str,
+            buttons: QMessageBox.StandardButton,
+            default_button: QMessageBox.StandardButton,
+    ) -> QMessageBox.StandardButton:
+        captured_dialogs.append({
+            'title': title,
+            'text': text,
+            'buttons': buttons,
+            'default': default_button,
+        })
+        return default_button
+
+    monkeypatch.setattr(QMessageBox, 'information', fake_information)
+
+    app = QApplication.instance() or QApplication([])
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    window.library.set_load_recursively(load_recursively)
+
+    window.choose_folder()
+    app.processEvents()
+
+    assert captured_dialogs == [
+        {
+            'title': 'No Eligible Photos',
+            'text': 'No supported photos were found in the selected folder.',
+            'buttons': QMessageBox.StandardButton.Ok,
+            'default': QMessageBox.StandardButton.Ok,
+        }
+    ]
+    assert_choose_folder_idle(window)
+    assert window.library.current_folder == tmp_path.resolve()
+    assert window.open_button.isEnabled() is True
+    assert window.detect_button.isEnabled() is False
+    assert window.organize_button.isEnabled() is False
 
     window.close()
     del app
@@ -1434,8 +1525,10 @@ def test_main_window_choose_folder_success_populates_ui(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """
-    Successful folder loads should focus the strip for immediate Down
-    navigation.
+    Successful folder loads should focus the strip without an empty dialog.
+
+    This protects the normal load path from the empty-folder warning while
+    keeping immediate Down-key navigation on the thumbnail strip.
     """
     create_jpeg(tmp_path / 'IMG_9080.JPG', 'dimgray')
     create_jpeg(tmp_path / 'IMG_9081.JPG', 'blue')
@@ -1444,6 +1537,15 @@ def test_main_window_choose_folder_success_populates_ui(
         QFileDialog,
         'getExistingDirectory',
         lambda *_args, **_kwargs: str(tmp_path),
+    )
+    empty_dialogs: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        'information',
+        lambda _parent, title, text, *_args: empty_dialogs.append((
+            title,
+            text,
+        )),
     )
 
     app = QApplication.instance() or QApplication([])
@@ -1469,6 +1571,7 @@ def test_main_window_choose_folder_success_populates_ui(
     assert window.organize_button.isEnabled() is True
     assert str(tmp_path.resolve()) in window.folder_label.text()
     assert _list_widget_has_focus(app, window.thumbnail_list) is True
+    assert empty_dialogs == []
 
     focus_widget = app.focusWidget()
     assert focus_widget is not None

@@ -108,14 +108,32 @@ class MainWindowWorkflowMixin:
         self.open_button.setEnabled(True)
         self._refresh_ui()
         self._restore_active_navigation_focus(defer=True)
+        # Show this only after the loaded-empty UI is fully restored. That
+        # keeps the modal dialog from interrupting progress cleanup or leaving
+        # controls in a transient disabled state while the user dismisses it.
+        if not self.library.photos:
+            self._show_no_eligible_photos_dialog()
+
+    def _show_no_eligible_photos_dialog(self: MainWindow) -> None:
+        """Tell the user the selected folder contained no loadable photos."""
+        QMessageBox.information(
+            self,
+            'No Eligible Photos',
+            'No supported photos were found in the selected folder.',
+            QMessageBox.StandardButton.Ok,
+            QMessageBox.StandardButton.Ok,
+        )
 
     def load_culling_launch_request(
             self: MainWindow, request: CullingLaunchRequest
     ) -> None:
         """Load a culling workspace requested by a photo-viewer handoff."""
+        load_recursively = self._load_photo_load_recursively()
         if request.preloaded_library is not None:
             self.library = request.preloaded_library
+            self.library.set_load_recursively(load_recursively)
         else:
+            self.library.set_load_recursively(load_recursively)
             self.library.load_folder(request.folder)
 
         # Handoff may reuse a hydrated photo-viewer library, whose order is
@@ -127,6 +145,9 @@ class MainWindowWorkflowMixin:
         )
         self._check_photo_sort_control(self.library.sort_mode)
         self._check_photo_sort_reverse_control(self.library.sort_reversed)
+        self._check_photo_load_recursively_control(
+            self.library.load_recursively
+        )
         loaded_photo_ids = {photo.photo_id for photo in self.library.photos}
         self.current_photo_id = (
             request.selected_photo_id
@@ -513,6 +534,62 @@ class MainWindowWorkflowMixin:
         )
         self._rebuild_loaded_views(show_progress=True)
         self._clear_metadata_history()
+
+    def _reload_current_folder_after_recursive_preference_change(
+            self: MainWindow, *, load_recursively: bool
+    ) -> None:
+        """
+        Reload the current folder after the recursive preference changes.
+
+        Parameters
+        ----------
+        self : MainWindow
+            Main window whose loaded library and visible lists should be
+            rebuilt.
+        load_recursively : bool
+            New recursive-loading preference to apply before scanning.
+
+        Returns
+        -------
+        None
+            The loaded library, current selection, list widgets, metadata
+            history, and focus state are updated in place.
+        """
+        current_folder = self.library.current_folder
+        if current_folder is None:
+            self.library.set_load_recursively(load_recursively)
+            return
+
+        previous_photo_id = self.current_photo_id
+        if self._compare_mode:
+            # Compare mode owns a capped set of photo IDs from the old load.
+            # Exit before reloading so stale compared panes are not restored
+            # after the recursive setting changes the available photo set.
+            self._exit_compare_mode(restore_previous=False)
+
+        self._show_progress('Scanning folder', 0)
+        self.library.set_load_recursively(load_recursively)
+        self.library.load_folder(
+            current_folder, progress_callback=self._handle_load_progress
+        )
+        loaded_photo_ids = {photo.photo_id for photo in self.library.photos}
+        # Keep the user's photo when it still exists after the scan-mode
+        # change; otherwise fall back to the first loaded photo so the rebuilt
+        # lists and viewer never point at an unloaded ID.
+        self.current_photo_id = (
+            previous_photo_id
+            if previous_photo_id in loaded_photo_ids
+            else self.library.photos[0].photo_id
+            if self.library.photos
+            else None
+        )
+        self._rebuild_loaded_views(
+            show_progress=True, preserve_current_photo=True
+        )
+        self._clear_metadata_history()
+        self._hide_progress()
+        self._refresh_ui()
+        self._restore_active_navigation_focus(defer=True)
 
     def _rebuild_loaded_views(
             self: MainWindow,
@@ -1118,6 +1195,7 @@ class MainWindowWorkflowMixin:
         self.organize_button.setEnabled(photo_actions_enabled)
         self.theme_toggle.setEnabled(enabled)
         self.show_af_point_toggle.setEnabled(enabled)
+        self.photo_load_recursively_checkbox.setEnabled(enabled)
         for button in self.photo_sort_buttons.values():
             button.setEnabled(enabled)
 

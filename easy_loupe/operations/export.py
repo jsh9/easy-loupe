@@ -5,8 +5,13 @@ from __future__ import annotations
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from easy_loupe.core.recursive_loading import (
+    normalize_relative_file_path,
+    resolve_relative_path,
+)
 from easy_loupe.operations.common import (
     CreatedFileUndo,
     MovedFileUndo,
@@ -20,8 +25,6 @@ from easy_loupe.operations.common import (
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from easy_loupe.core.records import PhotoRecord
 
 ProgressCallback = Callable[[str, int], None]
@@ -150,7 +153,7 @@ def _build_jobs(
         destinations = tuple(
             options.output_parent.expanduser().resolve()
             / folder_name
-            / path.name
+            / _relative_output_path(current_folder, path)
             for path in sources
         )
         jobs.append(
@@ -167,7 +170,7 @@ def _source_paths_for_photo(
 ) -> tuple[Path, ...]:
     sources: list[Path] = []
     for name in photo.files:
-        source = current_folder / name
+        source = resolve_relative_path(current_folder, name)
         if not source.exists():
             raise OperationError(source, 'Source file does not exist')
 
@@ -179,6 +182,45 @@ def _source_paths_for_photo(
             sources.append(sidecar_path)
 
     return tuple(sources)
+
+
+def _relative_output_path(current_folder: Path, source: Path) -> Path:
+    """
+    Return the source path to preserve under an output bucket.
+
+    Parameters
+    ----------
+    current_folder : Path
+        Loaded photo folder that owns ``source``.
+    source : Path
+        Source file or sidecar path to place under the organizer output folder.
+
+    Returns
+    -------
+    Path
+        Folder-relative output path with platform-native separators.
+
+    Raises
+    ------
+    OperationError
+        If ``source`` is outside ``current_folder`` or cannot be normalized
+        into a safe folder-relative path.
+    """
+    try:
+        relative_path = source.relative_to(current_folder).as_posix()
+    except ValueError as exc:
+        raise OperationError(
+            source, 'Source is outside the current folder'
+        ) from exc
+
+    # Preserve the source subfolder layout inside each tag bucket. This avoids
+    # filename collisions when recursive loading finds the same stem in
+    # multiple subfolders.
+    normalized = normalize_relative_file_path(relative_path)
+    if normalized is None:
+        raise OperationError(source, 'Source path is not folder-relative')
+
+    return Path(*normalized.split('/'))
 
 
 def _preflight_conflicts(jobs: list[_OrganizeJob]) -> None:

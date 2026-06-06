@@ -8,6 +8,7 @@ from PySide6.QtCore import QSettings
 from easy_loupe.ui.identity import APP_NAME
 from easy_loupe.ui.main_window.build import (
     COMPARE_PHOTO_LIMIT_SETTINGS_KEY,
+    PHOTO_LOAD_RECURSIVELY_SETTINGS_KEY,
     PHOTO_SORT_MODE_SETTINGS_KEY,
     PHOTO_SORT_REVERSED_SETTINGS_KEY,
 )
@@ -21,6 +22,7 @@ def clear_main_window_settings() -> Iterator[None]:
     settings = QSettings(APP_NAME, APP_NAME)
     setting_keys = [
         COMPARE_PHOTO_LIMIT_SETTINGS_KEY,
+        PHOTO_LOAD_RECURSIVELY_SETTINGS_KEY,
         PHOTO_SORT_MODE_SETTINGS_KEY,
         PHOTO_SORT_REVERSED_SETTINGS_KEY,
     ]

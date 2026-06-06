@@ -69,7 +69,13 @@ def read_exif_metadata(files: list[Path]) -> dict[str, dict[str, Any]]:
         for record in batch_records:
             source_file = record.get('SourceFile')
             if source_file:
-                records[Path(source_file).name] = record
+                source_path = Path(source_file)
+                # Recursive scans can contain duplicate filenames in different
+                # subfolders, so folder loading needs a resolved-path key.
+                # Keep the basename key for existing flat-folder tests and
+                # callers that stub EXIF maps by filename.
+                records[str(source_path.expanduser().resolve())] = record
+                records[source_path.name] = record
 
     return records
 

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import (
     QEvent,
     QObject,
+    QSettings,
     QSize,
     Qt,
     QThread,
@@ -30,11 +31,18 @@ from easy_loupe.core.folder_loading import (
 )
 from easy_loupe.core.histogram import compute_rgb_histogram
 from easy_loupe.core.photo_library import PhotoLibrary
+from easy_loupe.core.recursive_loading import (
+    normalize_load_recursively,
+    resolve_relative_path,
+)
 from easy_loupe.ui.defaults import DEFAULT_SHOW_AF_POINT
 from easy_loupe.ui.folder_access import FolderAccessManager
 from easy_loupe.ui.identity import APP_NAME, easy_loupe_icon
 from easy_loupe.ui.launch import CullingLaunchRequest
-from easy_loupe.ui.main_window.build import TRANSIENT_MESSAGE_TIMEOUT_MS
+from easy_loupe.ui.main_window.build import (
+    PHOTO_LOAD_RECURSIVELY_SETTINGS_KEY,
+    TRANSIENT_MESSAGE_TIMEOUT_MS,
+)
 from easy_loupe.ui.photo_viewer.workers import (
     FolderHydrationWorker,
     PhotoViewerExifResult,
@@ -712,10 +720,7 @@ class PhotoViewerWindow(QMainWindow):
             photo.photo_id,
             photo.metadata_source,
             photo.preview_source,
-            [
-                photo.preview_source.parent / filename
-                for filename in photo.files
-            ],
+            self._photo_file_paths(photo.files),
         )
         self._photo_viewer_exif_worker.moveToThread(
             self._photo_viewer_exif_thread
@@ -886,6 +891,7 @@ class PhotoViewerWindow(QMainWindow):
             cache_dir=self.library.cache_dir,
             sort_mode=PHOTO_SORT_MODE_FILENAME,
             sort_reversed=DEFAULT_PHOTO_SORT_REVERSED,
+            load_recursively=self._load_culling_recursive_preference(),
         )
         bridge = FolderHydrationSignalBridge(self)
         self._folder_hydration_bridge = bridge
@@ -924,6 +930,46 @@ class PhotoViewerWindow(QMainWindow):
             )
         )
         self._folder_hydration_thread.start()
+
+    def _photo_file_paths(self, photo_files: list[str]) -> list[Path]:
+        """
+        Return concrete paths for a photo record's relative file list.
+
+        Parameters
+        ----------
+        self : PhotoViewerWindow
+            Photo-viewer window that owns the current library.
+        photo_files : list[str]
+            Folder-relative POSIX file paths stored on the photo record.
+
+        Returns
+        -------
+        list[Path]
+            Platform-native paths suitable for EXIF reads.
+        """
+        current_folder = self.library.current_folder
+        if current_folder is None:
+            return [Path(filename) for filename in photo_files]
+
+        return [
+            resolve_relative_path(current_folder, filename)
+            for filename in photo_files
+        ]
+
+    @staticmethod
+    def _load_culling_recursive_preference() -> bool:
+        """
+        Load the persisted recursive preference for culling handoff.
+
+        Returns
+        -------
+        bool
+            Normalized recursive-loading preference stored for culling mode.
+        """
+        value = QSettings(APP_NAME, APP_NAME).value(
+            PHOTO_LOAD_RECURSIVELY_SETTINGS_KEY
+        )
+        return normalize_load_recursively(value)
 
     @Slot(int, object, str, int)
     def _handle_folder_hydration_progress(

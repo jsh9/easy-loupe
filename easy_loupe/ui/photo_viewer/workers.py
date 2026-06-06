@@ -15,6 +15,9 @@ from easy_loupe.core.records import (
     JPEG_EXTENSIONS,
     RAW_EXTENSIONS,
 )
+from easy_loupe.core.recursive_loading import (
+    exif_metadata_for_path,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -110,8 +113,8 @@ class PhotoViewerExifWorker(QObject):
                 return
 
             metadata = (
-                exif_map.get(self._metadata_source.name)
-                or exif_map.get(self._preview_source.name)
+                exif_metadata_for_path(exif_map, self._metadata_source)
+                or exif_metadata_for_path(exif_map, self._preview_source)
                 or {}
             )
             image_width, image_height = exif_module.resolve_image_size(
@@ -174,6 +177,7 @@ class FolderHydrationWorker(QObject):
             cache_dir: Path,
             sort_mode: str,
             sort_reversed: bool,
+            load_recursively: bool,
     ) -> None:
         super().__init__()
         self._request_id = request_id
@@ -181,6 +185,7 @@ class FolderHydrationWorker(QObject):
         self._cache_dir = cache_dir
         self._sort_mode = sort_mode
         self._sort_reversed = sort_reversed
+        self._load_recursively = load_recursively
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -198,6 +203,7 @@ class FolderHydrationWorker(QObject):
                 cache_dir=self._cache_dir,
                 sort_mode=self._sort_mode,
                 sort_reversed=self._sort_reversed,
+                load_recursively=self._load_recursively,
             )
             library.load_folder(
                 self._folder, progress_callback=self._emit_progress

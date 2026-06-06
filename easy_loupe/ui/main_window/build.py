@@ -37,6 +37,10 @@ from easy_loupe.core.folder_loading import (
     normalize_sort_reversed,
 )
 from easy_loupe.core.histogram import compute_rgb_histogram
+from easy_loupe.core.recursive_loading import (
+    DEFAULT_LOAD_RECURSIVELY,
+    normalize_load_recursively,
+)
 from easy_loupe.ui.defaults import DEFAULT_SHOW_AF_POINT
 from easy_loupe.ui.identity import APP_NAME, APP_VERSION
 from easy_loupe.ui.theme import NO_METADATA_TEXT
@@ -72,6 +76,7 @@ if TYPE_CHECKING:
 COMPARE_PHOTO_LIMIT_SETTINGS_KEY = 'compare/photo_limit'
 PHOTO_SORT_MODE_SETTINGS_KEY = 'photos/sort_mode'
 PHOTO_SORT_REVERSED_SETTINGS_KEY = 'photos/sort_reversed'
+PHOTO_LOAD_RECURSIVELY_SETTINGS_KEY = 'photos/load_recursively'
 MIN_SCENE_MERGE_PHOTO_COUNT = 2
 TRANSIENT_MESSAGE_FONT_SIZE_PX = 28
 TRANSIENT_MESSAGE_FONT_WEIGHT = 600
@@ -105,12 +110,7 @@ class MainWindowBuildMixin:
         self._apply_theme()
 
     def _build_top_bar(self: MainWindow, top_bar: QHBoxLayout) -> None:
-        self.open_button = QPushButton('Open Folder')
-        self.open_button.clicked.connect(self.choose_folder)
-        self.open_button.setToolTip(
-            self._shortcut_tooltip('Open Folder', 'Ctrl+O')
-        )
-        top_bar.addWidget(self.open_button)
+        self._build_photo_open_group(top_bar)
 
         self.detect_button = QPushButton('Detect Scenes')
         self.detect_button.clicked.connect(self.detect_scenes)
@@ -198,6 +198,24 @@ class MainWindowBuildMixin:
         self.progress_bar.setFixedWidth(220)
         top_bar.addWidget(self.progress_label)
         top_bar.addWidget(self.progress_bar)
+
+    def _build_photo_open_group(
+            self: MainWindow, target_layout: QHBoxLayout
+    ) -> None:
+        """Build the framed folder-opening controls in the top bar."""
+        self.photo_open_group = QFrame()
+        self.photo_open_group.setObjectName('photoOpenGroup')
+        open_control_row = QHBoxLayout(self.photo_open_group)
+        open_control_row.setContentsMargins(0, 0, 0, 0)
+        open_control_row.setSpacing(6)
+        self.open_button = QPushButton('Open Folder')
+        self.open_button.clicked.connect(self.choose_folder)
+        self.open_button.setToolTip(
+            self._shortcut_tooltip('Open Folder', 'Ctrl+O')
+        )
+        open_control_row.addWidget(self.open_button)
+        self._build_photo_load_recursively_control(open_control_row)
+        target_layout.addWidget(self.photo_open_group)
 
     def _build_view_mode_ui(self: MainWindow, root: QVBoxLayout) -> None:
         content_splitter = QSplitter(Qt.Horizontal)
@@ -542,6 +560,43 @@ class MainWindowBuildMixin:
 
         target_layout.addWidget(self.photo_sort_segment)
 
+    def _build_photo_load_recursively_control(
+            self: MainWindow, target_layout: QHBoxLayout
+    ) -> None:
+        """
+        Build and initialize the recursive-loading checkbox.
+
+        Parameters
+        ----------
+        self : MainWindow
+            Main window instance receiving the checkbox attribute.
+        target_layout : QHBoxLayout
+            Layout that should contain the checkbox.
+
+        Returns
+        -------
+        None
+            The checkbox is attached to ``self`` and added to
+            ``target_layout``.
+        """
+        self.photo_load_recursively_checkbox = QCheckBox('Include subfolders')
+        self.photo_load_recursively_checkbox.setObjectName(
+            'photoLoadRecursivelyCheckbox'
+        )
+        self.photo_load_recursively_checkbox.setFocusPolicy(Qt.NoFocus)
+        self.photo_load_recursively_checkbox.setToolTip(
+            'Load supported photos from subfolders'
+        )
+        self.photo_load_recursively_checkbox.toggled.connect(
+            lambda checked: self._set_photo_load_recursively(
+                checked, persist=True
+            )
+        )
+        self._set_photo_load_recursively(
+            self._load_photo_load_recursively(), persist=False
+        )
+        target_layout.addWidget(self.photo_load_recursively_checkbox)
+
     @staticmethod
     def _settings() -> QSettings:
         return QSettings(APP_NAME, APP_NAME)
@@ -566,6 +621,77 @@ class MainWindowBuildMixin:
             DEFAULT_PHOTO_SORT_REVERSED,
         )
         return normalize_sort_reversed(value)
+
+    def _load_photo_load_recursively(self: MainWindow) -> bool:
+        value = self._settings().value(
+            PHOTO_LOAD_RECURSIVELY_SETTINGS_KEY,
+            DEFAULT_LOAD_RECURSIVELY,
+        )
+        return normalize_load_recursively(value)
+
+    def _set_photo_load_recursively(
+            self: MainWindow,
+            load_recursively: object,
+            *,
+            persist: bool,
+    ) -> None:
+        normalized = normalize_load_recursively(load_recursively)
+        previous = self.library.load_recursively
+        if persist and (self._busy or self._background_task_active()):
+            self._check_photo_load_recursively_control(previous)
+            return
+
+        if persist and self.library.current_folder is not None:
+            if normalized == previous:
+                return
+
+            if not self._confirm_recursive_load_reload():
+                # Qt has already toggled the checkbox visually. Put it back so
+                # the control continues to reflect the still-loaded library.
+                self._check_photo_load_recursively_control(previous)
+                return
+
+            try:
+                self._reload_current_folder_after_recursive_preference_change(
+                    load_recursively=normalized
+                )
+            except Exception as exc:  # noqa: BLE001 - surface reload failures in the UI
+                # The persisted preference should not advance if the reload
+                # fails; otherwise the next app start would silently use a
+                # mode that never successfully loaded in this window.
+                self.library.set_load_recursively(previous)
+                self._settings().setValue(
+                    PHOTO_LOAD_RECURSIVELY_SETTINGS_KEY, previous
+                )
+                self._check_photo_load_recursively_control(previous)
+                self._hide_progress()
+                QMessageBox.critical(self, 'Folder Reload Failed', str(exc))
+                self._refresh_ui()
+                return
+        else:
+            self.library.set_load_recursively(normalized)
+
+        self._check_photo_load_recursively_control(normalized)
+        if persist:
+            self._settings().setValue(
+                PHOTO_LOAD_RECURSIVELY_SETTINGS_KEY, normalized
+            )
+
+    def _confirm_recursive_load_reload(self: MainWindow) -> bool:
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle('Reload Folder?')
+        dialog.setText('Reload current folder?')
+        dialog.setInformativeText(
+            'Changing Include subfolders requires reloading the current'
+            ' folder.'
+        )
+        reload_button = dialog.addButton(
+            'Reload', QMessageBox.ButtonRole.AcceptRole
+        )
+        dialog.addButton(QMessageBox.StandardButton.Cancel)
+        dialog.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        dialog.exec()
+        return dialog.clickedButton() is reload_button
 
     def _set_photo_sort_mode(
             self: MainWindow,
@@ -674,6 +800,15 @@ class MainWindowBuildMixin:
                 normalized_sort_reversed
             )
             self.photo_sort_reverse_checkbox.blockSignals(False)
+
+    def _check_photo_load_recursively_control(
+            self: MainWindow, load_recursively: object
+    ) -> None:
+        normalized = normalize_load_recursively(load_recursively)
+        if self.photo_load_recursively_checkbox.isChecked() != normalized:
+            self.photo_load_recursively_checkbox.blockSignals(True)
+            self.photo_load_recursively_checkbox.setChecked(normalized)
+            self.photo_load_recursively_checkbox.blockSignals(False)
 
     def _set_compare_photo_limit(
             self: MainWindow,

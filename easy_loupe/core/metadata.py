@@ -5,8 +5,7 @@ Metadata persistence, normalization, and validation for EasyLoupe.
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from easy_loupe.core.records import (
     COLOR_LABELS,
@@ -16,6 +15,10 @@ from easy_loupe.core.records import (
     PhotoRecord,
     SceneGroup,
 )
+from easy_loupe.core.recursive_loading import normalize_photo_identifier
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def read_folder_metadata(folder: Path) -> dict[str, Any]:
@@ -51,8 +54,8 @@ def normalize_metadata_entries(data: Any) -> dict[str, dict[str, Any]]:
         if not isinstance(value, dict):
             continue
 
-        stem = Path(str(key)).stem
-        if not stem:
+        photo_id = normalize_photo_identifier(key)
+        if photo_id is None:
             continue
 
         entry: dict[str, Any] = {}
@@ -72,7 +75,7 @@ def normalize_metadata_entries(data: Any) -> dict[str, dict[str, Any]]:
             entry['flag'] = flag
 
         if entry:
-            normalized[stem] = entry
+            normalized[photo_id] = entry
 
     return normalized
 
@@ -107,7 +110,10 @@ def normalize_scene_groups(
 
         group_photo_ids: list[str] = []
         for raw_photo_id in raw_group:
-            photo_id = str(raw_photo_id)
+            photo_id = normalize_photo_identifier(raw_photo_id)
+            if photo_id is None:
+                continue
+
             if photo_id not in valid_photo_ids or photo_id in seen:
                 continue
 

@@ -117,11 +117,13 @@ Notes:
 
 - `easy_loupe/core/`
   - Contains the non-UI implementation modules and packages: `photo_library`,
-    `records`, `folder_loading`, `exif`, `autofocus_points`, `metadata`, and
-    `preview`.
+    `records`, `folder_loading`, `recursive_loading`, `exif`,
+    `autofocus_points`, `metadata`, and `preview`.
   - `photo_library.py` defines `PhotoLibrary` and delegates folder loading,
     metadata persistence, previews, and scene detection to the lower-level
     modules.
+  - `recursive_loading.py` owns direct-vs-recursive folder discovery and
+    folder-relative POSIX photo IDs.
   - `autofocus_points/` owns AF/focus-point extraction. `exif.py` re-exports
     `extract_focus_point(...)` for compatibility, but new camera-brand-specific
     extraction logic belongs under `autofocus_points/brands/`.
@@ -203,33 +205,46 @@ Notes:
 Preserve these behaviors unless the change explicitly intends to redefine the
 product contract and the tests/docs are updated accordingly.
 
-- Photos are grouped by shared filename stem across supported extensions.
+- Photos are grouped by shared folder-relative stem across supported
+  extensions. Root photos use flat stems such as `IMG_2000`; subfolder photos
+  use POSIX relative stems such as `subfolder/IMG_2000`, even on Windows.
 - Supported extensions are defined in `easy_loupe/core/records.py` and include
   JPEG, HEIC/HEIF, and multiple camera RAW formats.
-- A `PhotoRecord.photo_id` is the visible stem, not the filename with
-  extension.
+- A `PhotoRecord.photo_id` is the folder-relative visible stem, not the
+  filename with extension.
+- `PhotoRecord.files` stores folder-relative POSIX paths under
+  `PhotoLibrary.current_folder`; resolve paths through the shared helper rather
+  than assuming filenames are direct children of the selected folder.
 - Metadata is stored in `easy-loupe.json` inside the selected photo folder.
 - Saved folder metadata uses a top-level `photos` object for per-photo entries
   and may include a top-level `scenes` object with `source` and `groups`.
-- Saved metadata keys use the visible stem format, for example `IMG_2000`, not
-  `IMG_2000.JPG`.
+- Saved metadata keys use the folder-relative visible stem format, for example
+  `IMG_2000` or `subfolder/IMG_2000`, not `IMG_2000.JPG`.
 - When reading metadata, legacy forms are normalized:
   - keys with extensions are reduced to stem
+  - Windows separators are converted to `/`
   - flag value `"reject"` becomes `"rejected"`
 - Ratings are limited to integers `1..5` or `None`.
 - Color labels are limited to `"red"`, `"yellow"`, `"green"`, `"blue"`,
   `"purple"`, or `None`.
 - Flags are limited to `"picked"`, `"rejected"`, or `None`.
 - Saved metadata entries may contain `rating`, `color_label`, and `flag`.
-- Shared XMP sidecars use the uppercase stem format `PHOTO_ID.XMP`.
+- Shared XMP sidecars use the uppercase stem format `PHOTO_ID.XMP` and are
+  placed beside the source photo group for subfolder photos.
 - XMP writing manages only the app-owned rating/color-label/pick-reject fields
   and supports preserve-or-replace merge policies.
 - Photo organization groups files by one metadata criterion at a time: `flag`,
   `color_label`, or `rating`.
 - Photo organization supports `copy` and `move` actions plus conflict policies
   `fail`, `skip`, and `overwrite`.
+- Photo organization preserves source subfolder paths inside each output bucket
+  to avoid collisions between same-named files from different subfolders.
 - Undo for organization/XMP workflows is explicit, filesystem-based, and a
   given `UndoPlan` is intended to be consumed at most once.
+- Culling folder loads include subfolders by default. The top-bar
+  `Include subfolders` checkbox is grouped with `Open Folder`, persisted via
+  `photos/load_recursively`, and reloads an already loaded folder only after
+  user confirmation.
 - Photos default to sorting by EXIF capture timestamp when available, then by
   display name. Users can change the global sort preference from the top-bar
   `Sort by:` visual group, which contains a segmented control between
@@ -386,6 +401,9 @@ Mode-transition summary:
   photo list, no progress overlay, and no forced state change.
 - If folder loading fails, the progress overlay is dismissed, controls are
   re-enabled, and a critical error dialog is shown.
+- If a manual folder load succeeds but finds no eligible photos, the UI is
+  rebuilt into the loaded-empty idle state before showing the
+  `No Eligible Photos` dialog.
 - When folder loading succeeds, the window:
   - loads the folder through `PhotoLibrary.load_folder(...)`
   - selects the first photo when photos exist
@@ -476,15 +494,16 @@ Mode-transition summary:
   follows the current photo, hides automatically in browse mode, compare mode,
   and busy/progress states, and reappears when returning to eligible normal
   view state if the overlay preference remains enabled.
-- The top bar includes a single `Sort by:` visual group with mutually exclusive
-  `File Name` and `Capture Time` options plus a `Reverse order` checkbox. The
-  sort-mode options are visually one track/pill segmented control with a
-  brand-blue active option, and the whole sort area is framed with a distinct
-  border as one group rather than loose controls. It is not exposed from the
-  menu bar. The `Reverse order` checkbox flips the active sort direction. Sort
-  changes immediately rebuild the vertical thumbnail strip, horizontal scene
-  strip, browse grid, and compare grid while preserving selected photo IDs
-  where those photos still exist.
+- The top bar includes a framed `Open Folder` group containing `Open Folder`
+  and `Include subfolders`, plus a separate `Sort by:` visual group with
+  mutually exclusive `File Name` and `Capture Time` options and a
+  `Reverse order` checkbox. The sort-mode options are visually one track/pill
+  segmented control with a brand-blue active option, and the whole sort area is
+  framed with a distinct border as one group rather than loose controls. Sort
+  controls are not exposed from the menu bar. The `Reverse order` checkbox
+  flips the active sort direction. Sort changes immediately rebuild the
+  vertical thumbnail strip, horizontal scene strip, browse grid, and compare
+  grid while preserving selected photo IDs where those photos still exist.
 - The `F` shortcut toggles `Show AF point`.
 - `Shift+F` in manual zoom temporarily recenters the active zoomed pane on the
   photo's AF point or image center without replacing remembered manual zoom
