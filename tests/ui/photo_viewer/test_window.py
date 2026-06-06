@@ -665,12 +665,13 @@ def test_photo_viewer_hydration_preserves_split_inspection_state(
     """
     Verify folder hydration does not collapse the active inspection state.
 
-    Background hydration swaps the lightweight viewer library for a full
-    culling-ready library; it should not reset a user's active split/zoom view.
+    Background hydration prepares a full culling-ready library; it should not
+    reset a user's active standalone split/zoom view.
     """
     create_jpeg(tmp_path / 'A.JPG', 'green', size=(2400, 1600))
     create_jpeg(tmp_path / 'B.JPG', 'blue', size=(2400, 1600))
     app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+    original_library = window.library
     hydrated_library = PhotoLibrary(cache_dir=tmp_path / '.hydrated-cache')
     hydrated_library.load_folder(tmp_path)
     window.resize(1200, 800)
@@ -693,6 +694,8 @@ def test_photo_viewer_hydration_preserves_split_inspection_state(
     )
     app.processEvents()
 
+    assert window.library is original_library
+    assert window._hydrated_library is hydrated_library
     assert window.current_photo_id == 'A'
     assert window.viewer.is_split_view() is True
     assert (
@@ -706,6 +709,62 @@ def test_photo_viewer_hydration_preserves_split_inspection_state(
     assert center is not None
     _assert_close_tuple(center, expected_center)
     window.close()
+
+
+def test_photo_viewer_hydration_does_not_expand_standalone_navigation(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify recursive culling hydration does not change viewer navigation.
+
+    Standalone viewer mode follows the opened file's immediate folder. The
+    hydrated recursive library should be retained only for culling handoff.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    create_jpeg(tmp_path / 'B.JPG', 'blue')
+    nested = tmp_path / 'nested'
+    nested.mkdir()
+    create_jpeg(nested / 'C.JPG', 'purple')
+    app, window = _open_viewer(tmp_path, monkeypatch, startup_name='B.JPG')
+    original_library = window.library
+    hydrated_library = PhotoLibrary(cache_dir=tmp_path / '.hydrated-cache')
+    hydrated_library.load_folder(tmp_path)
+    request_id = window._folder_hydration_request_id = 9
+    expected_folder = tmp_path.resolve()
+    window._folder_hydration_folder = expected_folder
+    requests: list[object] = []
+    window.culling_requested.connect(requests.append)
+
+    window._handle_folder_hydration_finished(
+        request_id, expected_folder, hydrated_library
+    )
+    app.processEvents()
+
+    assert window.library is original_library
+    assert window._hydrated_library is hydrated_library
+    assert [photo.photo_id for photo in window.library.photos] == ['A', 'B']
+    assert [photo.photo_id for photo in hydrated_library.photos] == [
+        'A',
+        'B',
+        'nested/C',
+    ]
+    assert window.current_photo_id == 'B'
+
+    window.navigate(1)
+
+    assert window.current_photo_id == 'B'
+
+    window._request_culling_handoff()
+
+    assert len(requests) == 1
+    request = requests[0]
+    assert isinstance(request, CullingLaunchRequest)
+    assert request.preloaded_library is hydrated_library
+    assert request.selected_photo_id == 'B'
+
+    window.close()
+    del app
 
 
 def test_photo_viewer_shortcuts_toggle_af_marker_and_info_overlay(

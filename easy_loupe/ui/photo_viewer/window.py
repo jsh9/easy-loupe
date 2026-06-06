@@ -996,6 +996,15 @@ class PhotoViewerWindow(QMainWindow):
             expected_folder: Path,
             library: object,
     ) -> None:
+        """
+        Store a culling-ready hydrated library without changing viewer scope.
+
+        The standalone photo viewer starts from the opened file's immediate
+        folder and keeps that navigation contract even when culling mode is
+        configured to include subfolders. Background hydration may therefore
+        produce a larger recursive library than the viewer should navigate.
+        Keep that library only as the payload for a later culling handoff.
+        """
         if not self._folder_hydration_request_matches(
             request_id, expected_folder
         ):
@@ -1009,33 +1018,9 @@ class PhotoViewerWindow(QMainWindow):
             )
             return
 
-        preserved_photo_id = self.current_photo_id
-        preserve_inspection = preserved_photo_id in {
-            photo.photo_id for photo in library.photos
-        }
-        inspection_state = (
-            self._capture_inspection_state() if preserve_inspection else None
-        )
+        # Do not assign this to self.library. The active viewer library remains
+        # direct-folder scoped; the hydrated library is for G/Enter handoff.
         self._hydrated_library = library
-        self.library = library
-        if preserve_inspection:
-            self.current_photo_id = preserved_photo_id
-        elif library.photos:
-            self.current_photo_id = library.photos[0].photo_id
-        else:
-            self.current_photo_id = None
-
-        try:
-            self._display_current_photo(inspection_state=inspection_state)
-        except (OSError, RuntimeError, ValueError) as exc:
-            self._handle_folder_hydration_failed(
-                request_id,
-                expected_folder,
-                str(exc),
-            )
-            return
-
-        self._refresh_window_title()
         if self._pending_culling_handoff:
             self._pending_culling_handoff = False
             self._hide_progress()

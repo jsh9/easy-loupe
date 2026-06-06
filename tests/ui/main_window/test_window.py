@@ -739,6 +739,80 @@ def test_main_window_recursive_loading_reload_applies_to_current_folder(
     del app
 
 
+def test_main_window_recursive_loading_empty_reload_shows_no_eligible_dialog(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify direct-only reloads that find no photos explain the empty state.
+
+    This covers folders where all eligible photos live below the selected root
+    and become hidden when Include subfolders is unchecked.
+    """
+    nested = tmp_path / 'subfolder_1'
+    nested.mkdir()
+    create_jpeg(nested / 'NESTED.JPG', 'green')
+    stub_read_exif(monkeypatch, {})
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache-recursive')
+    library.load_folder(tmp_path)
+    app = QApplication.instance() or QApplication([])
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    window.library = library
+    window.current_photo_id = 'subfolder_1/NESTED'
+    window._populate_thumbnail_list()
+    window._populate_browse_list()
+    window._populate_scene_list()
+    window._display_current_photo()
+    window._refresh_ui()
+    clicked_button: dict[str, object | None] = {'button': None}
+    empty_dialogs: list[tuple[str, str]] = []
+
+    def fake_exec(message_box: QMessageBox) -> int:
+        reload_button = next(
+            button
+            for button in message_box.buttons()
+            if button.text() == 'Reload'
+        )
+        clicked_button['button'] = reload_button
+        return 0
+
+    def fake_information(
+            _parent: object,
+            title: str,
+            text: str,
+            *_args: object,
+    ) -> QMessageBox.StandardButton:
+        empty_dialogs.append((title, text))
+        return QMessageBox.StandardButton.Ok
+
+    monkeypatch.setattr(QMessageBox, 'exec', fake_exec)
+    monkeypatch.setattr(
+        QMessageBox,
+        'clickedButton',
+        lambda _message_box: clicked_button['button'],
+    )
+    monkeypatch.setattr(QMessageBox, 'information', fake_information)
+
+    window.photo_load_recursively_checkbox.setChecked(False)
+    app.processEvents()
+
+    assert empty_dialogs == [
+        (
+            'No Eligible Photos',
+            'No supported photos were found in the selected folder.',
+        )
+    ]
+    assert window.library.load_recursively is False
+    assert window.library.photos == []
+    assert window.current_photo_id is None
+    assert window.detect_button.isEnabled() is False
+    assert window.organize_button.isEnabled() is False
+
+    window.close()
+    del app
+
+
 def test_main_window_handoff_reapplies_persisted_culling_sort(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,

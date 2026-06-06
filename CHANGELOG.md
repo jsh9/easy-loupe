@@ -1,5 +1,19 @@
 # Change Log
 
+## [1.1.2] - 2026-06-06
+
+- Fixed
+
+  - Standalone photo-viewer folder hydration no longer expands viewer
+    navigation into subfolders; recursive hydration is kept for culling handoff
+    only
+  - Saved metadata and scene groups now preserve dotted photo IDs such as
+    `IMG.0001` instead of treating the final dotted segment as an extension
+  - Recursive folder loading no longer groups photos from case-distinct
+    subfolders such as `Trip/IMG_1000` and `trip/IMG_1000`
+  - Confirmed `Include subfolders` reloads that find no eligible direct-child
+    photos now show the `No Eligible Photos` dialog
+
 ## [1.1.1] - 2026-06-06
 
 - Fixed

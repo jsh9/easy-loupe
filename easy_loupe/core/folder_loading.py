@@ -24,6 +24,7 @@ from easy_loupe.core.recursive_loading import (
     DEFAULT_LOAD_RECURSIVELY,
     discover_photo_files,
     exif_metadata_for_path,
+    relative_photo_group_key,
     relative_photo_id,
     relative_posix_path,
 )
@@ -79,7 +80,15 @@ def load_folder_state(
             [list[Path]], dict[str, dict[str, Any]]
         ],
 ) -> LoadedFolderState:
-    """Scan a folder, build photo records, and reset scene state."""
+    """
+    Scan a folder, build photo records, and load saved folder state.
+
+    Folder scanning owns the transition from filesystem paths to stable
+    folder-relative photo IDs. Records are built before saved metadata is
+    applied because metadata migration needs the actual loaded IDs to
+    distinguish exact dotted stems, such as ``IMG.0001``, from legacy
+    filename-style keys that should have their final extension stripped.
+    """
     folder = folder.expanduser().resolve()
     if not folder.is_dir():
         raise FileNotFoundError(f'{folder} is not a directory')
@@ -93,11 +102,14 @@ def load_folder_state(
         load_recursively=load_recursively,
     )
 
-    groups: dict[str, list[Path]] = {}
+    groups: dict[tuple[str, str], list[Path]] = {}
     for path in files:
-        groups.setdefault(
-            relative_photo_id(folder, path).casefold(), []
-        ).append(path)
+        # Group case-insensitively only within the same exact relative folder.
+        # This pairs same-photo JPEG/RAW files without merging case-distinct
+        # subfolders on filesystems that allow them.
+        groups.setdefault(relative_photo_group_key(folder, path), []).append(
+            path
+        )
 
     if progress_callback:
         progress_callback('Reading metadata', 20)
@@ -105,23 +117,25 @@ def load_folder_state(
     if metadata_entries is None:
         metadata_entries = metadata_module.read_folder_metadata(folder)
 
-    normalized_metadata = metadata_module.normalize_metadata_entries(
-        metadata_entries or {}
-    )
     exif_map = read_exif_metadata_fn(files)
 
     records: list[PhotoRecord] = []
     sorted_groups = sorted(groups.items(), key=operator.itemgetter(0))
     total_groups = max(len(sorted_groups), 1)
     for index, (_, grouped_files) in enumerate(sorted_groups, start=1):
-        photo = _build_photo_record(
-            folder, grouped_files, exif_map, normalized_metadata
-        )
+        photo = _build_photo_record(folder, grouped_files, exif_map)
         records.append(photo)
         if progress_callback:
             progress = 35 + int((index / total_groups) * 55)
             progress_callback('Building photo list', min(progress, 90))
 
+    # Apply metadata after records exist so legacy-key repair can be checked
+    # against the concrete IDs discovered in this folder.
+    normalized_metadata = metadata_module.normalize_metadata_entries(
+        metadata_entries or {},
+        valid_photo_ids=[photo.photo_id for photo in records],
+    )
+    _apply_normalized_metadata(records, normalized_metadata)
     sort_photo_records(records, sort_mode, sort_reversed=sort_reversed)
     photo_map = {photo.photo_id: photo for photo in records}
     scene_source, scenes = metadata_module.normalize_scene_groups(
@@ -148,7 +162,15 @@ def load_viewer_folder_state(
         *,
         allow_folder_scan: bool,
 ) -> LoadedFolderState:
-    """Build a fast filename-sorted state for photo-viewer startup."""
+    """
+    Build a fast filename-sorted state for photo-viewer startup.
+
+    Standalone photo-viewer mode is intentionally scoped to the opened file's
+    immediate folder so adjacent-file navigation stays predictable and fast. It
+    still reuses the shared record builder and delayed metadata application
+    path so direct-file startup handles dotted IDs and legacy metadata keys the
+    same way as full culling loads.
+    """
     opened_file = opened_file.expanduser().resolve()
     if not opened_file.is_file():
         raise FileNotFoundError(f'{opened_file} is not a file')
@@ -178,21 +200,24 @@ def load_viewer_folder_state(
     for path in files:
         groups.setdefault(path.stem.lower(), []).append(path)
 
-    normalized_metadata = metadata_module.normalize_metadata_entries(
-        metadata_entries or {}
-    )
     records = [
         _build_photo_record(
             folder,
             grouped_files,
             {},
-            normalized_metadata,
             focus_point_pending=True,
         )
         for _, grouped_files in sorted(
             groups.items(), key=operator.itemgetter(0)
         )
     ]
+    # Use the freshly built viewer IDs for metadata repair, matching the
+    # culling loader while preserving the viewer's direct-folder scope.
+    normalized_metadata = metadata_module.normalize_metadata_entries(
+        metadata_entries or {},
+        valid_photo_ids=[photo.photo_id for photo in records],
+    )
+    _apply_normalized_metadata(records, normalized_metadata)
     sort_photo_records(
         records,
         PHOTO_SORT_MODE_FILENAME,
@@ -213,7 +238,6 @@ def _build_photo_record(
         folder: Path,
         grouped_files: list[Path],
         exif_map: dict[str, dict[str, Any]],
-        normalized_metadata: dict[str, dict[str, Any]],
         *,
         focus_point_pending: bool = False,
 ) -> PhotoRecord:
@@ -265,11 +289,6 @@ def _build_photo_record(
         source_metadata, exif_display.image_width, exif_display.image_height
     )
 
-    existing_metadata = normalized_metadata.get(shared_stem, {})
-    rating = existing_metadata.get('rating')
-    color_label = existing_metadata.get('color_label')
-    flag = existing_metadata.get('flag')
-
     return PhotoRecord(
         photo_id=shared_stem,
         display_name=shared_stem,
@@ -285,16 +304,40 @@ def _build_photo_record(
         has_raster=bool(raster_files),
         focus_point_pending=focus_point_pending,
         capture_at=exif_display.capture_at,
-        rating=rating
-        if isinstance(rating, int) and MIN_RATING <= rating <= MAX_RATING
-        else None,
-        color_label=color_label if color_label in COLOR_LABELS else None,
-        flag=flag if flag in {'picked', 'rejected'} else None,
         scene_id=None,
         image_width=exif_display.image_width,
         image_height=exif_display.image_height,
         exif_display=exif_display.exif_display,
     )
+
+
+def _apply_normalized_metadata(
+        records: list[PhotoRecord],
+        normalized_metadata: dict[str, dict[str, Any]],
+) -> None:
+    """
+    Apply already-normalized saved metadata to loaded photo records.
+
+    ``normalize_metadata_entries`` performs key migration and value filtering,
+    while this helper mutates the freshly built records. Keeping the mutation
+    here lets record construction stay focused on filesystem and EXIF data, and
+    makes the metadata migration order explicit in ``load_folder_state`` and
+    ``load_viewer_folder_state``.
+    """
+    for photo in records:
+        existing_metadata = normalized_metadata.get(photo.photo_id, {})
+        rating = existing_metadata.get('rating')
+        color_label = existing_metadata.get('color_label')
+        flag = existing_metadata.get('flag')
+        photo.rating = (
+            rating
+            if isinstance(rating, int) and MIN_RATING <= rating <= MAX_RATING
+            else None
+        )
+        photo.color_label = (
+            color_label if color_label in COLOR_LABELS else None
+        )
+        photo.flag = flag if flag in {'picked', 'rejected'} else None
 
 
 def build_photo_exif_display(
