@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- Fixed
+
+  - Exiting compare mode now realigns the main viewer, vertical strip focus,
+    and visible-region overlay to the active compare photo before Space enters
+    focus zoom.
+
 - Changed
 
   - Moved feature-level maintenance notes out of `AGENTS.md` and into dedicated

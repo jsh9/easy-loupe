@@ -140,6 +140,10 @@ Transition summary:
 - `Esc` while a selected compare photo is open returns to the comparison grid.
 - `Esc` while in compare mode restores the previous view/browse state and the
   stored pre-compare selection.
+- After `Esc` returns from compare to normal view, the active compare photo
+  remains current. The normal viewer image, vertical strip current item, and
+  visible-region overlay target must all realign to that photo while the stored
+  pre-compare selection remains selected.
 - `G` while in compare mode enters browse mode and restores the stored
   pre-compare selection, even when compare displayed only a capped subset.
 - Entering browse mode from split view and pressing `Space` exits to
@@ -384,5 +388,8 @@ implementation.
   `PhotoViewer.visible_region_rect()`.
 - Verify the overlay appears only for the active strip thumbnail in manual zoom
   and that scene mode uses the horizontal `scene_list`.
+- Verify compare-mode exit keeps the active compare photo aligned across
+  `current_photo_id`, the normal viewer image, the active strip item, and the
+  visible-region overlay after pressing `Space`.
 - Prefer a render-to-image widget test when checking mask opacity, edge color,
   or other paint details.
