@@ -269,6 +269,13 @@ class MainPhotoViewer(QWidget):
         self._active_zoom_viewer().keyboard_pan_by(base_dx, base_dy)
         self._sync_mode()
 
+    def set_normalized_viewport_center(
+            self, center: tuple[float, float]
+    ) -> None:
+        """Move the active manual viewport center without changing zoom."""
+        self._active_zoom_viewer().set_normalized_viewport_center(center)
+        self._sync_mode()
+
     def apply_manual_view(
             self, zoom_factor: float, center: tuple[float, float] | None
     ) -> None:

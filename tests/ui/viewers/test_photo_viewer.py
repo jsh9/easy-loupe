@@ -95,6 +95,63 @@ def test_photo_viewer_visible_region_rect_tracks_manual_zoom_and_pan(
     viewer.close()
 
 
+def test_photo_viewer_minimap_center_preserves_manual_zoom(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify minimap recentering moves the manual viewport without rescaling.
+
+    The minimap is an alternate pan control, so it should reuse the current
+    zoom level rather than acting like a new focus-zoom request.
+    """
+    create_jpeg(tmp_path / 'IMG_7010.JPG', 'orange')
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(320, 240)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_photo(tmp_path / 'IMG_7010.JPG', (0.5, 0.5))
+    viewer.toggle_focus_zoom()
+    viewer.zoom_step(1.25)
+    zoom_before = viewer.current_zoom_factor()
+
+    viewer.set_normalized_viewport_center((0.75, 0.25))
+
+    assert viewer.current_zoom_factor() == pytest.approx(zoom_before)
+    assert viewer.normalized_viewport_center() == pytest.approx((0.75, 0.25))
+    assert viewer.visible_region_rect() is not None
+
+    viewer.close()
+
+
+def test_photo_viewer_minimap_center_noops_in_fit_view(
+        tmp_path: Path,
+) -> None:
+    """
+    Fit view has no red-box minimap owner, so recenter requests are inert.
+    """
+    create_jpeg(tmp_path / 'IMG_7011.JPG', 'orange')
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(320, 240)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_photo(tmp_path / 'IMG_7011.JPG', (0.5, 0.5))
+    center_before = viewer.normalized_viewport_center()
+
+    viewer.set_normalized_viewport_center((0.75, 0.25))
+
+    assert viewer._mode == 'fit'
+    assert viewer.normalized_viewport_center() == pytest.approx(center_before)
+    assert viewer.visible_region_rect() is None
+
+    viewer.close()
+
+
 def test_photo_viewer_focus_point_marker_tracks_loaded_photo(
         tmp_path: Path,
 ) -> None:

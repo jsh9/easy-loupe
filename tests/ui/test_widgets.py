@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QSize
+import pytest
+from PySide6.QtCore import QPoint, QSize, Qt
 from PySide6.QtGui import QColor, QPixmap
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 import easy_loupe.ui.theme as theme_module
@@ -81,6 +83,301 @@ def test_thumbnail_preview_widget_masks_outside_visible_region_and_draws_red_edg
 
     assert cleared_outside == baseline_outside
 
+    widget.close()
+
+
+def test_thumbnail_preview_widget_emits_normalized_minimap_click() -> None:
+    """
+    Verify minimap clicks emit image-normalized center coordinates.
+
+    The widget is reused by strip thumbnails and the standalone floating
+    minimap, so this guards the shared signal contract independently of either
+    host window's routing policy.
+    """
+    app = QApplication.instance() or QApplication([])
+    widget = widgets_module.ThumbnailPreviewWidget(QSize(100, 100))
+    pixmap = QPixmap(100, 50)
+    pixmap.fill(QColor('#f4f4f4'))
+    widget.set_pixmap(pixmap)
+    widget.set_visible_region_overlay((0.2, 0.2, 0.5, 0.5))
+    widget.show()
+    app.processEvents()
+
+    centers: list[tuple[float, float]] = []
+    widget.visible_region_center_requested.connect(
+        lambda x, y: centers.append((x, y))
+    )
+
+    QTest.mousePress(
+        widget,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(75, 50),
+    )
+    app.processEvents()
+
+    assert centers == pytest.approx([(0.75, 0.5)])
+
+    QTest.mouseRelease(
+        widget,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(75, 50),
+    )
+    widget.close()
+
+
+def test_thumbnail_preview_widget_drags_and_clamps_minimap_edges() -> None:
+    """
+    Verify held-button minimap drags clamp to the displayed image edges.
+
+    Letterboxed thumbnails have widget area outside the photo; dragging beyond
+    the minimap should pin to the image boundary instead of producing invalid
+    centers or continuing past the red-box travel range.
+    """
+    app = QApplication.instance() or QApplication([])
+    widget = widgets_module.ThumbnailPreviewWidget(QSize(100, 100))
+    pixmap = QPixmap(100, 50)
+    pixmap.fill(QColor('#f4f4f4'))
+    widget.set_pixmap(pixmap)
+    widget.set_visible_region_overlay((0.2, 0.2, 0.5, 0.5))
+    widget.show()
+    app.processEvents()
+
+    centers: list[tuple[float, float]] = []
+    widget.visible_region_center_requested.connect(
+        lambda x, y: centers.append((x, y))
+    )
+
+    QTest.mousePress(
+        widget,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(50, 50),
+    )
+    QTest.mouseMove(widget, QPoint(-20, 130))
+    QTest.mouseRelease(
+        widget,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(-20, 130),
+    )
+    app.processEvents()
+
+    assert centers[0] == pytest.approx((0.5, 0.5))
+    assert centers[-1] == pytest.approx((0.0, 1.0))
+
+    widget.close()
+
+
+def test_thumbnail_preview_widget_without_overlay_emits_no_minimap_signal() -> (
+    None
+):
+    """
+    Verify thumbnails without a red-box overlay do not consume minimap input.
+
+    Normal strip thumbnails still need ordinary list selection behavior, so the
+    preview widget should emit and track drags only while an overlay is active.
+    """
+    app = QApplication.instance() or QApplication([])
+    widget = widgets_module.ThumbnailPreviewWidget(QSize(100, 100))
+    pixmap = QPixmap(100, 50)
+    pixmap.fill(QColor('#f4f4f4'))
+    widget.set_pixmap(pixmap)
+    widget.show()
+    app.processEvents()
+
+    centers: list[tuple[float, float]] = []
+    widget.visible_region_center_requested.connect(
+        lambda x, y: centers.append((x, y))
+    )
+
+    QTest.mousePress(
+        widget,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(50, 50),
+    )
+    QTest.mouseMove(widget, QPoint(75, 50))
+    QTest.mouseRelease(
+        widget,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(75, 50),
+    )
+    app.processEvents()
+
+    assert centers == []
+    assert widget._visible_region_drag_active is False
+
+    widget.close()
+
+
+def test_thumbnail_preview_widget_emits_passive_image_click_position() -> None:
+    """
+    Verify plain image-area thumbnail clicks emit normalized positions.
+
+    Non-overlay thumbnails need to pass selection through to their host list,
+    but MainWindow also needs the clicked image point for spatial zoom handoff.
+    """
+    app = QApplication.instance() or QApplication([])
+    widget = widgets_module.ThumbnailPreviewWidget(QSize(100, 100))
+    pixmap = QPixmap(100, 50)
+    pixmap.fill(QColor('#f4f4f4'))
+    widget.set_pixmap(pixmap)
+    widget.show()
+    app.processEvents()
+
+    clicked: list[tuple[float, float]] = []
+    dragged: list[tuple[float, float]] = []
+    widget.image_position_clicked.connect(lambda x, y: clicked.append((x, y)))
+    widget.image_position_dragged.connect(lambda x, y: dragged.append((x, y)))
+
+    QTest.mousePress(
+        widget,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(75, 50),
+    )
+    app.processEvents()
+
+    assert clicked == pytest.approx([(0.75, 0.5)])
+    assert dragged == []
+    assert widget._image_position_drag_active is True
+    assert widget._visible_region_drag_active is False
+
+    QTest.mouseRelease(
+        widget,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(75, 50),
+    )
+    assert widget._image_position_drag_active is False
+    widget.close()
+
+
+def test_thumbnail_preview_widget_passive_image_drag_clamps_edges() -> None:
+    """
+    Verify held passive thumbnail drags emit clamped image positions.
+
+    This protects the click-and-hold spatial zoom path used when selecting a
+    different thumbnail and immediately dragging the red box without release.
+    """
+    app = QApplication.instance() or QApplication([])
+    widget = widgets_module.ThumbnailPreviewWidget(QSize(100, 100))
+    pixmap = QPixmap(100, 50)
+    pixmap.fill(QColor('#f4f4f4'))
+    widget.set_pixmap(pixmap)
+    widget.show()
+    app.processEvents()
+
+    dragged: list[tuple[float, float]] = []
+    widget.image_position_dragged.connect(lambda x, y: dragged.append((x, y)))
+
+    QTest.mousePress(
+        widget,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(50, 50),
+    )
+    QTest.mouseMove(widget, QPoint(-20, 130))
+    app.processEvents()
+
+    assert dragged[-1] == pytest.approx((0.0, 1.0))
+
+    QTest.mouseRelease(
+        widget,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(-20, 130),
+    )
+    assert widget._image_position_drag_active is False
+    widget.close()
+
+
+def test_thumbnail_preview_widget_ignores_outside_passive_image_click() -> (
+    None
+):
+    """
+    Verify passive spatial clicks are limited to the displayed image.
+
+    Thumbnail cards include margins and letterboxing; those areas should keep
+    ordinary selection behavior without carrying an unrelated zoom center.
+    """
+    app = QApplication.instance() or QApplication([])
+    widget = widgets_module.ThumbnailPreviewWidget(QSize(100, 100))
+    pixmap = QPixmap(100, 50)
+    pixmap.fill(QColor('#f4f4f4'))
+    widget.set_pixmap(pixmap)
+    widget.show()
+    app.processEvents()
+
+    clicked: list[tuple[float, float]] = []
+    dragged: list[tuple[float, float]] = []
+    widget.image_position_clicked.connect(lambda x, y: clicked.append((x, y)))
+    widget.image_position_dragged.connect(lambda x, y: dragged.append((x, y)))
+
+    QTest.mousePress(
+        widget,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(50, 10),
+    )
+    app.processEvents()
+
+    assert clicked == []
+    assert dragged == []
+    assert widget._image_position_drag_active is False
+
+    QTest.mouseRelease(
+        widget,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(50, 10),
+    )
+    widget.close()
+
+
+def test_thumbnail_preview_widget_ignores_modified_passive_image_click() -> (
+    None
+):
+    """
+    Verify modifier-assisted thumbnail clicks do not emit spatial centers.
+
+    Shift/Control/Command selection gestures should remain pure selection
+    actions instead of also rewriting remembered zoom centers.
+    """
+    app = QApplication.instance() or QApplication([])
+    widget = widgets_module.ThumbnailPreviewWidget(QSize(100, 100))
+    pixmap = QPixmap(100, 50)
+    pixmap.fill(QColor('#f4f4f4'))
+    widget.set_pixmap(pixmap)
+    widget.show()
+    app.processEvents()
+
+    clicked: list[tuple[float, float]] = []
+    dragged: list[tuple[float, float]] = []
+    widget.image_position_clicked.connect(lambda x, y: clicked.append((x, y)))
+    widget.image_position_dragged.connect(lambda x, y: dragged.append((x, y)))
+
+    QTest.mousePress(
+        widget,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.ShiftModifier,
+        QPoint(75, 50),
+    )
+    app.processEvents()
+
+    assert clicked == []
+    assert dragged == []
+    assert widget._image_position_drag_active is False
+
+    QTest.mouseRelease(
+        widget,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.ShiftModifier,
+        QPoint(75, 50),
+    )
     widget.close()
 
 

@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- Added
+
+  - Visible-region minimaps now pan zoomed photos: click to recenter the red
+    box, or drag it with edge/corner clamping.
+  - In manual zoom, clicking another strip thumbnail's image now opens that
+    photo at the clicked relative position and can continue panning while the
+    mouse button remains held.
+
 - Fixed
 
   - Exiting compare mode now realigns the main viewer, vertical strip focus,

@@ -260,10 +260,22 @@ Major logic:
 - While the main viewer is in manual zoom, the active strip thumbnail shows the
   current visible region with a darkened mask outside the visible region and a
   red edge around it.
+- Left-clicking a visible-region minimap recenters the zoomed viewer on the
+  clicked image position. Holding the left button and dragging within the
+  minimap continuously pans the zoomed viewer; dragging beyond the minimap
+  clamps the request to the nearest displayed image edge or corner.
+- While the main viewer is in manual zoom, a plain left-click on another strip
+  thumbnail's image area selects that photo and recenters the zoomed viewer on
+  the clicked relative image position. Holding the left button and dragging
+  continues panning that newly selected photo without needing to release and
+  click the red box again. Modifier-assisted selection, keyboard navigation,
+  browse-grid clicks, and clicks outside the thumbnail image area keep the
+  normal remembered-center behavior.
 - In non-scene mode, the visible-region overlay belongs on the active item in
   the left thumbnail strip.
-- In scene mode, the visible-region overlay belongs on the horizontal
-  `scene_list`, not on the left scene-stack strip.
+- In scene mode, the exact current photo's interactive overlay belongs on the
+  horizontal `scene_list`. The left scene-stack strip may show and control the
+  overlay only when the current photo is that stack's cover photo.
 - Browse mode never shows the visible-region overlay on browse-grid items.
 - Returning to fit view clears the overlay. Re-entering manual view restores
   the corresponding overlay geometry for the current photo.

@@ -402,6 +402,33 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
         self._apply_transform()
         self._store_manual_view()
 
+    def set_normalized_viewport_center(
+            self, center: tuple[float, float]
+    ) -> None:
+        """
+        Move the manual viewport center without changing zoom scale.
+
+        Minimap drags are pan gestures, not new zoom requests, so fit view and
+        temporary inspection states intentionally ignore them.
+        """
+        if self._image_size.isEmpty() or not self.should_preserve_zoom():
+            return
+
+        self._hold_zoom_active = False
+        self._actual_size_zoom_active = False
+        self._mode = 'manual'
+        self._clear_transient_recenter()
+        normalized_center = (
+            max(0.0, min(1.0, center[0])),
+            max(0.0, min(1.0, center[1])),
+        )
+        self._center_point = QPointF(
+            normalized_center[0] * self._image_size.width(),
+            normalized_center[1] * self._image_size.height(),
+        )
+        self._apply_transform()
+        self._store_manual_view()
+
     def keyboard_pan_by(self, base_dx: float, base_dy: float) -> None:
         """Pan by a zoom-relative keyboard delta."""
         zoom_factor = max(self.current_zoom_factor(), 0.001)

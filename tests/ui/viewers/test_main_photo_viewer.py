@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from easy_loupe.ui.main_window.build import VIEWER_KEYBOARD_PAN_STEP
 from easy_loupe.ui.viewers.main_photo_viewer import MainPhotoViewer
 from tests.ui._helpers import (
+    create_jpeg,
     create_main_window_with_library,
     trigger_viewer_shortcut,
 )
@@ -159,6 +160,45 @@ def test_main_window_viewer_shortcuts_target_split_right_pane_only(
     )
 
     window.close()
+
+
+def test_main_photo_viewer_minimap_center_targets_split_right_pane(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify minimap recentering follows the active zoom-pane contract.
+
+    In split view, the right pane owns manual zoom while the left pane stays
+    fit-only, so minimap input must leave the left pane unchanged.
+    """
+    create_jpeg(tmp_path / 'IMG_8072.JPG', 'dimgray', size=(1000, 800))
+
+    app = QApplication.instance() or QApplication([])
+    viewer = MainPhotoViewer()
+    viewer.resize(640, 480)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_photo(tmp_path / 'IMG_8072.JPG', (0.5, 0.5))
+    viewer.toggle_split_view()
+    app.processEvents()
+
+    left_center_before = viewer.split_fit_viewer.normalized_viewport_center()
+    right_zoom_before = viewer.split_zoom_viewer.current_zoom_factor()
+
+    viewer.set_normalized_viewport_center((0.65, 0.35))
+
+    assert viewer.split_fit_viewer.normalized_viewport_center() == (
+        pytest.approx(left_center_before)
+    )
+    assert viewer.split_zoom_viewer.current_zoom_factor() == pytest.approx(
+        right_zoom_before
+    )
+    assert viewer.split_zoom_viewer.normalized_viewport_center() == (
+        pytest.approx((0.65, 0.35))
+    )
+
+    viewer.close()
 
 
 def test_main_window_keyboard_pan_step_scales_with_zoom(

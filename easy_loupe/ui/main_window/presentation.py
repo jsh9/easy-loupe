@@ -436,6 +436,27 @@ class MainWindowPresentationMixin:
             scene_count=scene_count,
             stacked=stacked,
         )
+        widget.image_position_clicked.connect(
+            lambda x, y, source_list=list_widget, photo_id=photo.photo_id: (
+                self._handle_thumbnail_image_clicked(
+                    source_list, photo_id, x, y
+                )
+            )
+        )
+        widget.image_position_dragged.connect(
+            lambda x, y, source_list=list_widget, photo_id=photo.photo_id: (
+                self._handle_thumbnail_image_dragged(
+                    source_list, photo_id, x, y
+                )
+            )
+        )
+        widget.visible_region_center_requested.connect(
+            lambda x, y, source_list=list_widget, photo_id=photo.photo_id: (
+                self._handle_minimap_center_requested(
+                    source_list, photo_id, x, y
+                )
+            )
+        )
         item = QListWidgetItem()
         item.setData(PHOTO_ID_ROLE, photo.photo_id)
         item.setData(SCENE_COUNT_ROLE, scene_count)
@@ -781,6 +802,136 @@ class MainWindowPresentationMixin:
         widget = list_widget.itemWidget(item)
         if isinstance(widget, ThumbnailItemWidget):
             widget.set_visible_region_overlay(visible_region)
+
+    def _handle_thumbnail_image_clicked(
+            self: MainWindow,
+            list_widget: QListWidget,
+            photo_id: str,
+            x: float,
+            y: float,
+    ) -> None:
+        """
+        Remember a spatial thumbnail click until normal selection completes.
+
+        The preview widget must not consume non-overlay clicks because Qt still
+        owns list selection. This stores the clicked image point so the later
+        current-item handler can move the newly displayed zoomed photo there.
+        """
+        if (
+            self._browse_mode
+            or self._compare_mode
+            or self.viewer.visible_region_rect() is None
+        ):
+            self._pending_thumbnail_click_center = None
+            return
+
+        if list_widget not in {self.thumbnail_list, self.scene_list}:
+            self._pending_thumbnail_click_center = None
+            return
+
+        if list_widget is self.scene_list and not (
+            self.library.scene_detection_done
+        ):
+            self._pending_thumbnail_click_center = None
+            return
+
+        self._pending_thumbnail_click_center = (
+            list_widget,
+            photo_id,
+            (x, y),
+        )
+
+    def _handle_thumbnail_image_dragged(
+            self: MainWindow,
+            list_widget: QListWidget,
+            photo_id: str,
+            x: float,
+            y: float,
+    ) -> None:
+        """
+        Continue a spatial thumbnail click as a held-button pan gesture.
+
+        The first press may still be waiting for Qt's selection change. While
+        that happens, keep the pending center fresh; after selection, route
+        drag updates directly to the now-current zoomed photo.
+        """
+        if (
+            self._browse_mode
+            or self._compare_mode
+            or self.viewer.visible_region_rect() is None
+        ):
+            self._pending_thumbnail_click_center = None
+            return
+
+        if list_widget not in {self.thumbnail_list, self.scene_list}:
+            self._pending_thumbnail_click_center = None
+            return
+
+        if list_widget is self.scene_list and not (
+            self.library.scene_detection_done
+        ):
+            self._pending_thumbnail_click_center = None
+            return
+
+        if photo_id == self.current_photo_id:
+            # Selection has caught up to the pressed thumbnail, so future drag
+            # positions can directly pan the active viewer instead of waiting
+            # in the pending handoff slot used for the initial press.
+            self._pending_thumbnail_click_center = None
+            self.viewer.set_normalized_viewport_center((x, y))
+            return
+
+        pending = self._pending_thumbnail_click_center
+        if pending is None:
+            return
+
+        pending_widget, pending_photo_id, _center = pending
+        if pending_widget is list_widget and pending_photo_id == photo_id:
+            # Qt may deliver a move before currentItemChanged finishes loading
+            # the new photo. Keep only the latest cursor position so the first
+            # displayed view lands where the user is actually holding.
+            self._pending_thumbnail_click_center = (
+                list_widget,
+                photo_id,
+                (x, y),
+            )
+        else:
+            self._pending_thumbnail_click_center = None
+
+    def _handle_minimap_center_requested(
+            self: MainWindow,
+            list_widget: QListWidget,
+            photo_id: str,
+            x: float,
+            y: float,
+    ) -> None:
+        """
+        Route an active minimap request to the zoomed viewer.
+
+        Thumbnail widgets emit generic normalized coordinates. MainWindow must
+        still enforce which visible-region overlay owns the request so stale,
+        hidden, browse-grid, or compare-mode thumbnails cannot pan the viewer.
+        """
+        if (
+            self._browse_mode
+            or self._compare_mode
+            or self.viewer.visible_region_rect() is None
+        ):
+            return
+
+        if list_widget is self.thumbnail_list:
+            if photo_id != self._thumbnail_overlay_owner_photo_id():
+                return
+        elif list_widget is self.scene_list:
+            if (
+                not self.library.scene_detection_done
+                or photo_id != self.current_photo_id
+            ):
+                return
+        else:
+            return
+
+        self.viewer.set_normalized_viewport_center((x, y))
 
     def _refresh_visible_region_overlay(
             self: MainWindow, *, force_full: bool = False

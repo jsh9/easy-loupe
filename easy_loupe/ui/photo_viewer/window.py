@@ -220,7 +220,9 @@ class PhotoViewerWindow(QMainWindow):
             QSize(PHOTO_VIEWER_MINIMAP_WIDTH, PHOTO_VIEWER_MINIMAP_HEIGHT),
             self.viewer_stack_widget,
         )
-        self.minimap.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.minimap.visible_region_center_requested.connect(
+            lambda x, y: self.viewer.set_normalized_viewport_center((x, y))
+        )
         self.minimap.hide()
         self.exif_overlay = ExifOverlayWidget(self.viewer_stack_widget)
         self.exif_overlay.hide()
