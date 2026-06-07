@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-06-07
+
 - Added
 
   - Visible-region minimaps now pan zoomed photos: click to recenter the red
@@ -15,6 +17,9 @@
   - Exiting compare mode now realigns the main viewer, vertical strip focus,
     and visible-region overlay to the active compare photo before Space enters
     focus zoom.
+  - Closing culling or standalone photo-viewer windows while background work is
+    active now defers native Qt teardown until tracked thread-slot cleanup has
+    finished.
 
 - Changed
 

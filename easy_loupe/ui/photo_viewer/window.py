@@ -49,6 +49,10 @@ from easy_loupe.ui.photo_viewer.workers import (
     PhotoViewerExifWorker,
     ViewerPrefetchWorker,
 )
+from easy_loupe.ui.threading import (
+    ThreadSlot,
+    ThreadSlotGroup,
+)
 from easy_loupe.ui.viewers.exif_overlay import ExifOverlayWidget
 from easy_loupe.ui.viewers.main_photo_viewer import MainPhotoViewer
 from easy_loupe.ui.viewers.shell import (
@@ -183,6 +187,28 @@ class PhotoViewerWindow(QMainWindow):
         self._photo_viewer_exif_refresh_pending = False
         self._viewer_prefetch_thread: QThread | None = None
         self._viewer_prefetch_worker: ViewerPrefetchWorker | None = None
+        # Keep close/replacement decisions tied to stored thread slots so Qt
+        # wrapper cleanup cannot race with widget teardown.
+        self._background_thread_slots = ThreadSlotGroup([
+            ThreadSlot(
+                self,
+                'photo_viewer_exif',
+                '_photo_viewer_exif_thread',
+                '_photo_viewer_exif_worker',
+            ),
+            ThreadSlot(
+                self,
+                'viewer_prefetch',
+                '_viewer_prefetch_thread',
+                '_viewer_prefetch_worker',
+            ),
+            ThreadSlot(
+                self,
+                'folder_hydration',
+                '_folder_hydration_thread',
+                '_folder_hydration_worker',
+            ),
+        ])
         self._show_af_point_marker = DEFAULT_SHOW_AF_POINT
         self._info_overlay_enabled = False
         self._info_overlay_refresh_deferred = False
@@ -813,12 +839,9 @@ class PhotoViewerWindow(QMainWindow):
     def _clear_photo_viewer_exif_worker(
             self, finished_thread: object, finished_worker: object
     ) -> None:
-        if (
-            self._photo_viewer_exif_thread is finished_thread
-            and self._photo_viewer_exif_worker is finished_worker
-        ):
-            self._photo_viewer_exif_thread = None
-            self._photo_viewer_exif_worker = None
+        self._background_thread_slots.clear_if_current(
+            'photo_viewer_exif', finished_thread, finished_worker
+        )
 
         if self._photo_viewer_exif_refresh_pending and not self._closing:
             self._photo_viewer_exif_refresh_pending = False
@@ -865,14 +888,23 @@ class PhotoViewerWindow(QMainWindow):
         self._viewer_prefetch_thread.finished.connect(
             self._viewer_prefetch_thread.deleteLater
         )
+        # Capture this exact pair so a queued old finished signal cannot clear
+        # a newer prefetch slot after replacement logic grows more flexible.
+        finished_thread = self._viewer_prefetch_thread
+        finished_worker = self._viewer_prefetch_worker
         self._viewer_prefetch_thread.finished.connect(
-            self._clear_viewer_prefetch_worker
+            lambda: self._clear_viewer_prefetch_worker(
+                finished_thread, finished_worker
+            )
         )
         self._viewer_prefetch_thread.start()
 
-    def _clear_viewer_prefetch_worker(self) -> None:
-        self._viewer_prefetch_thread = None
-        self._viewer_prefetch_worker = None
+    def _clear_viewer_prefetch_worker(
+            self, finished_thread: object, finished_worker: object
+    ) -> None:
+        self._background_thread_slots.clear_if_current(
+            'viewer_prefetch', finished_thread, finished_worker
+        )
         self._finish_deferred_close_if_ready()
 
     def _start_folder_hydration(self, folder: Path) -> None:
@@ -1057,12 +1089,9 @@ class PhotoViewerWindow(QMainWindow):
             finished_thread: object,
             finished_worker: object,
     ) -> None:
-        if (
-            self._folder_hydration_thread is finished_thread
-            and self._folder_hydration_worker is finished_worker
+        if self._background_thread_slots.clear_if_current(
+            'folder_hydration', finished_thread, finished_worker
         ):
-            self._folder_hydration_thread = None
-            self._folder_hydration_worker = None
             self._clear_folder_hydration_bridge()
             if self._folder_hydration_request_matches(
                 request_id, expected_folder
@@ -1088,6 +1117,12 @@ class PhotoViewerWindow(QMainWindow):
             bridge.deleteLater()
 
     def _cancel_background_tasks_for_replacement(self) -> None:
+        """
+        Invalidate current background results before replacing viewer state.
+
+        Unlike close-time shutdown, replacement can clear inactive slots now
+        because the window and its child widgets are staying alive.
+        """
         self._pending_culling_handoff = False
         self._photo_viewer_exif_refresh_pending = False
         self._photo_viewer_exif_request_id += 1
@@ -1095,70 +1130,31 @@ class PhotoViewerWindow(QMainWindow):
         self._folder_hydration_folder = None
         self._folder_hydration_error = None
         self._hydrated_library = None
-        self._stop_background_thread(
-            thread_attr='_photo_viewer_exif_thread',
-            worker_attr='_photo_viewer_exif_worker',
-        )
-        self._stop_background_thread(
-            thread_attr='_viewer_prefetch_thread',
-            worker_attr='_viewer_prefetch_worker',
-        )
-        self._stop_background_thread(
-            thread_attr='_folder_hydration_thread',
-            worker_attr='_folder_hydration_worker',
-        )
+        self._background_thread_slots.stop_all_for_replacement()
         if self._folder_hydration_thread is None:
             self._clear_folder_hydration_bridge()
 
     def _stop_photo_viewer_background_tasks(self) -> None:
-        self._cancel_background_tasks_for_replacement()
+        """
+        Request shutdown for close without clearing stored thread slots.
+
+        Closing must wait for each QThread.finished cleanup slot to clear the
+        Python references. Replacement cleanup is allowed to drop inactive
+        slots immediately, so close uses this narrower shutdown path instead.
+        """
+        self._pending_culling_handoff = False
+        self._photo_viewer_exif_refresh_pending = False
+        self._photo_viewer_exif_request_id += 1
+        self._folder_hydration_request_id += 1
+        self._folder_hydration_folder = None
+        self._folder_hydration_error = None
+        self._hydrated_library = None
+        self._background_thread_slots.request_shutdown_all()
         self._folder_hydration_message = ''
         self._folder_hydration_progress = 0
 
-    def _stop_background_thread(
-            self,
-            *,
-            thread_attr: str,
-            worker_attr: str,
-    ) -> None:
-        thread = getattr(self, thread_attr)
-        worker = getattr(self, worker_attr)
-        if worker is not None and hasattr(worker, 'cancel'):
-            worker.cancel()
-
-        if thread is not None:
-            thread.quit()
-            is_running = getattr(thread, 'isRunning', None)
-            if callable(is_running) and not is_running():
-                setattr(self, thread_attr, None)
-                setattr(self, worker_attr, None)
-
-            return
-
-        setattr(self, thread_attr, None)
-        setattr(self, worker_attr, None)
-
     def _photo_viewer_background_tasks_active(self) -> bool:
-        return (
-            self._background_thread_slot_active(self._photo_viewer_exif_thread)
-            or self._background_thread_slot_active(
-                self._viewer_prefetch_thread
-            )
-            or self._background_thread_slot_active(
-                self._folder_hydration_thread
-            )
-        )
-
-    @staticmethod
-    def _background_thread_slot_active(thread: object) -> bool:
-        if thread is None:
-            return False
-
-        is_running = getattr(thread, 'isRunning', None)
-        if callable(is_running):
-            return bool(is_running())
-
-        return True
+        return self._background_thread_slots.any_active()
 
     def _finish_deferred_close_if_ready(self) -> None:
         if (
@@ -1166,7 +1162,9 @@ class PhotoViewerWindow(QMainWindow):
             and not self._photo_viewer_background_tasks_active()
         ):
             self._close_after_background_tasks = False
-            self.close()
+            # Queue the final close so Qt can finish delivering the current
+            # QThread.finished signal and its deleteLater cleanup first.
+            QTimer.singleShot(0, self.close)
 
     def _refresh_visible_region_overlay(self) -> None:
         visible_region = self.viewer.visible_region_rect()
