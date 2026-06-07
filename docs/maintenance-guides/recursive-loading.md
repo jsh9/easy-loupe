@@ -34,6 +34,8 @@ Primary files:
 
 Major logic:
 
+- Supported extensions are defined in `easy_loupe/core/records.py` and include
+  JPEG, HEIC/HEIF, and multiple camera RAW formats.
 - `PhotoLibrary.load_recursively` stores the active direct-vs-recursive scan
   preference. `PhotoLibrary.set_load_recursively(...)` normalizes raw values
   before the next folder load.
