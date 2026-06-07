@@ -99,6 +99,9 @@ class MainWindow(
         self._scene_list_scene_id: str | None = None
         self._thumbnail_overlay_photo_id: str | None = None
         self._scene_overlay_photo_id: str | None = None
+        self._pending_thumbnail_click_center: (
+            tuple[object, str, tuple[float, float]] | None
+        ) = None
         self._metadata_undo_stack: list[MetadataEdit | SceneEdit] = []
         self._metadata_redo_stack: list[MetadataEdit | SceneEdit] = []
         self._initial_folder_prompt_timer = QTimer(self)

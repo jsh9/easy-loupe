@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QPoint, QSettings, Qt
 from PySide6.QtGui import QKeySequence
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 import easy_loupe.ui.identity as identity_module
@@ -75,6 +76,14 @@ def _assert_close_tuple(
     assert len(actual) == len(expected)
     for actual_value, expected_value in zip(actual, expected, strict=True):
         assert abs(actual_value - expected_value) <= tolerance
+
+
+def _minimap_point(widget: Any, x: float, y: float) -> QPoint:
+    target = widget.displayed_image_rect()
+    return QPoint(
+        int(target.left() + (target.width() * x)),
+        int(target.top() + (target.height() * y)),
+    )
 
 
 def test_photo_viewer_window_opens_file_and_navigates_adjacent_photos(
@@ -206,6 +215,48 @@ def test_photo_viewer_minimap_thumb_failure_hides_minimap(
 
     assert window.current_photo_id == 'A'
     assert window.minimap.isHidden() is True
+    window.close()
+
+
+def test_photo_viewer_minimap_drag_recenters_zoomed_photo(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify the standalone floating minimap can pan the zoomed viewer.
+
+    The minimap is hosted outside the culling thumbnail lists, so this covers
+    the direct PhotoViewerWindow signal wiring.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green', size=(2400, 1600))
+    app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+    window.resize(1200, 800)
+    app.processEvents()
+
+    window.space_shortcut.activated.emit()
+    window.viewer.zoom_step(1.25)
+    app.processEvents()
+
+    assert window.minimap.isVisible() is True
+
+    QTest.mousePress(
+        window.minimap,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        _minimap_point(window.minimap, 0.5, 0.5),
+    )
+    QTest.mouseMove(window.minimap, _minimap_point(window.minimap, 0.65, 0.35))
+    QTest.mouseRelease(
+        window.minimap,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        _minimap_point(window.minimap, 0.65, 0.35),
+    )
+    app.processEvents()
+
+    assert window.viewer.normalized_viewport_center() == pytest.approx(
+        (0.65, 0.35), abs=0.02
+    )
     window.close()
 
 

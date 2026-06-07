@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 import easy_loupe.ui.main_window.window as main_window_module
@@ -19,6 +21,69 @@ from tests.ui._helpers import (
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+def _minimap_point(widget: Any, x: float, y: float) -> QPoint:
+    target = widget.displayed_image_rect()
+    return QPoint(
+        int(target.left() + (target.width() * x)),
+        int(target.top() + (target.height() * y)),
+    )
+
+
+def _drag_minimap(
+        widget: Any, start: tuple[float, float], end: tuple[float, float]
+) -> None:
+    QTest.mousePress(
+        widget,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        _minimap_point(widget, *start),
+    )
+    QTest.mouseMove(widget, _minimap_point(widget, *end))
+    QTest.mouseRelease(
+        widget,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        _minimap_point(widget, *end),
+    )
+
+
+def _click_thumbnail_image(
+        widget: Any,
+        point: tuple[float, float],
+        modifier: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier,
+) -> None:
+    QTest.mouseClick(
+        widget,
+        Qt.MouseButton.LeftButton,
+        modifier,
+        _minimap_point(widget, *point),
+    )
+
+
+def _press_drag_thumbnail_image(
+        widget: Any,
+        start: tuple[float, float],
+        end: tuple[float, float] | QPoint,
+) -> None:
+    """Simulate one held thumbnail press that selects, pans, then releases."""
+    QTest.mousePress(
+        widget,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        _minimap_point(widget, *start),
+    )
+    end_point = (
+        end if isinstance(end, QPoint) else _minimap_point(widget, *end)
+    )
+    QTest.mouseMove(widget, end_point)
+    QTest.mouseRelease(
+        widget,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        end_point,
+    )
 
 
 def test_main_window_thumbnail_list_shows_visible_region_for_zoomed_photo(
@@ -51,6 +116,432 @@ def test_main_window_thumbnail_list_shows_visible_region_for_zoomed_photo(
 
     assert overlay_after is not None
     assert overlay_after[0] > overlay_before[0]
+
+    window.close()
+
+
+def test_thumbnail_image_click_spatially_recenters_new_current_photo(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify zoomed thumbnail-image clicks select and recenter a new photo.
+
+    This covers the manual UX regression: clicking a point on another strip
+    thumbnail should inspect that same relative point instead of restoring that
+    photo's old remembered center.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_8100', 'dimgray'),
+            ('IMG_8101', 'blue'),
+        ],
+    )
+
+    window.viewer.toggle_focus_zoom()
+    window.viewer.zoom_step(1.25)
+    app.processEvents()
+
+    widget = thumbnail_item_widget(window.thumbnail_list, 1)
+    image_widget = widget._front_image_widget
+    assert image_widget is not None
+
+    _click_thumbnail_image(image_widget, (0.58, 0.42))
+    app.processEvents()
+
+    assert window.current_photo_id == 'IMG_8101'
+    assert window.viewer.normalized_viewport_center() == pytest.approx(
+        (0.58, 0.42), abs=0.02
+    )
+    assert thumbnail_overlay(window.thumbnail_list, 1) == pytest.approx(
+        window.viewer.visible_region_rect()
+    )
+
+    window.close()
+
+
+def test_thumbnail_image_press_drag_continues_after_selection(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify held thumbnail-image drags keep panning after photo selection.
+
+    Users should be able to press another thumbnail and immediately drag the
+    red box without releasing and clicking the newly selected minimap again.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_8110', 'dimgray'),
+            ('IMG_8111', 'blue'),
+        ],
+    )
+
+    window.viewer.toggle_focus_zoom()
+    window.viewer.zoom_step(1.25)
+    app.processEvents()
+
+    widget = thumbnail_item_widget(window.thumbnail_list, 1)
+    image_widget = widget._front_image_widget
+    assert image_widget is not None
+
+    QTest.mousePress(
+        image_widget,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        _minimap_point(image_widget, 0.5, 0.5),
+    )
+    app.processEvents()
+
+    assert window.current_photo_id == 'IMG_8111'
+
+    QTest.mouseMove(image_widget, _minimap_point(image_widget, 0.58, 0.42))
+    app.processEvents()
+    QTest.mouseRelease(
+        image_widget,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        _minimap_point(image_widget, 0.58, 0.42),
+    )
+
+    assert window.viewer.normalized_viewport_center() == pytest.approx(
+        (0.58, 0.42), abs=0.02
+    )
+
+    window.close()
+
+
+def test_thumbnail_image_press_drag_clamps_zoomed_view_to_image_edge(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify held thumbnail-image drags clamp to the thumbnail image edge.
+
+    Dragging outside the pressed thumbnail should pin the newly selected zoomed
+    view to the corresponding photo edge instead of drifting beyond it.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_8112', 'dimgray'),
+            ('IMG_8113', 'blue'),
+        ],
+    )
+
+    window.viewer.toggle_focus_zoom()
+    window.viewer.zoom_step(1.25)
+    app.processEvents()
+
+    widget = thumbnail_item_widget(window.thumbnail_list, 1)
+    image_widget = widget._front_image_widget
+    assert image_widget is not None
+
+    _press_drag_thumbnail_image(image_widget, (0.5, 0.5), QPoint(-20, -20))
+    app.processEvents()
+
+    visible_region = window.viewer.visible_region_rect()
+
+    assert window.current_photo_id == 'IMG_8113'
+    assert visible_region is not None
+    assert visible_region[0] == pytest.approx(0.0)
+    assert visible_region[1] == pytest.approx(0.0)
+
+    window.close()
+
+
+def test_scene_thumbnail_image_click_spatially_recenters_exact_photo(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify scene-strip image clicks spatially select exact scene photos.
+
+    Scene stacks in the left strip may represent multiple photos, so non-cover
+    photos need the horizontal strip path to carry the clicked inspection
+    point.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_8102', 'dimgray'),
+            ('IMG_8103', 'green'),
+            ('IMG_8104', 'blue'),
+        ],
+        scene_groups=[['IMG_8102', 'IMG_8103'], ['IMG_8104']],
+    )
+
+    window.viewer.toggle_focus_zoom()
+    window.viewer.zoom_step(1.25)
+    app.processEvents()
+
+    widget = thumbnail_item_widget(window.scene_list, 1)
+    image_widget = widget._front_image_widget
+    assert image_widget is not None
+
+    _click_thumbnail_image(image_widget, (0.58, 0.42))
+    app.processEvents()
+
+    assert window.current_photo_id == 'IMG_8103'
+    assert window.viewer.normalized_viewport_center() == pytest.approx(
+        (0.58, 0.42), abs=0.02
+    )
+    assert thumbnail_overlay(window.scene_list, 1) == pytest.approx(
+        window.viewer.visible_region_rect()
+    )
+
+    window.close()
+
+
+def test_scene_thumbnail_image_press_drag_continues_after_selection(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify held scene-strip thumbnail drags keep panning exact photos.
+
+    Scene mode uses horizontal exact-photo thumbnails for non-cover photos, so
+    that path needs the same no-release spatial drag behavior.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_8114', 'dimgray'),
+            ('IMG_8115', 'green'),
+            ('IMG_8116', 'blue'),
+        ],
+        scene_groups=[['IMG_8114', 'IMG_8115'], ['IMG_8116']],
+    )
+
+    window.viewer.toggle_focus_zoom()
+    window.viewer.zoom_step(1.25)
+    app.processEvents()
+
+    widget = thumbnail_item_widget(window.scene_list, 1)
+    image_widget = widget._front_image_widget
+    assert image_widget is not None
+
+    QTest.mousePress(
+        image_widget,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        _minimap_point(image_widget, 0.5, 0.5),
+    )
+    app.processEvents()
+
+    assert window.current_photo_id == 'IMG_8115'
+
+    QTest.mouseMove(image_widget, _minimap_point(image_widget, 0.58, 0.42))
+    app.processEvents()
+    QTest.mouseRelease(
+        image_widget,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        _minimap_point(image_widget, 0.58, 0.42),
+    )
+
+    assert window.viewer.normalized_viewport_center() == pytest.approx(
+        (0.58, 0.42), abs=0.02
+    )
+
+    window.close()
+
+
+def test_spatial_thumbnail_clicks_ignore_browse_mode_and_stale_navigation(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify spatial click centers apply only to matching strip selections.
+
+    Browse thumbnails and stale pending clicks must not rewrite zoom centers
+    during hidden-viewer, keyboard, or programmatic navigation flows.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_8105', 'dimgray'),
+            ('IMG_8106', 'green'),
+            ('IMG_8107', 'blue'),
+        ],
+    )
+
+    window.viewer.toggle_focus_zoom()
+    window.viewer.zoom_step(1.25)
+    app.processEvents()
+    center_before = window.viewer.normalized_viewport_center()
+
+    window.browse_mode_shortcut.activated.emit()
+    app.processEvents()
+    widget = thumbnail_item_widget(window.browse_list, 1)
+    image_widget = widget._front_image_widget
+    assert image_widget is not None
+
+    _press_drag_thumbnail_image(image_widget, (0.5, 0.5), (0.58, 0.42))
+    app.processEvents()
+
+    assert window._pending_thumbnail_click_center is None
+    assert window.viewer.normalized_viewport_center() == pytest.approx(
+        center_before
+    )
+
+    window.space_shortcut.activated.emit()
+    window.space_shortcut.activated.emit()
+    app.processEvents()
+    window._handle_thumbnail_image_clicked(
+        window.thumbnail_list, 'IMG_8106', 0.58, 0.42
+    )
+    window.thumbnail_list.setCurrentRow(2)
+    app.processEvents()
+
+    assert window.current_photo_id == 'IMG_8107'
+    assert window._pending_thumbnail_click_center is None
+    assert window.viewer.normalized_viewport_center() != pytest.approx(
+        (0.58, 0.42), abs=0.02
+    )
+
+    window.close()
+
+
+def test_main_window_minimap_drag_recenters_zoomed_photo(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify the active strip minimap is a direct pan control.
+
+    The thumbnail widget emits normalized image coordinates while MainWindow
+    policy ensures only the active overlay owner moves the viewer.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_8090', 'dimgray'), ('IMG_8091', 'blue')],
+    )
+
+    window.viewer.toggle_focus_zoom()
+    window.viewer.zoom_step(1.25)
+    app.processEvents()
+
+    widget = thumbnail_item_widget(window.thumbnail_list, 0)
+    minimap = widget._front_image_widget
+    assert minimap is not None
+
+    _drag_minimap(minimap, (0.5, 0.5), (0.58, 0.42))
+    app.processEvents()
+
+    assert window.viewer.normalized_viewport_center() == pytest.approx(
+        (0.58, 0.42), abs=0.02
+    )
+    assert thumbnail_overlay(window.thumbnail_list, 0) == pytest.approx(
+        window.viewer.visible_region_rect()
+    )
+
+    window.close()
+
+
+def test_scene_strip_minimap_controls_exact_current_photo(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify scene-mode minimap input uses the horizontal exact-photo owner.
+
+    Non-cover photos do not own the vertical scene-stack minimap, so their
+    interactive overlay belongs to the scene strip.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_8092', 'dimgray'),
+            ('IMG_8093', 'green'),
+            ('IMG_8094', 'blue'),
+        ],
+        scene_groups=[['IMG_8092', 'IMG_8093'], ['IMG_8094']],
+    )
+
+    window.scene_list.setCurrentRow(1)
+    app.processEvents()
+    assert window.current_photo_id == 'IMG_8093'
+
+    window.viewer.toggle_focus_zoom()
+    window.viewer.zoom_step(1.25)
+    app.processEvents()
+
+    scene_widget = thumbnail_item_widget(window.scene_list, 1)
+    scene_minimap = scene_widget._front_image_widget
+    assert scene_minimap is not None
+
+    _drag_minimap(scene_minimap, (0.5, 0.5), (0.58, 0.35))
+    app.processEvents()
+
+    assert thumbnail_overlay(window.thumbnail_list, 0) is None
+    assert window.viewer.normalized_viewport_center() == pytest.approx(
+        (0.58, 0.35), abs=0.02
+    )
+    assert thumbnail_overlay(window.scene_list, 1) == pytest.approx(
+        window.viewer.visible_region_rect()
+    )
+
+    window.close()
+
+
+def test_non_owner_and_inactive_minimap_requests_do_not_move_viewer(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify stale or inactive minimap signals cannot pan the active viewer.
+
+    The widgets are generic coordinate emitters; window policy must still
+    reject non-owner, browse-mode, and compare-mode requests.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_8095', 'dimgray'),
+            ('IMG_8096', 'green'),
+            ('IMG_8097', 'blue'),
+        ],
+    )
+
+    window.viewer.toggle_focus_zoom()
+    window.viewer.zoom_step(1.25)
+    app.processEvents()
+    center_before = window.viewer.normalized_viewport_center()
+
+    window._handle_minimap_center_requested(
+        window.thumbnail_list, 'IMG_8096', 0.65, 0.35
+    )
+    assert window.viewer.normalized_viewport_center() == pytest.approx(
+        center_before
+    )
+
+    window.browse_mode_shortcut.activated.emit()
+    app.processEvents()
+    window._handle_minimap_center_requested(
+        window.thumbnail_list, 'IMG_8095', 0.65, 0.35
+    )
+    assert window.viewer.normalized_viewport_center() == pytest.approx(
+        center_before
+    )
+
+    window.space_shortcut.activated.emit()
+    app.processEvents()
+    window.space_shortcut.activated.emit()
+    app.processEvents()
+    window.thumbnail_list.item(0).setSelected(True)
+    window.thumbnail_list.item(1).setSelected(True)
+    window.compare_mode_shortcut.activated.emit()
+    app.processEvents()
+
+    window._handle_minimap_center_requested(
+        window.thumbnail_list, 'IMG_8095', 0.65, 0.35
+    )
+    assert window.viewer.normalized_viewport_center() == pytest.approx(
+        center_before
+    )
 
     window.close()
 

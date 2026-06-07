@@ -196,6 +196,12 @@ class MainWindowNavigationMixin:
             preserved_selection_photo_ids
         )
 
+        center = self._take_pending_thumbnail_click_center(
+            self.thumbnail_list, self.current_photo_id
+        )
+        if center is not None:
+            self.viewer.set_normalized_viewport_center(center)
+
         self._refresh_selection_labels()
         self._refresh_metadata_history_actions()
         self._refresh_selection_styles(
@@ -262,6 +268,11 @@ class MainWindowNavigationMixin:
         photo_id = current.data(PHOTO_ID_ROLE)
         if photo_id is None or photo_id == self.current_photo_id:
             self._scene_merge_selection_source = 'scene'
+            if photo_id is not None:
+                self._take_pending_thumbnail_click_center(
+                    self.scene_list, str(photo_id)
+                )
+
             self._refresh_metadata_history_actions()
             return
 
@@ -283,11 +294,40 @@ class MainWindowNavigationMixin:
             suppress_signals=True,
             preserve_selection=self._selection_extending_modifier_active(),
         )
+        center = self._take_pending_thumbnail_click_center(
+            self.scene_list, self.current_photo_id
+        )
+        if center is not None:
+            self.viewer.set_normalized_viewport_center(center)
+
         self._refresh_selection_labels()
         self._refresh_metadata_history_actions()
         self._refresh_selection_styles(
             previous_photo_id, self.current_photo_id, 'scene'
         )
+
+    def _take_pending_thumbnail_click_center(
+            self: MainWindow,
+            list_widget: QListWidget,
+            photo_id: str,
+    ) -> tuple[float, float] | None:
+        """
+        Return a matching spatial thumbnail click and clear stale requests.
+
+        Thumbnail image clicks arrive before Qt changes the list current item.
+        Clearing on every selection attempt prevents an unmatched click from
+        affecting later keyboard, programmatic, or modifier-driven navigation.
+        """
+        pending = self._pending_thumbnail_click_center
+        self._pending_thumbnail_click_center = None
+        if pending is None:
+            return None
+
+        pending_widget, pending_photo_id, center = pending
+        if pending_widget is not list_widget or pending_photo_id != photo_id:
+            return None
+
+        return center
 
     def _navigate_scene(self: MainWindow, direction: int) -> None:
         if (

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from PySide6.QtGui import QPaintEvent
+    from PySide6.QtGui import QMouseEvent, QPaintEvent
 
     from easy_loupe.ui.theme import ThemePalette
 
@@ -40,6 +40,10 @@ class _SceneNavigator(Protocol):
 class ThumbnailPreviewWidget(QWidget):
     """Thumbnail image widget with an optional visible-region overlay."""
 
+    image_position_clicked = Signal(float, float)
+    image_position_dragged = Signal(float, float)
+    visible_region_center_requested = Signal(float, float)
+
     _MASK_COLOR = QColor(0, 0, 0, 112)
     _EDGE_COLOR = QColor('#ff3b30')
 
@@ -48,6 +52,8 @@ class ThumbnailPreviewWidget(QWidget):
         self.setFixedSize(size)
         self._pixmap = QPixmap()
         self._visible_region: tuple[float, float, float, float] | None = None
+        self._image_position_drag_active = False
+        self._visible_region_drag_active = False
 
     def set_pixmap(self, pixmap: QPixmap) -> None:
         """Replace the displayed thumbnail pixmap and repaint."""
@@ -91,6 +97,119 @@ class ThumbnailPreviewWidget(QWidget):
             scaled.width(),
             scaled.height(),
         )
+
+    def _visible_region_input_enabled(self) -> bool:
+        """Return whether minimap input can safely drive a zoomed view."""
+        return (
+            not self._pixmap.isNull()
+            and self._visible_region is not None
+            and not self.displayed_image_rect().isEmpty()
+        )
+
+    def _emit_visible_region_center_request(self, pos: QPointF) -> None:
+        """Emit a displayed-image-relative center for minimap panning."""
+        point = self._normalized_image_point(pos, clamp=True)
+        if point is None:
+            return
+
+        self.visible_region_center_requested.emit(*point)
+
+    def _normalized_image_point(
+            self, pos: QPointF, *, clamp: bool = False
+    ) -> tuple[float, float] | None:
+        target = self.displayed_image_rect()
+        if target.isEmpty():
+            return None
+
+        if clamp:
+            # Clamp to the drawn image, not the whole widget, so letterboxed
+            # minimaps stop at the actual photo edge while the drag is held.
+            x = max(target.left(), min(target.right(), pos.x()))
+            y = max(target.top(), min(target.bottom(), pos.y()))
+        elif not target.contains(pos):
+            return None
+        else:
+            x = pos.x()
+            y = pos.y()
+
+        return (
+            max(0.0, min(1.0, (x - target.left()) / target.width())),
+            max(0.0, min(1.0, (y - target.top()) / target.height())),
+        )
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        """Emit normalized minimap coordinates for active overlay clicks."""
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and event.modifiers() == Qt.KeyboardModifier.NoModifier
+            and self._visible_region_input_enabled()
+        ):
+            self._visible_region_drag_active = True
+            self._emit_visible_region_center_request(event.position())
+            event.accept()
+            return
+
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and event.modifiers() == Qt.KeyboardModifier.NoModifier
+        ):
+            point = self._normalized_image_point(event.position())
+            if point is not None:
+                # This is a spatial-selection hint, not the selection action
+                # itself. Keep the event unaccepted so QListWidget can still
+                # make the clicked thumbnail current before drag updates pan.
+                self._image_position_drag_active = True
+                self.image_position_clicked.emit(*point)
+
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        """Emit clamped normalized coordinates while dragging the minimap."""
+        if (
+            self._visible_region_drag_active
+            and event.buttons() & Qt.MouseButton.LeftButton
+            and self._visible_region_input_enabled()
+        ):
+            self._emit_visible_region_center_request(event.position())
+            event.accept()
+            return
+
+        if (
+            self._image_position_drag_active
+            and event.buttons() & Qt.MouseButton.LeftButton
+        ):
+            point = self._normalized_image_point(event.position(), clamp=True)
+            if point is not None:
+                # After the press has selected the row, the same held gesture
+                # becomes a pan request. Consume moves here so the list view
+                # does not reinterpret the drag as selection/scroll input.
+                self.image_position_dragged.emit(*point)
+                event.accept()
+                return
+
+        self._image_position_drag_active = False
+        self._visible_region_drag_active = False
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        """Finish an active minimap drag without changing selection state."""
+        if (
+            self._visible_region_drag_active
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            self._visible_region_drag_active = False
+            event.accept()
+            return
+
+        if (
+            self._image_position_drag_active
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            self._image_position_drag_active = False
+            event.accept()
+            return
+
+        super().mouseReleaseEvent(event)
 
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 - Qt API
         """Paint the thumbnail image and optional visible-region overlay."""
@@ -172,6 +291,10 @@ class ThumbnailPreviewWidget(QWidget):
 
 class ThumbnailItemWidget(QWidget):
     """Thumbnail card widget with metadata and scene-stack badge support."""
+
+    image_position_clicked = Signal(float, float)
+    image_position_dragged = Signal(float, float)
+    visible_region_center_requested = Signal(float, float)
 
     _IMAGE_TEXT_SPACING = 1
     _TEXT_ROW_SPACING = 8
@@ -288,6 +411,15 @@ class ThumbnailItemWidget(QWidget):
 
         image_widget = ThumbnailPreviewWidget(
             QSize(frame_size.width() - 16, frame_size.height() - 16), frame
+        )
+        image_widget.image_position_clicked.connect(
+            self.image_position_clicked
+        )
+        image_widget.image_position_dragged.connect(
+            self.image_position_dragged
+        )
+        image_widget.visible_region_center_requested.connect(
+            self.visible_region_center_requested
         )
         self._set_pixmap(image_widget, pixmap)
         self._image_widgets.append(image_widget)
