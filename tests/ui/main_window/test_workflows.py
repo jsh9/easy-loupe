@@ -431,6 +431,66 @@ def test_main_window_detect_scenes_replace_starts_worker(
     del app
 
 
+@pytest.mark.parametrize(
+    ('initially_running', 'expected_quit_calls'),
+    [
+        pytest.param(True, 1, id='running'),
+        pytest.param(False, 0, id='stopped-slot'),
+    ],
+)
+def test_main_window_close_defers_until_scene_thread_clears(
+        initially_running: bool,
+        expected_quit_calls: int,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify app shutdown does not delete scene-thread wrappers while active.
+
+    The crash logs point at PySide/Shiboken object teardown during background
+    work, so close should request shutdown and wait for the normal finished
+    cleanup path before allowing the window to close.
+    """
+
+    class FakeThread:
+        def __init__(self) -> None:
+            self.running = initially_running
+            self.quit_calls = 0
+
+        def isRunning(self) -> bool:  # noqa: N802 - Qt API
+            return self.running
+
+        def quit(self) -> None:
+            self.quit_calls += 1
+
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_7450', 'dimgray')],
+    )
+    fake_thread = FakeThread()
+    fake_worker = object()
+    window._scene_thread = fake_thread
+    window._scene_worker = fake_worker
+
+    window.close()
+    app.processEvents()
+
+    assert window.isVisible() is True
+    assert window._close_after_background_tasks is True
+    assert fake_thread.quit_calls == expected_quit_calls
+
+    fake_thread.running = False
+    window._clear_scene_worker(fake_thread, fake_worker)
+
+    assert window.isVisible() is True
+
+    app.processEvents()
+
+    assert window.isVisible() is False
+    del app
+
+
 def test_scene_detection_clears_stale_manual_scene_undo_history(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1367,6 +1427,12 @@ def test_main_window_progress_overlay_disables_and_restores_interaction(
 def test_main_window_handle_scene_failed_and_clear_worker_restore_ui(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """
+    Verify scene-failure UI recovery waits for matching worker cleanup.
+
+    The failed signal restores the error/progress state, but the action buttons
+    stay guarded until the finished cleanup clears the exact thread slot.
+    """
     _, app, window = create_main_window_with_library(
         tmp_path,
         monkeypatch,
@@ -1378,8 +1444,10 @@ def test_main_window_handle_scene_failed_and_clear_worker_restore_ui(
         'critical',
         lambda _parent, title, text: errors.append((title, text)),
     )
-    window._scene_thread = object()
-    window._scene_worker = object()
+    scene_thread = object()
+    scene_worker = object()
+    window._scene_thread = scene_thread
+    window._scene_worker = scene_worker
     window._show_progress('Preparing scenes', 10)
 
     window._handle_scene_failed('boom')
@@ -1390,7 +1458,7 @@ def test_main_window_handle_scene_failed_and_clear_worker_restore_ui(
     assert window.detect_button.isEnabled() is True
     assert window.organize_button.isEnabled() is False
 
-    window._clear_scene_worker()
+    window._clear_scene_worker(scene_thread, scene_worker)
 
     assert window._scene_thread is None
     assert window._scene_worker is None
@@ -2224,7 +2292,10 @@ def test_scene_detection_finish_restores_thumbnail_strip_focus(
 
     # Start from the user workflow: a non-first photo is selected and the
     # vertical strip owns keyboard focus before scene detection starts.
-    window._scene_thread = object()
+    scene_thread = object()
+    scene_worker = object()
+    window._scene_thread = scene_thread
+    window._scene_worker = scene_worker
     window._handle_scene_finished()
     app.processEvents()
 
@@ -2233,7 +2304,7 @@ def test_scene_detection_finish_restores_thumbnail_strip_focus(
 
     # The real restore opportunity happens after the worker thread is cleared;
     # before that, background-task guards intentionally block focus changes.
-    window._clear_scene_worker()
+    window._clear_scene_worker(scene_thread, scene_worker)
     app.processEvents()
 
     assert _list_widget_has_focus(app, window.thumbnail_list) is True
@@ -2295,6 +2366,66 @@ def test_main_window_open_organizer_dialog_starts_operation_worker(
     assert window.progress_overlay.isVisible() is True
 
     window.close()
+    del app
+
+
+@pytest.mark.parametrize(
+    ('initially_running', 'expected_quit_calls'),
+    [
+        pytest.param(True, 1, id='running'),
+        pytest.param(False, 0, id='stopped-slot'),
+    ],
+)
+def test_main_window_close_defers_until_operation_thread_clears(
+        initially_running: bool,
+        expected_quit_calls: int,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify close waits for organizer/undo worker-thread cleanup.
+
+    The operation slot uses the same deferred-close lifecycle as scene
+    detection, so active file operations cannot lose their Python Qt wrappers
+    while the OS is terminating the window.
+    """
+
+    class FakeThread:
+        def __init__(self) -> None:
+            self.running = initially_running
+            self.quit_calls = 0
+
+        def isRunning(self) -> bool:  # noqa: N802 - Qt API
+            return self.running
+
+        def quit(self) -> None:
+            self.quit_calls += 1
+
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_9110', 'dimgray')],
+    )
+    fake_thread = FakeThread()
+    fake_worker = object()
+    window._operation_thread = fake_thread
+    window._operation_worker = fake_worker
+
+    window.close()
+    app.processEvents()
+
+    assert window.isVisible() is True
+    assert window._close_after_background_tasks is True
+    assert fake_thread.quit_calls == expected_quit_calls
+
+    fake_thread.running = False
+    window._clear_operation_worker(fake_thread, fake_worker)
+
+    assert window.isVisible() is True
+
+    app.processEvents()
+
+    assert window.isVisible() is False
     del app
 
 

@@ -362,8 +362,20 @@ Current shortcut coverage in code includes:
 Keyboard shortcuts are part of the product behavior, not incidental
 implementation.
 
+Window close while scene detection or organizer/undo work is active must
+request best-effort worker shutdown and defer the actual close until the
+relevant `QThread.finished` cleanup clears the stored thread slot. Standalone
+photo-viewer close follows the same rule for EXIF refresh, prefetch, and
+folder-hydration threads. Only workers with an explicit `cancel()` hook are
+cooperatively cancellable; file-operation workers drain to completion while
+close remains deferred.
+
 ## 7. Verification Pointers
 
+- For shutdown fixes involving `QThread` cleanup, verify both source runs and
+  the packaged app by closing and using `Cmd+Q` while scene detection,
+  organizer/undo work, standalone EXIF refresh, prefetch, or folder hydration
+  is active.
 - If scene detection changes, test grouping behavior, not just helper
   functions, and preserve ordering assumptions based on capture time.
 - If `MainWindow` selection/display logic changes, verify which preview kind is

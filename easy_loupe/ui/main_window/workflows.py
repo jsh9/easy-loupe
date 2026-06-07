@@ -205,7 +205,13 @@ class MainWindowWorkflowMixin:
         self._scene_worker.finished.connect(self._scene_worker.deleteLater)
         self._scene_worker.failed.connect(self._scene_worker.deleteLater)
         self._scene_thread.finished.connect(self._scene_thread.deleteLater)
-        self._scene_thread.finished.connect(self._clear_scene_worker)
+        # Capture this exact pair so cleanup ignores stale finished callbacks
+        # if a future replacement path starts another scene worker first.
+        finished_thread = self._scene_thread
+        finished_worker = self._scene_worker
+        self._scene_thread.finished.connect(
+            lambda: self._clear_scene_worker(finished_thread, finished_worker)
+        )
         self._scene_thread.start()
 
     def open_organizer_dialog(self: MainWindow) -> None:
@@ -336,9 +342,15 @@ class MainWindowWorkflowMixin:
     def _handle_scene_progress(
             self: MainWindow, message: str, progress: int
     ) -> None:
+        if self._closing:
+            return
+
         self._show_progress(message, progress)
 
     def _handle_scene_finished(self: MainWindow) -> None:
+        if self._closing:
+            return
+
         was_browse_mode = self._browse_mode
         was_split_view = self.viewer.is_split_view()
         self._show_progress('Scene detection finished', 100)
@@ -366,23 +378,39 @@ class MainWindowWorkflowMixin:
         self._restore_thumbnail_strip_focus(defer=True)
 
     def _handle_scene_failed(self: MainWindow, error: str) -> None:
+        if self._closing:
+            return
+
         self._hide_progress()
         QMessageBox.critical(self, 'Scene Detection Failed', error)
         self.detect_button.setEnabled(bool(self.library.photos))
 
-    def _clear_scene_worker(self: MainWindow) -> None:
-        self._scene_thread = None
-        self._scene_worker = None
-        self.detect_button.setEnabled(bool(self.library.photos))
-        self._refresh_ui()
-        self._restore_thumbnail_strip_focus(defer=True)
+    def _clear_scene_worker(
+            self: MainWindow,
+            finished_thread: QThread | None,
+            finished_worker: SceneDetectionWorker | None,
+    ) -> None:
+        if self._background_thread_slots.clear_if_current(
+            'scene', finished_thread, finished_worker
+        ):
+            self.detect_button.setEnabled(bool(self.library.photos))
+            self._refresh_ui()
+            self._restore_thumbnail_strip_focus(defer=True)
+
+        self._finish_deferred_close_if_ready()
 
     def _handle_operation_progress(
             self: MainWindow, message: str, progress: int
     ) -> None:
+        if self._closing:
+            return
+
         self._show_progress(message, progress)
 
     def _handle_operation_finished(self: MainWindow, summary: object) -> None:
+        if self._closing:
+            return
+
         if self._operation_kind == 'undo':
             self._handle_undo_finished()
             return
@@ -413,8 +441,6 @@ class MainWindowWorkflowMixin:
         should_undo = self._show_operation_finished_dialog(summary, request)
         self._organizer_request = None
         self._operation_kind = None
-        self._operation_thread = None
-        self._operation_worker = None
         if should_undo and summary.undo_plan is not None:
             self._start_undo_operation(summary.undo_plan)
             return
@@ -422,6 +448,9 @@ class MainWindowWorkflowMixin:
         self._restore_active_navigation_focus(defer=True)
 
     def _handle_operation_failed(self: MainWindow, error: str) -> None:
+        if self._closing:
+            return
+
         self._hide_progress()
         operation_kind = self._operation_kind
         request = self._organizer_request
@@ -443,13 +472,30 @@ class MainWindowWorkflowMixin:
             finished_thread: QThread | None,
             finished_worker: OperationWorker | None,
     ) -> None:
-        if self._operation_thread is finished_thread:
-            self._operation_thread = None
+        if self._background_thread_slots.clear_if_current(
+            'operation', finished_thread, finished_worker
+        ):
+            self._refresh_ui()
 
-        if self._operation_worker is finished_worker:
-            self._operation_worker = None
+        self._finish_deferred_close_if_ready()
 
-        self._refresh_ui()
+    def _stop_main_window_background_tasks(self: MainWindow) -> None:
+        """Request safe shutdown without clearing stored thread slots."""
+        self._background_thread_slots.request_shutdown_all()
+
+    def _finish_deferred_close_if_ready(self: MainWindow) -> None:
+        """Complete a close that was waiting for background tasks to finish."""
+        if (
+            self._close_after_background_tasks
+            and not self._background_task_active()
+        ):
+            # Re-enter close only after the finished slots have cleared active
+            # thread references. This keeps Qt wrapper lifetime tied to the
+            # normal worker cleanup path instead of the first close event.
+            self._close_after_background_tasks = False
+            # Queue the final close so Qt can finish delivering the current
+            # QThread.finished signal and its deleteLater cleanup first.
+            QTimer.singleShot(0, self.close)
 
     def _show_operation_finished_dialog(
             self: MainWindow,

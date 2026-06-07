@@ -1110,6 +1110,122 @@ def test_photo_viewer_exif_clear_skips_pending_refresh_while_closing(
     window.close()
 
 
+def test_photo_viewer_close_waits_for_stored_background_thread_slot(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify close waits for finished cleanup even after a thread stops running.
+
+    Qt can report a thread as not running before its finished cleanup slot has
+    cleared the Python owner reference. Close must still defer until that slot
+    runs so widget teardown cannot race queued worker deletion events.
+    """
+
+    class FakeThread:
+        def __init__(self) -> None:
+            self.quit_calls = 0
+
+        @staticmethod
+        def isRunning() -> bool:  # noqa: N802 - Qt API
+            return False
+
+        def quit(self) -> None:
+            self.quit_calls += 1
+
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+    fake_thread = FakeThread()
+    fake_worker = object()
+    window._photo_viewer_exif_thread = fake_thread
+    window._photo_viewer_exif_worker = fake_worker
+
+    window.close()
+    app.processEvents()
+
+    assert window.isVisible() is True
+    assert window._close_after_background_tasks is True
+    assert window._photo_viewer_exif_thread is fake_thread
+    assert fake_thread.quit_calls == 0
+
+    window._clear_photo_viewer_exif_worker(fake_thread, fake_worker)
+
+    assert window.isVisible() is True
+
+    app.processEvents()
+
+    assert window.isVisible() is False
+
+
+def test_photo_viewer_replacement_cleanup_clears_inactive_thread_slot(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify replacement cleanup can drop an already-finished thread reference.
+
+    This is narrower than close-time handling: replacing background work can
+    clean up an inactive slot immediately, while window close waits for the
+    normal finished cleanup callback.
+    """
+
+    class FakeThread:
+        @staticmethod
+        def isRunning() -> bool:  # noqa: N802 - Qt API
+            return False
+
+        @staticmethod
+        def quit() -> None:
+            raise AssertionError('inactive replacement thread should not quit')
+
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    _app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+    window._photo_viewer_exif_thread = FakeThread()
+    window._photo_viewer_exif_worker = object()
+
+    window._background_thread_slots.slot(
+        'photo_viewer_exif'
+    ).stop_for_replacement()
+
+    assert window._photo_viewer_exif_thread is None
+    assert window._photo_viewer_exif_worker is None
+
+    window.close()
+
+
+def test_photo_viewer_prefetch_cleanup_ignores_stale_finished_slot(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify an old prefetch cleanup cannot clear a newer thread slot.
+
+    Prefetch is currently one-at-a-time, but matching the finished thread and
+    worker avoids a future replacement path dropping the active prefetch owner
+    references and reintroducing the shutdown wrapper race.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    _app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+    old_thread = object()
+    old_worker = object()
+    new_thread = object()
+    new_worker = object()
+    window._viewer_prefetch_thread = new_thread
+    window._viewer_prefetch_worker = new_worker
+
+    window._clear_viewer_prefetch_worker(old_thread, old_worker)
+
+    assert window._viewer_prefetch_thread is new_thread
+    assert window._viewer_prefetch_worker is new_worker
+
+    window._clear_viewer_prefetch_worker(new_thread, new_worker)
+
+    assert window._viewer_prefetch_thread is None
+    assert window._viewer_prefetch_worker is None
+
+    window.close()
+
+
 def test_photo_viewer_denied_access_blocks_navigation_and_handoff(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,

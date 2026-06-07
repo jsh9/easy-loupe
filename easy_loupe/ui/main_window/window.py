@@ -21,6 +21,7 @@ from easy_loupe.ui.main_window.presentation import (
 from easy_loupe.ui.main_window.selection import MainWindowSelectionMixin
 from easy_loupe.ui.main_window.workflows import MainWindowWorkflowMixin
 from easy_loupe.ui.theme import THEMES
+from easy_loupe.ui.threading import ThreadSlot, ThreadSlotGroup
 
 if TYPE_CHECKING:
     from PySide6.QtCore import QThread
@@ -78,6 +79,7 @@ class MainWindow(
         self._preserved_scene_selection_photo_ids: set[str] = set()
 
         self._initial_folder_prompt_pending = launch_request is None
+        self._init_runtime_lifecycle_state()
         self._scene_thread: QThread | None = None
         self._scene_worker: SceneDetectionWorker | None = None
         self._operation_thread: QThread | None = None
@@ -121,6 +123,20 @@ class MainWindow(
         if launch_request is not None:
             self.load_culling_launch_request(launch_request)
 
+    def _init_runtime_lifecycle_state(self) -> None:
+        """Initialize close lifecycle state."""
+        self._closing = False
+        self._close_after_background_tasks = False
+        self._background_thread_slots = ThreadSlotGroup([
+            ThreadSlot(self, 'scene', '_scene_thread', '_scene_worker'),
+            ThreadSlot(
+                self,
+                'operation',
+                '_operation_thread',
+                '_operation_worker',
+            ),
+        ])
+
     @staticmethod
     def _shortcut_tooltip(label: str, shortcut: str) -> str:
         native_shortcut = QKeySequence(shortcut).toString(
@@ -130,7 +146,4 @@ class MainWindow(
 
     def _background_task_active(self) -> bool:
         """Return True while any background operation thread is active."""
-        return (
-            self._scene_thread is not None
-            or self._operation_thread is not None
-        )
+        return self._background_thread_slots.any_active()
