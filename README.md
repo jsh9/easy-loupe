@@ -17,7 +17,7 @@ ______________________________________________________________________
 - [4. Modes and Transitions](#4-modes-and-transitions)
 - [5. Keyboard Shortcuts](#5-keyboard-shortcuts)
 - [6. Metadata File](#6-metadata-file)
-- [7. Maintenance Roadmaps](#7-maintenance-roadmaps)
+- [7. Maintenance Guides](#7-maintenance-guides)
 
 ______________________________________________________________________
 
@@ -384,11 +384,11 @@ Example:
 }
 ```
 
-## 7. Maintenance Roadmaps
+## 7. Maintenance Guides
 
-Feature-level maintenance maps live under `docs/roadmaps/`. Start with
-`docs/roadmaps/README.md` when you need to find the modules, tests, and
-behavior contracts for a major app feature.
+Feature-level maintenance guides live under `docs/maintenance-guides/`. Start
+with `docs/maintenance-guides/README.md` when you need to find the modules,
+tests, and behavior contracts for a major app feature.
 
 Rules:
 

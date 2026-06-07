@@ -1,5 +1,12 @@
 # Change Log
 
+## [Unreleased]
+
+- Changed
+
+  - Moved feature-level maintenance notes out of `AGENTS.md` and into dedicated
+    maintenance guides under `docs/maintenance-guides/`
+
 ## [1.1.2] - 2026-06-06
 
 - Fixed
