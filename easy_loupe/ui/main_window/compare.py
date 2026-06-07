@@ -228,9 +228,28 @@ class MainWindowCompareMixin:
             else:
                 self.scene_list.setVisible(False)
 
+            # Compare updates ``current_photo_id`` while the normal viewer is
+            # hidden. Reload that viewer in fit mode so the next Space press
+            # zooms the same photo that overlay ownership will target.
+            self._display_current_photo(force_fit=True)
+
         self._refresh_ui()
         if selection_photo_ids:
             self._restore_photo_selection(selection_photo_ids)
+
+        if not restore_browse_mode:
+            # Restoring selected flags does not make the strip current row
+            # follow ``current_photo_id``. Move the current index without
+            # clearing selection so focus styling and minimap ownership stay
+            # aligned with the active compare photo.
+            self._sync_left_list_for_photo(
+                self.current_photo_id,
+                suppress_signals=True,
+                preserve_selection=True,
+            )
+            self._refresh_item_styles(self.thumbnail_list)
+            if self.library.scene_detection_done:
+                self._refresh_item_styles(self.scene_list)
 
         self._refresh_visible_region_overlay(force_full=True)
         self._refresh_info_overlay()

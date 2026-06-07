@@ -255,6 +255,14 @@ shared contracts, UI state transitions, threading, or filesystem operations.
 - Prefer small, surgical changes. This repo still has a lot of behavior packed
   into `ui/main_window/` and the core loading/preview pipeline, so broad
   refactors can create regressions quickly.
+- Prefer modular, decoupled changes that keep new behavior isolated behind
+  clear interfaces instead of spreading feature logic across unrelated modules.
+- For big-ish new features, prefer creating a dedicated module for the feature
+  and importing its components from existing modules. This helps keep existing
+  modules focused and improves long-term modularity.
+- After making changes, do not automatically stage or unstage files for the
+  user. Leave index state untouched unless the user explicitly requests a git
+  staging operation.
 - Read the affected method end-to-end before patching; several UI methods
   coordinate through shared mutable state such as `current_photo_id`, `_busy`,
   `_scene_thread`, and `scene_detection_done`.

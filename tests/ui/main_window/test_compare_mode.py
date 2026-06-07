@@ -12,13 +12,14 @@ import json
 from typing import TYPE_CHECKING
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QItemSelectionModel, Qt
 
 from easy_loupe.core.records import METADATA_FILENAME
 from easy_loupe.ui.main_window.build import VIEWER_KEYBOARD_PAN_STEP
 from tests.ui._helpers import (
     create_main_window_with_library,
     set_scene_detection_result,
+    thumbnail_overlay,
     trigger_scene_shortcut,
 )
 
@@ -36,6 +37,25 @@ def _select_rows(list_widget: object, rows: range | list[int]) -> None:
         assert item is not None
         item.setSelected(True)
 
+    list_widget.setFocus(Qt.OtherFocusReason)
+
+
+def _select_rows_with_current(
+        list_widget: object, rows: list[int], current_row: int
+) -> None:
+    """Select rows while preserving a separate current/focus row."""
+    list_widget.clearSelection()
+    for row in rows:
+        item = list_widget.item(row)
+        assert item is not None
+        item.setSelected(True)
+
+    current_item = list_widget.item(current_row)
+    assert current_item is not None
+    flags = QItemSelectionModel.SelectionFlag.NoUpdate
+    list_widget.selectionModel().setCurrentIndex(
+        list_widget.indexFromItem(current_item), flags
+    )
     list_widget.setFocus(Qt.OtherFocusReason)
 
 
@@ -77,6 +97,73 @@ def test_compare_mode_opens_default_limit_and_esc_restores_view(
     assert window.viewer_stack.currentWidget() is window.viewer
     assert window.content_splitter.isVisible() is True
     assert window.thumbnail_list.isVisible() is True
+
+    window.close()
+
+
+def test_compare_mode_esc_reloads_viewer_and_overlay_for_active_photo(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify compare exit realigns viewer, strip focus, and minimap target.
+
+    The normal viewer is hidden during compare. Leaving compare must reload it
+    for the active compare pane before Space can enter manual zoom; otherwise
+    the viewer can zoom one selected photo while the visible-region overlay is
+    painted on another.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_99700', 'dimgray'),
+            ('IMG_99701', 'blue'),
+            ('IMG_99702', 'green'),
+        ],
+    )
+
+    _select_rows_with_current(window.thumbnail_list, [0, 1, 2], 2)
+    app.processEvents()
+
+    assert window.current_photo_id == 'IMG_99702'
+
+    window.compare_mode_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._compare_mode is True
+    assert window.compare_viewer.active_photo_id() == 'IMG_99700'
+    assert window.current_photo_id == 'IMG_99700'
+
+    window.exit_compare_shortcut.activated.emit()
+    app.processEvents()
+
+    expected_image_path = window.library.get_preview_path(
+        'IMG_99700', 'viewer'
+    )
+
+    assert window._compare_mode is False
+    assert window.current_photo_id == 'IMG_99700'
+    assert window.viewer._current_image_path == expected_image_path
+    assert window.thumbnail_list.currentRow() == 0
+    assert [
+        item.data(Qt.UserRole)
+        for item in window.thumbnail_list.selectedItems()
+    ] == ['IMG_99700', 'IMG_99701', 'IMG_99702']
+    assert thumbnail_overlay(window.thumbnail_list, 0) is None
+    assert thumbnail_overlay(window.thumbnail_list, 1) is None
+    assert thumbnail_overlay(window.thumbnail_list, 2) is None
+
+    window.space_shortcut.activated.emit()
+    app.processEvents()
+
+    visible_region = window.viewer.visible_region_rect()
+
+    assert visible_region is not None
+    assert thumbnail_overlay(window.thumbnail_list, 0) == pytest.approx(
+        visible_region
+    )
+    assert thumbnail_overlay(window.thumbnail_list, 1) is None
+    assert thumbnail_overlay(window.thumbnail_list, 2) is None
 
     window.close()
 
