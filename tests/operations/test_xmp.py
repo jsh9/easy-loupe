@@ -377,6 +377,47 @@ def test_write_xmp_sidecars_writes_nested_sidecar_beside_photo(
     assert _element_text(description, XMP_NAMESPACE, 'Rating') == '4'
 
 
+def test_write_xmp_sidecars_reports_structured_progress(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify XMP writing exposes counted structured progress stages.
+
+    This keeps the XMP overlay contract covered without coupling the test to
+    XML-writing details that are asserted elsewhere.
+    """
+    source_folder, library = _make_library(
+        tmp_path,
+        monkeypatch,
+        stem='IMG_5100',
+        create_raw=True,
+        create_jpeg_file=True,
+    )
+    library.update_metadata(
+        'IMG_5100',
+        rating=5,
+        fields={'rating'},
+    )
+    progress_updates: list[tuple[str, int]] = []
+    progress_snapshots = []
+
+    write_xmp_sidecars(
+        source_folder,
+        library.get_photos(),
+        WriteXmpOptions(merge_policy='preserve'),
+        lambda message, progress: progress_updates.append((
+            message,
+            progress,
+        )),
+        progress_snapshot_callback=progress_snapshots.append,
+    )
+
+    assert progress_updates[0] == ('Preparing XMP sidecars', 5)
+    assert progress_updates[1] == ('Writing XMP sidecars, 1 of 1', 99)
+    assert progress_snapshots[-2].stages[1].count_text() == '1 of 1'
+    assert progress_snapshots[-2].stages[1].status == 'complete'
+
+
 def _make_library(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,

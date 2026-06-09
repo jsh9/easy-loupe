@@ -223,6 +223,12 @@ def test_load_folder_rejects_missing_directory(tmp_path: Path) -> None:
 def test_load_folder_sorts_by_capture_time_ignores_unsupported_files_and_reports_progress(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """
+    Verify folder loading preserves sorting/filtering and progress contracts.
+
+    This protects the legacy tuple callback and structured stage snapshots
+    while the loader still resets stale scene state on a new folder.
+    """
     create_jpeg(tmp_path / 'IMG_2102.JPG', 'blue')
     create_jpeg(tmp_path / 'IMG_2100.JPEG', 'green')
     (tmp_path / 'IMG_2101.NEF').write_bytes(b'raw')
@@ -235,6 +241,7 @@ def test_load_folder_sorts_by_capture_time_ignores_unsupported_files_and_reports
     stub_read_exif(monkeypatch, exif_map)
 
     progress_updates: list[tuple[str, int]] = []
+    progress_snapshots = []
     library = PhotoLibrary(cache_dir=tmp_path / '.cache')
     library.scenes = [SceneGroup(scene_id='scene-old', photo_ids=['OLD'])]
     library.scene_detection_done = True
@@ -246,6 +253,7 @@ def test_load_folder_sorts_by_capture_time_ignores_unsupported_files_and_reports
             message,
             progress,
         )),
+        progress_snapshot_callback=progress_snapshots.append,
     )
 
     assert [photo.photo_id for photo in library.photos] == [
@@ -257,8 +265,28 @@ def test_load_folder_sorts_by_capture_time_ignores_unsupported_files_and_reports
     assert library.scenes == []
     assert library.scene_detection_done is False
     assert progress_updates[0] == ('Scanning folder', 5)
-    assert progress_updates[1] == ('Reading metadata', 20)
+    assert progress_updates[1] == ('Discovered 3 photos from 3 files', 20)
+    assert (
+        'Loading EXIF data, batch 1 of 1 (20 photos per batch)',
+        35,
+    ) in progress_updates
+    assert ('Building photo list, 0 of 3', 35) in progress_updates
     assert progress_updates[-1] == ('Finished loading folder', 100)
+    metadata_snapshot = next(
+        snapshot
+        for snapshot in progress_snapshots
+        if snapshot.current_message
+        == 'Loading EXIF data, batch 1 of 1 (20 photos per batch)'
+    )
+    assert metadata_snapshot.stages[1].count_text() == '1 of 1'
+    assert metadata_snapshot.stages[1].status == 'active'
+    record_snapshot = next(
+        snapshot
+        for snapshot in progress_snapshots
+        if snapshot.current_message == 'Building photo list, 3 of 3'
+    )
+    assert record_snapshot.stages[2].count_text() == '3 of 3'
+    assert record_snapshot.stages[2].status == 'complete'
     assert all('notes.txt' not in photo.files for photo in library.photos)
     assert library.photos[0].capture_at == datetime(
         2024, 5, 1, 10, 0, 0, tzinfo=UTC
@@ -593,6 +621,12 @@ def test_get_photo_and_save_metadata_require_loaded_photo_state(
 def test_detect_scenes_groups_adjacent_similar_photos(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """
+    Verify PhotoLibrary scene detection emits counted progress snapshots.
+
+    This covers the library-to-analysis callback bridge used by the UI overlay
+    while still checking that scene ids are assigned to the loaded records.
+    """
     create_jpeg(tmp_path / 'IMG_4000.JPG', 'white')
     create_jpeg(tmp_path / 'IMG_4001.JPG', 'white')
     create_jpeg(tmp_path / 'IMG_4002.JPG', 'black')
@@ -629,11 +663,13 @@ def test_detect_scenes_groups_adjacent_similar_photos(
     )
 
     progress_updates = []
+    progress_snapshots = []
     scenes = library.detect_scenes(
         progress_callback=lambda message, progress: progress_updates.append((
             message,
             progress,
-        ))
+        )),
+        progress_snapshot_callback=progress_snapshots.append,
     )
 
     assert [scene.photo_ids for scene in scenes] == [
@@ -643,6 +679,10 @@ def test_detect_scenes_groups_adjacent_similar_photos(
     assert library.photos[0].scene_id == library.photos[1].scene_id
     assert library.photos[2].scene_id != library.photos[1].scene_id
     assert progress_updates[-1] == ('done', 100)
+    assert any(
+        snapshot.current_message == 'Grouping scenes, 3 of 3'
+        for snapshot in progress_snapshots
+    )
 
 
 def test_detect_scenes_handles_empty_and_single_photo_libraries(
@@ -659,7 +699,7 @@ def test_detect_scenes_handles_empty_and_single_photo_libraries(
 
     assert empty_scenes == []
     assert empty_library.scene_detection_done is True
-    assert empty_progress[0] == ('preparing files', 5)
+    assert empty_progress[0] == ('Preparing files', 5)
     assert empty_progress[-1] == ('done', 100)
 
     create_jpeg(tmp_path / 'IMG_7300.JPG', 'white')

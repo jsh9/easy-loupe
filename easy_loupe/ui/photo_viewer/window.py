@@ -35,6 +35,7 @@ from easy_loupe.core.recursive_loading import (
     normalize_load_recursively,
     resolve_relative_path,
 )
+from easy_loupe.progress import ProgressSnapshot
 from easy_loupe.ui.defaults import DEFAULT_SHOW_AF_POINT
 from easy_loupe.ui.folder_access import FolderAccessManager
 from easy_loupe.ui.identity import APP_NAME, easy_loupe_icon
@@ -134,6 +135,18 @@ class FolderHydrationSignalBridge(QObject):
         )
 
     @Slot(int, object, object)
+    def handle_progress_snapshot(
+            self,
+            request_id: int,
+            expected_folder: Path,
+            snapshot: object,
+    ) -> None:
+        """Forward worker structured progress to the GUI thread."""
+        self._window._handle_folder_hydration_progress_snapshot(  # noqa: SLF001
+            request_id, expected_folder, snapshot
+        )
+
+    @Slot(int, object, object)
     def handle_finished(
             self,
             request_id: int,
@@ -175,6 +188,7 @@ class PhotoViewerWindow(QMainWindow):
         self._hydrated_library: PhotoLibrary | None = None
         self._folder_hydration_message = ''
         self._folder_hydration_progress = 0
+        self._folder_hydration_snapshot: ProgressSnapshot | None = None
         self._folder_hydration_request_id = 0
         self._folder_hydration_folder: Path | None = None
         self._folder_hydration_error: str | None = None
@@ -263,6 +277,7 @@ class PhotoViewerWindow(QMainWindow):
         self.progress_panel = overlay.panel
         self.overlay_message_label = overlay.message_label
         self.overlay_progress_bar = overlay.progress_bar
+        self.progress_stage_list = overlay.stage_list
 
     def _build_transient_message_overlay(self) -> None:
         overlay = build_transient_message_overlay(
@@ -285,6 +300,19 @@ class PhotoViewerWindow(QMainWindow):
                 color: {PHOTO_VIEWER_OVERLAY_TEXT};
                 font-size: {PHOTO_VIEWER_PROGRESS_FONT_SIZE_PX}px;
                 font-weight: {PHOTO_VIEWER_OVERLAY_FONT_WEIGHT};
+            }}
+            """
+        )
+        self.progress_stage_list.setStyleSheet(
+            f"""
+            QLabel#progressStageLabel {{
+                color: {PHOTO_VIEWER_OVERLAY_TEXT};
+                font-size: 13px;
+                font-weight: {PHOTO_VIEWER_OVERLAY_FONT_WEIGHT};
+            }}
+            QLabel#progressStageCount {{
+                color: {PHOTO_VIEWER_OVERLAY_TEXT};
+                font-size: 13px;
             }}
             """
         )
@@ -617,10 +645,14 @@ class PhotoViewerWindow(QMainWindow):
             # culling. Once a hydrated library exists, handoff may proceed even
             # before QThread.finished has cleared the thread slot.
             self._pending_culling_handoff = True
-            self._show_progress(
-                self._folder_hydration_message or 'Loading folder...',
-                self._folder_hydration_progress,
-            )
+            if self._folder_hydration_snapshot is not None:
+                self._show_progress_snapshot(self._folder_hydration_snapshot)
+            else:
+                self._show_progress(
+                    self._folder_hydration_message or 'Loading folder...',
+                    self._folder_hydration_progress,
+                )
+
             return
 
         if self._hydrated_library is None:
@@ -918,6 +950,7 @@ class PhotoViewerWindow(QMainWindow):
         self._folder_hydration_error = None
         self._folder_hydration_message = 'Loading folder...'
         self._folder_hydration_progress = 0
+        self._folder_hydration_snapshot = None
         self._folder_hydration_thread = QThread(self)
         self._folder_hydration_worker = FolderHydrationWorker(
             request_id,
@@ -936,6 +969,9 @@ class PhotoViewerWindow(QMainWindow):
             self._folder_hydration_worker.run
         )
         self._folder_hydration_worker.progress.connect(bridge.handle_progress)
+        self._folder_hydration_worker.progress_snapshot.connect(
+            bridge.handle_progress_snapshot
+        )
         self._folder_hydration_worker.finished.connect(bridge.handle_finished)
         self._folder_hydration_worker.failed.connect(bridge.handle_failed)
         self._folder_hydration_worker.finished.connect(
@@ -1020,8 +1056,37 @@ class PhotoViewerWindow(QMainWindow):
 
         self._folder_hydration_message = message
         self._folder_hydration_progress = progress
-        if self._pending_culling_handoff and self.progress_overlay.isVisible():
+        if (
+            self._pending_culling_handoff
+            and self.progress_overlay.isVisible()
+            and self._folder_hydration_snapshot is None
+        ):
+            # Hydration emits legacy and structured progress. Once a snapshot
+            # exists, keep the stage rows active so a later scalar update does
+            # not replace them during a blocking handoff wait.
             self._show_progress(message, progress)
+
+    @Slot(int, object, object)
+    def _handle_folder_hydration_progress_snapshot(
+            self,
+            request_id: int,
+            expected_folder: Path,
+            snapshot: object,
+    ) -> None:
+        if not self._folder_hydration_request_matches(
+            request_id, expected_folder
+        ):
+            return
+
+        if not isinstance(snapshot, ProgressSnapshot):
+            return
+
+        # Store snapshots silently: background hydration should not interrupt
+        # standalone viewing, but a pending culling handoff needs the latest
+        # stage rows immediately while it waits.
+        self._folder_hydration_snapshot = snapshot
+        if self._pending_culling_handoff and self.progress_overlay.isVisible():
+            self._show_progress_snapshot(snapshot)
 
     @Slot(int, object, object)
     def _handle_folder_hydration_finished(
@@ -1099,6 +1164,7 @@ class PhotoViewerWindow(QMainWindow):
                 self._folder_hydration_folder = None
                 self._folder_hydration_message = ''
                 self._folder_hydration_progress = 0
+                self._folder_hydration_snapshot = None
 
         self._finish_deferred_close_if_ready()
 
@@ -1129,6 +1195,7 @@ class PhotoViewerWindow(QMainWindow):
         self._folder_hydration_request_id += 1
         self._folder_hydration_folder = None
         self._folder_hydration_error = None
+        self._folder_hydration_snapshot = None
         self._hydrated_library = None
         self._background_thread_slots.stop_all_for_replacement()
         if self._folder_hydration_thread is None:
@@ -1152,6 +1219,7 @@ class PhotoViewerWindow(QMainWindow):
         self._background_thread_slots.request_shutdown_all()
         self._folder_hydration_message = ''
         self._folder_hydration_progress = 0
+        self._folder_hydration_snapshot = None
 
     def _photo_viewer_background_tasks_active(self) -> bool:
         return self._background_thread_slots.any_active()
@@ -1233,13 +1301,28 @@ class PhotoViewerWindow(QMainWindow):
         self.progress_overlay.show()
         self.progress_overlay.raise_()
         self.overlay_message_label.setText(message)
+        self.progress_stage_list.clear_stages()
         self.overlay_progress_bar.setRange(0, max_value)
+        self.overlay_progress_bar.setVisible(True)
         self.overlay_progress_bar.setValue(max(0, min(max_value, progress)))
+        self._update_progress_overlay_geometry()
+
+    def _show_progress_snapshot(self, snapshot: ProgressSnapshot) -> None:
+        self.exif_overlay.hide()
+        self.progress_overlay.show()
+        self.progress_overlay.raise_()
+        self.overlay_message_label.setText(snapshot.current_message)
+        # Stage rows include their own bars, so hide the legacy aggregate bar
+        # to avoid showing two competing progress scales for one workflow.
+        self.overlay_progress_bar.setVisible(False)
+        self.progress_stage_list.update_snapshot(snapshot)
         self._update_progress_overlay_geometry()
 
     def _hide_progress(self) -> None:
         self.progress_overlay.hide()
+        self.overlay_progress_bar.setVisible(True)
         self.overlay_progress_bar.setRange(0, 100)
+        self.progress_stage_list.clear_stages()
         self._refresh_info_overlay()
 
     def _show_transient_message(

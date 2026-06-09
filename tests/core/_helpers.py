@@ -19,7 +19,9 @@ def stub_read_exif(
         exif_map: dict[str, dict[str, object]],
 ) -> None:
     monkeypatch.setattr(
-        core_exif_module, 'read_exif_metadata', lambda _files: exif_map
+        core_exif_module,
+        'read_exif_metadata',
+        lambda _files, **_kwargs: exif_map,
     )
 
 

@@ -23,6 +23,11 @@ from easy_loupe.operations.common import (
     sidecar_path_for_photo,
     undo_operation,
 )
+from easy_loupe.progress import (
+    ProgressReporter,
+    ProgressStageDefinition,
+    StructuredProgressCallback,
+)
 
 if TYPE_CHECKING:
     from easy_loupe.core.records import PhotoRecord
@@ -50,6 +55,8 @@ def organize_photos(
         photos: list[PhotoRecord],
         options: OrganizeFilesOptions,
         progress_callback: ProgressCallback | None = None,
+        *,
+        progress_snapshot_callback: StructuredProgressCallback | None = None,
 ) -> OperationSummary:
     """Copy or move the selected photo sets into tag-named folders."""
     source_folder = current_folder.expanduser().resolve()
@@ -60,8 +67,16 @@ def organize_photos(
     if output_parent.exists() and not output_parent.is_dir():
         raise OperationError(output_parent, 'Output parent is not a directory')
 
-    if progress_callback:
-        progress_callback('Preparing photo organization', 5)
+    reporter = ProgressReporter(
+        'Organizing photos',
+        (
+            ProgressStageDefinition('prepare', 'Preparing photo organization'),
+            ProgressStageDefinition('organize', 'Organizing photo files'),
+        ),
+        progress_callback=progress_callback,
+        snapshot_callback=progress_snapshot_callback,
+    )
+    reporter.start_stage('prepare', overall_progress=5)
 
     jobs = _build_jobs(source_folder, photos, options)
     if options.conflict_policy == 'fail':
@@ -72,7 +87,7 @@ def organize_photos(
     moved_files = 0
     skipped_photos = 0
     skipped_paths: list[str] = []
-    total_jobs = max(len(jobs), 1)
+    total_jobs = len(jobs)
     try:
         for index, job in enumerate(jobs, start=1):
             conflicts = [
@@ -108,15 +123,19 @@ def organize_photos(
                             )
                         )
 
-            if progress_callback:
-                progress = 5 + int((index / total_jobs) * 94)
-                progress_callback('Organizing photo files', min(progress, 99))
+            progress = 5 + int((index / max(total_jobs, 1)) * 94)
+            reporter.update_stage(
+                'organize',
+                current=index,
+                total=total_jobs,
+                overall_progress=min(progress, 99),
+                complete=index == total_jobs,
+            )
     except Exception:
         undo_operation(undo_plan)
         raise
 
-    if progress_callback:
-        progress_callback('Photo organization complete', 100)
+    reporter.finish('Photo organization complete', 100)
 
     return OperationSummary(
         processed_photos=len(jobs),

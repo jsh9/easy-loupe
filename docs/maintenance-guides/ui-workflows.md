@@ -62,6 +62,23 @@ Major logic:
   populates the left strip, browse grid, and scene strip, displays the current
   photo, refreshes labels/selection/overlays, and restores keyboard focus to
   the active navigation list after the UI becomes interactive.
+- Folder loading, standalone hydration handoff waits, scene detection,
+  organizer/XMP work, and undo use structured progress snapshots rendered as
+  stage rows with per-loop counts such as `4 of 37`. Preserve the legacy
+  `(message, percent)` callbacks for non-UI callers and tests when changing
+  progress reporting. Item counts represent completed rows/cache attempts, so
+  preview-backed stages must advance only after the relevant preview work
+  returns. Worker workflows prefer structured snapshots after one has been
+  emitted; legacy scalar progress is a fallback only for producers that never
+  emit snapshots. Generic operation and scene workers accept legacy
+  progress-only callables as well as structured progress producers. Zero-total
+  stages render as status-only rows without per-stage bars; active stages with
+  unknown totals still show an indeterminate bar.
+- Folder-load scanning reports discovered grouped-photo and supported-file
+  counts after discovery finishes. Do not add fake scan item counts; the total
+  is not known until the filesystem walk is done. The EXIF row counts ExifTool
+  batches, shows the adaptive batch size in the row label, and keeps the
+  current batch count beside that row.
 - In normal non-scene view mode after a successful load, the left thumbnail
   strip should be ready to move on the first `Down` keypress.
 - Photos default to sorting by EXIF capture timestamp when available, then by
@@ -378,6 +395,11 @@ close remains deferred.
   is active.
 - If scene detection changes, test grouping behavior, not just helper
   functions, and preserve ordering assumptions based on capture time.
+- If progress reporting changes, verify both legacy progress tuples and the
+  structured stage-row overlay for folder loading, standalone hydration
+  handoff, scene detection, organizer/XMP work, and undo. Worker workflows must
+  connect legacy scalar progress as a fallback, but paired scalar updates must
+  not clear structured stage rows after a snapshot has been emitted.
 - If `MainWindow` selection/display logic changes, verify which preview kind is
   requested and verify action shortcuts plus enable/disable states where
   relevant.

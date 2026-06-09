@@ -3,8 +3,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication
 
 import easy_loupe.ui.viewers.shell as shell_module
+from easy_loupe.progress import ProgressStageSnapshot
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -36,6 +38,45 @@ def test_build_viewer_shortcuts_wires_common_zoom_and_pan_controls() -> None:
 
     assert zoom_calls == [0.8, 1.25, 1.25]
     assert pan_calls == [(0, -1), (-1, 0), (0, 1), (1, 0)]
+
+
+def test_progress_stage_row_hides_zero_total_but_keeps_unknown_indeterminate() -> (
+    None
+):
+    """
+    Verify empty stages render as status-only rows without losing spinners.
+
+    Zero-work stages should not show fake empty bars, while active unknown
+    totals still need an indeterminate bar for long-running uncounted work.
+    """
+    app = QApplication.instance() or QApplication([])
+    row = shell_module.ProgressStageRow(
+        ProgressStageSnapshot(
+            'empty', 'No work', current=0, total=0, status='complete'
+        )
+    )
+    row.show()
+    app.processEvents()
+
+    assert row.count_label.isHidden() is True
+    assert row.progress_bar.isHidden() is True
+
+    row.update_stage(
+        ProgressStageSnapshot(
+            'unknown',
+            'Scanning folder',
+            current=None,
+            total=None,
+            status='active',
+        )
+    )
+    app.processEvents()
+
+    assert row.progress_bar.isVisible() is True
+    assert row.progress_bar.minimum() == 0
+    assert row.progress_bar.maximum() == 0
+
+    row.close()
 
 
 def test_resolve_widget_screen_prefers_window_handle_screen(

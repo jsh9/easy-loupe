@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
 )
 
+from easy_loupe.core.folder_loading import FOLDER_LOAD_PROGRESS_STAGES
 from easy_loupe.operations.common import (
     OperationSummary,
     UndoPlan,
@@ -24,6 +25,12 @@ from easy_loupe.operations.common import (
 )
 from easy_loupe.operations.export import organize_photos
 from easy_loupe.operations.xmp import write_xmp_sidecars
+from easy_loupe.progress import (
+    ProgressReporter,
+    ProgressSnapshot,
+    ProgressStageDefinition,
+    StructuredProgressCallback,
+)
 from easy_loupe.ui.main_window.build import (
     MIN_SCENE_MERGE_PHOTO_COUNT,
     TRANSIENT_MESSAGE_TIMEOUT_MS,
@@ -45,6 +52,11 @@ if TYPE_CHECKING:
     from easy_loupe.ui.main_window.window import MainWindow
 
 ProgressCallback = Callable[[str, int], None]
+LOAD_WORKFLOW_PROGRESS_STAGES = (
+    *FOLDER_LOAD_PROGRESS_STAGES,
+    ProgressStageDefinition('thumbnails', 'Preparing thumbnails'),
+    ProgressStageDefinition('browse', 'Preparing browse grid'),
+)
 
 
 @dataclass(frozen=True)
@@ -88,13 +100,14 @@ class MainWindowWorkflowMixin:
         if not folder:
             return
 
+        reporter = self._folder_load_progress_reporter()
         try:
-            self._show_progress('Scanning folder', 0)
+            reporter.start_stage(
+                'scan', message='Scanning folder', overall_progress=0
+            )
             self.open_button.setEnabled(False)
             self.detect_button.setEnabled(False)
-            self.library.load_folder(
-                Path(folder), progress_callback=self._handle_load_progress
-            )
+            self.library.load_folder(Path(folder), progress_reporter=reporter)
         except Exception as exc:  # noqa: BLE001 - surface unexpected load errors in the UI
             self._hide_progress()
             self.open_button.setEnabled(True)
@@ -102,7 +115,9 @@ class MainWindowWorkflowMixin:
             QMessageBox.critical(self, 'Failed to Open Folder', str(exc))
             return
 
-        self._rebuild_loaded_views(show_progress=True)
+        self._rebuild_loaded_views(
+            show_progress=True, progress_reporter=reporter
+        )
         self._clear_metadata_history()
         self._hide_progress()
         self.open_button.setEnabled(True)
@@ -197,7 +212,12 @@ class MainWindowWorkflowMixin:
         self._scene_worker = SceneDetectionWorker(self.library)
         self._scene_worker.moveToThread(self._scene_thread)
         self._scene_thread.started.connect(self._scene_worker.run)
+        # Structured reporters emit both signals; legacy-only workers still
+        # need scalar progress so overlays are not stuck at "Preparing".
         self._scene_worker.progress.connect(self._handle_scene_progress)
+        self._scene_worker.progress_snapshot.connect(
+            self._handle_scene_progress_snapshot
+        )
         self._scene_worker.finished.connect(self._handle_scene_finished)
         self._scene_worker.failed.connect(self._handle_scene_failed)
         self._scene_worker.finished.connect(self._scene_thread.quit)
@@ -237,15 +257,27 @@ class MainWindowWorkflowMixin:
         self._organizer_request = request
         self._show_progress('Preparing organizer workflow...', 0)
         self._operation_thread = QThread(self)
-        self._operation_worker = OperationWorker(
-            lambda progress_callback: self._run_organizer_request(
-                request, progress_callback
+
+        def run_operation(
+                progress_callback: ProgressCallback,
+                progress_snapshot_callback: StructuredProgressCallback,
+        ) -> object:
+            return self._run_organizer_request(
+                request,
+                progress_callback,
+                progress_snapshot_callback,
             )
-        )
+
+        self._operation_worker = OperationWorker(run_operation)
         self._operation_worker.moveToThread(self._operation_thread)
         self._operation_thread.started.connect(self._operation_worker.run)
+        # Keep scalar progress connected for legacy-only operation callables;
+        # structured snapshots replace it when richer stage data is available.
         self._operation_worker.progress.connect(
             self._handle_operation_progress
+        )
+        self._operation_worker.progress_snapshot.connect(
+            self._handle_operation_progress_snapshot
         )
         self._operation_worker.finished.connect(
             self._handle_operation_finished
@@ -275,6 +307,9 @@ class MainWindowWorkflowMixin:
             self: MainWindow,
             request: OrganizerDialogResult,
             progress_callback: ProgressCallback,
+            progress_snapshot_callback: StructuredProgressCallback | None = (
+                None
+            ),
     ) -> OperationSummary:
         current_folder = self.library.current_folder
         if current_folder is None:
@@ -288,6 +323,7 @@ class MainWindowWorkflowMixin:
                 photos,
                 request.organize_options,
                 progress_callback,
+                progress_snapshot_callback=progress_snapshot_callback,
             )
 
         assert request.xmp_options is not None
@@ -296,6 +332,7 @@ class MainWindowWorkflowMixin:
             photos,
             request.xmp_options,
             progress_callback,
+            progress_snapshot_callback=progress_snapshot_callback,
         )
 
     def _start_undo_operation(self: MainWindow, undo_plan: UndoPlan) -> None:
@@ -305,15 +342,27 @@ class MainWindowWorkflowMixin:
         self._operation_kind = 'undo'
         self._show_progress('Preparing undo...', 0)
         self._operation_thread = QThread(self)
-        self._operation_worker = OperationWorker(
-            lambda progress_callback: undo_operation(
-                undo_plan, progress_callback
+
+        def run_undo(
+                progress_callback: ProgressCallback,
+                progress_snapshot_callback: StructuredProgressCallback,
+        ) -> None:
+            undo_operation(
+                undo_plan,
+                progress_callback,
+                progress_snapshot_callback=progress_snapshot_callback,
             )
-        )
+
+        self._operation_worker = OperationWorker(run_undo)
         self._operation_worker.moveToThread(self._operation_thread)
         self._operation_thread.started.connect(self._operation_worker.run)
+        # Keep scalar progress connected for legacy-only operation callables;
+        # structured snapshots replace it when richer stage data is available.
         self._operation_worker.progress.connect(
             self._handle_operation_progress
+        )
+        self._operation_worker.progress_snapshot.connect(
+            self._handle_operation_progress_snapshot
         )
         self._operation_worker.finished.connect(
             self._handle_operation_finished
@@ -346,6 +395,14 @@ class MainWindowWorkflowMixin:
             return
 
         self._show_progress(message, progress)
+
+    def _handle_scene_progress_snapshot(
+            self: MainWindow, snapshot: ProgressSnapshot
+    ) -> None:
+        if self._closing:
+            return
+
+        self._show_progress_snapshot(snapshot)
 
     def _handle_scene_finished(self: MainWindow) -> None:
         if self._closing:
@@ -406,6 +463,14 @@ class MainWindowWorkflowMixin:
             return
 
         self._show_progress(message, progress)
+
+    def _handle_operation_progress_snapshot(
+            self: MainWindow, snapshot: ProgressSnapshot
+    ) -> None:
+        if self._closing:
+            return
+
+        self._show_progress_snapshot(snapshot)
 
     def _handle_operation_finished(self: MainWindow, summary: object) -> None:
         if self._closing:
@@ -564,10 +629,11 @@ class MainWindowWorkflowMixin:
         if current_folder is None:
             return
 
-        self.library.load_folder(
-            current_folder, progress_callback=self._handle_load_progress
+        reporter = self._folder_load_progress_reporter()
+        self.library.load_folder(current_folder, progress_reporter=reporter)
+        self._rebuild_loaded_views(
+            show_progress=True, progress_reporter=reporter
         )
-        self._rebuild_loaded_views(show_progress=True)
         self._clear_metadata_history()
 
     def _reload_current_folder_after_undo(self: MainWindow) -> None:
@@ -575,10 +641,11 @@ class MainWindowWorkflowMixin:
         if current_folder is None:
             return
 
-        self.library.load_folder(
-            current_folder, progress_callback=self._handle_load_progress
+        reporter = self._folder_load_progress_reporter()
+        self.library.load_folder(current_folder, progress_reporter=reporter)
+        self._rebuild_loaded_views(
+            show_progress=True, progress_reporter=reporter
         )
-        self._rebuild_loaded_views(show_progress=True)
         self._clear_metadata_history()
 
     def _reload_current_folder_after_recursive_preference_change(
@@ -613,11 +680,12 @@ class MainWindowWorkflowMixin:
             # after the recursive setting changes the available photo set.
             self._exit_compare_mode(restore_previous=False)
 
-        self._show_progress('Scanning folder', 0)
-        self.library.set_load_recursively(load_recursively)
-        self.library.load_folder(
-            current_folder, progress_callback=self._handle_load_progress
+        reporter = self._folder_load_progress_reporter()
+        reporter.start_stage(
+            'scan', message='Scanning folder', overall_progress=0
         )
+        self.library.set_load_recursively(load_recursively)
+        self.library.load_folder(current_folder, progress_reporter=reporter)
         loaded_photo_ids = {photo.photo_id for photo in self.library.photos}
         # Keep the user's photo when it still exists after the scan-mode
         # change; otherwise fall back to the first loaded photo so the rebuilt
@@ -630,7 +698,9 @@ class MainWindowWorkflowMixin:
             else None
         )
         self._rebuild_loaded_views(
-            show_progress=True, preserve_current_photo=True
+            show_progress=True,
+            preserve_current_photo=True,
+            progress_reporter=reporter,
         )
         self._clear_metadata_history()
         self._hide_progress()
@@ -647,6 +717,7 @@ class MainWindowWorkflowMixin:
             *,
             show_progress: bool = False,
             preserve_current_photo: bool = False,
+            progress_reporter: ProgressReporter | None = None,
     ) -> None:
         if not self.library.photos and self._browse_mode:
             self._set_browse_mode(active=False)
@@ -662,8 +733,14 @@ class MainWindowWorkflowMixin:
             if self.library.photos
             else None
         )
-        self._populate_thumbnail_list(show_progress=show_progress)
-        self._populate_browse_list(show_progress=show_progress)
+        self._populate_thumbnail_list(
+            show_progress=show_progress,
+            progress_reporter=progress_reporter,
+        )
+        self._populate_browse_list(
+            show_progress=show_progress,
+            progress_reporter=progress_reporter,
+        )
         self._populate_scene_list()
         self._display_current_photo()
         self._refresh_ui()
@@ -691,9 +768,27 @@ class MainWindowWorkflowMixin:
         self.progress_overlay.show()
         self.progress_overlay.raise_()
         self.overlay_message_label.setText(message)
+        self.progress_stage_list.clear_stages()
         self.overlay_progress_bar.setVisible(show_bar)
         self.overlay_progress_bar.setRange(0, max_value)
         self.overlay_progress_bar.setValue(max(0, min(max_value, progress)))
+        self._update_progress_overlay_geometry()
+        self._refresh_info_overlay()
+        QApplication.processEvents()
+
+    def _show_progress_snapshot(
+            self: MainWindow, snapshot: ProgressSnapshot
+    ) -> None:
+        """Show a structured, multi-stage progress snapshot."""
+        self._set_interaction_enabled(enabled=False)
+        self._busy = True
+        self.progress_overlay.show()
+        self.progress_overlay.raise_()
+        self.overlay_message_label.setText(snapshot.current_message)
+        # Stage rows include their own bars, so hide the legacy aggregate bar
+        # to avoid showing two competing progress scales for one workflow.
+        self.overlay_progress_bar.setVisible(False)
+        self.progress_stage_list.update_snapshot(snapshot)
         self._update_progress_overlay_geometry()
         self._refresh_info_overlay()
         QApplication.processEvents()
@@ -704,6 +799,7 @@ class MainWindowWorkflowMixin:
         self.overlay_progress_bar.setRange(0, 100)
         self.overlay_progress_bar.setValue(0)
         self.overlay_message_label.setText('')
+        self.progress_stage_list.clear_stages()
         self._busy = False
         self._set_interaction_enabled(enabled=True)
         self._refresh_info_overlay()
@@ -712,6 +808,19 @@ class MainWindowWorkflowMixin:
             self: MainWindow, message: str, progress: int
     ) -> None:
         self._show_progress(message, progress)
+
+    def _handle_load_progress_snapshot(
+            self: MainWindow, snapshot: ProgressSnapshot
+    ) -> None:
+        self._show_progress_snapshot(snapshot)
+
+    def _folder_load_progress_reporter(self: MainWindow) -> ProgressReporter:
+        """Return a reporter for folder loading plus list preparation."""
+        return ProgressReporter(
+            'Loading folder',
+            LOAD_WORKFLOW_PROGRESS_STAGES,
+            snapshot_callback=self._handle_load_progress_snapshot,
+        )
 
     def _set_rating(self: MainWindow, rating: int | None) -> None:
         if hasattr(self, '_apply_metadata_to_selection'):

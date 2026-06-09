@@ -328,6 +328,7 @@ class MainWindowBuildMixin:
         self.progress_panel = overlay.panel
         self.overlay_message_label = overlay.message_label
         self.overlay_progress_bar = overlay.progress_bar
+        self.progress_stage_list = overlay.stage_list
 
     def _build_transient_message_overlay(self: MainWindow) -> None:
         overlay = build_transient_message_overlay(

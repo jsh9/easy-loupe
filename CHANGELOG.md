@@ -2,6 +2,34 @@
 
 ## [Unreleased]
 
+- Changed
+
+  - Long-running progress overlays now show granular counted stages for folder
+    loading, hydration, scene detection, organization, XMP writing, and undo
+    workflows.
+  - Folder metadata loading now sends one primary ExifTool source per grouped
+    photo, falls back to companion previews only when needed, and reports
+    explicit EXIF batch counts in the progress overlay.
+
+- Fixed
+
+  - Folder-loading EXIF reader injection remains compatible with one-argument
+    readers, and progress counts now advance after preview-backed work
+    completes.
+  - Scene and operation progress overlays no longer flicker between scalar
+    progress bars and structured stage rows.
+  - Folder-load EXIF progress now shows the photos-per-batch detail in the
+    metadata row label beside the batch progress bar.
+  - Failed ExifTool batches now split and retry smaller chunks so one bad file
+    no longer drops EXIF metadata for the rest of the configured batch.
+  - Stopped ExifTool reads no longer report skipped batches as completed, and
+    later progress stages preserve the last completed EXIF batch count.
+  - Scene and operation workers remain compatible with legacy progress-only
+    callables while still supporting structured progress snapshots.
+  - Empty progress stages now render as complete status-only rows instead of
+    showing incomplete `0 of 0` progress bars.
+  - Empty undo plans now emit completed zero-work progress before cleanup.
+
 ## [1.1.3] - 2026-06-07
 
 - Added

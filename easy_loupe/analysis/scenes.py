@@ -17,6 +17,11 @@ from easy_loupe.core.records import (
     PhotoRecord,
     SceneGroup,
 )
+from easy_loupe.progress import (
+    ProgressReporter,
+    ProgressStageDefinition,
+    StructuredProgressCallback,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -39,6 +44,7 @@ def detect_scenes(
         get_preview_path_fn: Callable[[str, str], Path],
         progress_callback: Callable[[str, int], None] | None = None,
         *,
+        progress_snapshot_callback: StructuredProgressCallback | None = None,
         analysis_features_fn: Callable[[PhotoRecord], tuple[Any, list[float]]]
         | None = None,
 ) -> list[SceneGroup]:
@@ -50,18 +56,31 @@ def detect_scenes(
         ) -> tuple[Any, list[float]]:
             return _analysis_features(photo, get_preview_path_fn)
 
-    if progress_callback:
-        progress_callback('preparing files', 5)
+    reporter = ProgressReporter(
+        'Detecting scenes',
+        (
+            ProgressStageDefinition('features', 'Extracting preview features'),
+            ProgressStageDefinition('grouping', 'Grouping scenes'),
+        ),
+        progress_callback=progress_callback,
+        snapshot_callback=progress_snapshot_callback,
+    )
+    reporter.start_stage(
+        'features', message='Preparing files', overall_progress=5
+    )
 
     features: dict[str, tuple[Any, list[float]]] = {}
-    total_photos = max(len(photos), 1)
+    total_photos = len(photos)
     for index, photo in enumerate(photos, start=1):
         features[photo.photo_id] = analysis_features_fn(photo)
-        if progress_callback:
-            progress = 5 + int((index / total_photos) * 70)
-            progress_callback(
-                'extracting previews/features', min(progress, 75)
-            )
+        progress = 5 + int((index / max(total_photos, 1)) * 70)
+        reporter.update_stage(
+            'features',
+            current=index,
+            total=total_photos,
+            overall_progress=min(progress, 75),
+            complete=index == total_photos,
+        )
 
     scene_groups: list[SceneGroup] = []
     current_scene: SceneGroup | None = None
@@ -74,8 +93,13 @@ def detect_scenes(
             )
             photo.scene_id = current_scene.scene_id
             previous_photo = photo
-            if progress_callback:
-                progress_callback('grouping scenes', 80)
+            reporter.update_stage(
+                'grouping',
+                current=index,
+                total=total_photos,
+                overall_progress=80,
+                complete=index == total_photos,
+            )
 
             continue
 
@@ -90,15 +114,19 @@ def detect_scenes(
 
         photo.scene_id = current_scene.scene_id
         previous_photo = photo
-        if progress_callback:
-            progress = 80 + int((index / total_photos) * 19)
-            progress_callback('grouping scenes', min(progress, 99))
+        progress = 80 + int((index / max(total_photos, 1)) * 19)
+        reporter.update_stage(
+            'grouping',
+            current=index,
+            total=total_photos,
+            overall_progress=min(progress, 99),
+            complete=index == total_photos,
+        )
 
     if current_scene is not None:
         scene_groups.append(current_scene)
 
-    if progress_callback:
-        progress_callback('done', 100)
+    reporter.finish('done', 100)
 
     return scene_groups
 

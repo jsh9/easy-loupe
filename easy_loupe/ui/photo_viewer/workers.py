@@ -8,7 +8,10 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QObject, Signal
 
 import easy_loupe.core.exif as exif_module
-from easy_loupe.core.folder_loading import build_photo_exif_display
+from easy_loupe.core.folder_loading import (
+    FOLDER_LOAD_PROGRESS_STAGES,
+    build_photo_exif_display,
+)
 from easy_loupe.core.photo_library import PhotoLibrary
 from easy_loupe.core.records import (
     HEIF_EXTENSIONS,
@@ -18,6 +21,7 @@ from easy_loupe.core.records import (
 from easy_loupe.core.recursive_loading import (
     exif_metadata_for_path,
 )
+from easy_loupe.progress import ProgressReporter, ProgressStageDefinition
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -166,6 +170,7 @@ class FolderHydrationWorker(QObject):
     """Load a full folder library and prewarm browse/viewer previews."""
 
     progress = Signal(int, object, str, int)
+    progress_snapshot = Signal(int, object, object)
     finished = Signal(int, object, object)
     failed = Signal(int, object, str)
 
@@ -196,6 +201,10 @@ class FolderHydrationWorker(QObject):
         """Emit progress with request context for queued GUI-thread slots."""
         self.progress.emit(self._request_id, self._folder, message, progress)
 
+    def _emit_progress_snapshot(self, snapshot: object) -> None:
+        """Emit structured progress with request context."""
+        self.progress_snapshot.emit(self._request_id, self._folder, snapshot)
+
     def run(self) -> None:
         """Load the folder and warm thumbnail/viewer previews."""
         try:
@@ -205,17 +214,30 @@ class FolderHydrationWorker(QObject):
                 sort_reversed=self._sort_reversed,
                 load_recursively=self._load_recursively,
             )
-            library.load_folder(
-                self._folder, progress_callback=self._emit_progress
+            reporter = ProgressReporter(
+                'Loading folder',
+                (
+                    *FOLDER_LOAD_PROGRESS_STAGES,
+                    ProgressStageDefinition(
+                        'viewer_cache', 'Preparing photo viewer cache'
+                    ),
+                ),
+                progress_callback=self._emit_progress,
+                snapshot_callback=self._emit_progress_snapshot,
             )
+            library.load_folder(self._folder, progress_reporter=reporter)
             photos = library.get_photos()
-            total = max(len(photos), 1)
+            total = len(photos)
+            reporter.update_stage(
+                'viewer_cache',
+                current=0,
+                total=total,
+                overall_progress=100,
+            )
             for index, photo in enumerate(photos, start=1):
                 if self._cancelled:
                     break
 
-                progress = 100 + int((index / total) * 100)
-                self._emit_progress('Preparing photo viewer cache', progress)
                 try:
                     library.get_preview_path(photo.photo_id, 'thumb')
                     if self._cancelled:
@@ -223,7 +245,18 @@ class FolderHydrationWorker(QObject):
 
                     library.get_preview_path(photo.photo_id, 'viewer')
                 except (OSError, RuntimeError, ValueError):
-                    continue
+                    pass
+
+                # Counts reflect completed cache attempts. Canceling between
+                # renders leaves the partial photo uncounted.
+                progress = 100 + int((index / max(total, 1)) * 100)
+                reporter.update_stage(
+                    'viewer_cache',
+                    current=index,
+                    total=total,
+                    overall_progress=progress,
+                    complete=index == total,
+                )
         except Exception as exc:  # noqa: BLE001  # pragma: no cover - thread safety path
             self.failed.emit(self._request_id, self._folder, str(exc))
             return

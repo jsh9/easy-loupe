@@ -10,6 +10,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from easy_loupe.core.recursive_loading import resolve_relative_path
+from easy_loupe.progress import (
+    ProgressReporter,
+    ProgressStageDefinition,
+    StructuredProgressCallback,
+)
 
 if TYPE_CHECKING:
     from easy_loupe.core.records import PhotoRecord
@@ -118,6 +123,8 @@ def backup_existing_file(path: Path, undo_plan: UndoPlan) -> None:
 def undo_operation(
         undo_plan: UndoPlan | None,
         progress_callback: ProgressCallback | None = None,
+        *,
+        progress_snapshot_callback: StructuredProgressCallback | None = None,
 ) -> None:
     """Undo a completed operation by replaying inverse file actions."""
     if undo_plan is None:
@@ -127,13 +134,33 @@ def undo_operation(
         raise RuntimeError('Undo plan has already been consumed')
 
     entries = list(reversed(undo_plan.entries))
-    total_entries = max(len(entries), 1)
+    total_entries = len(entries)
+    reporter = ProgressReporter(
+        'Undoing photo organization',
+        (ProgressStageDefinition('undo', 'Undoing photo organization'),),
+        progress_callback=progress_callback,
+        snapshot_callback=progress_snapshot_callback,
+    )
     try:
+        if total_entries == 0:
+            reporter.update_stage(
+                'undo',
+                current=0,
+                total=0,
+                overall_progress=100,
+                complete=True,
+            )
+
         for index, entry in enumerate(entries, start=1):
             _undo_entry(entry)
-            if progress_callback is not None:
-                progress = int((index / total_entries) * 100)
-                progress_callback('Undoing photo organization', progress)
+            progress = int((index / max(total_entries, 1)) * 100)
+            reporter.update_stage(
+                'undo',
+                current=index,
+                total=total_entries,
+                overall_progress=progress,
+                complete=index == total_entries,
+            )
     finally:
         backup_root = undo_plan.backup_root
         if backup_root is not None and backup_root.exists():

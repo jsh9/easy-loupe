@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Never
+from typing import Any, Never
 
 import pytest
 from PySide6.QtCore import QItemSelectionModel, QPoint, Qt, QThread
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
+from PySide6.QtWidgets import QApplication, QFileDialog, QLabel, QMessageBox
 
 import easy_loupe.ui.main_window.build as build_module
 import easy_loupe.ui.main_window.window as main_window_module
@@ -225,9 +225,12 @@ def test_main_window_choose_folder_cancel_and_failure_paths_restore_ui(
     if load_behavior == 'raise':
 
         def fail_load_folder(
-                _folder: Path, *, progress_callback: object | None = None
+                _folder: Path,
+                *,
+                progress_callback: object | None = None,
+                progress_reporter: object | None = None,
         ) -> Never:
-            del progress_callback
+            del progress_callback, progress_reporter
             raise RuntimeError('boom')
 
         monkeypatch.setattr(window.library, 'load_folder', fail_load_folder)
@@ -1424,6 +1427,205 @@ def test_main_window_progress_overlay_disables_and_restores_interaction(
     del app
 
 
+def test_main_window_progress_snapshot_renders_stage_rows(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify structured progress shows stage rows with workflow count text.
+
+    This protects the blocking overlay from showing the old aggregate bar and
+    protects metadata batch counts from looking like photo totals while other
+    folder-load stages keep the generic item-count wording.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_7420', 'dimgray')],
+    )
+    reporter = window._folder_load_progress_reporter()
+
+    reporter.start_stage('scan', overall_progress=5)
+    reporter.update_stage(
+        'metadata',
+        label='Loading EXIF data (20 photos per batch)',
+        current=1,
+        total=2,
+        overall_progress=25,
+    )
+    app.processEvents()
+
+    metadata_label_texts = {
+        label.text()
+        for label in window.progress_stage_list.findChildren(QLabel)
+    }
+    assert window.progress_overlay.isVisible() is True
+    assert window.overlay_progress_bar.isVisible() is False
+    assert window.progress_stage_list.isVisible() is True
+    assert 'Loading EXIF data (20 photos per batch)' in metadata_label_texts
+    assert 'Batch 1 of 2' in metadata_label_texts
+
+    reporter.update_stage('records', current=4, total=37, overall_progress=50)
+    app.processEvents()
+
+    record_label_texts = {
+        label.text()
+        for label in window.progress_stage_list.findChildren(QLabel)
+    }
+    assert 'Building photo list' in record_label_texts
+    assert '4 of 37' in record_label_texts
+
+    window._hide_progress()
+    assert window.progress_stage_list.isHidden() is True
+
+    window.close()
+    del app
+
+
+def test_main_window_structured_scene_progress_does_not_show_scalar_bar(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify structured scene progress keeps the stage-row overlay visible.
+
+    Scene detection reporters emit legacy tuples for compatibility. The worker
+    route must suppress those paired tuples so scalar progress does not clear
+    the structured rows and flash the old aggregate bar.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_7425', 'dimgray')],
+    )
+
+    class StructuredSceneLibrary:
+        @staticmethod
+        def detect_scenes(
+                *,
+                progress_callback: Any,
+                progress_snapshot_callback: Any = None,
+        ) -> None:
+            reporter = workflows_module.ProgressReporter(
+                'Detecting scenes',
+                (
+                    workflows_module.ProgressStageDefinition(
+                        'features', 'Extracting preview features'
+                    ),
+                ),
+                progress_callback=progress_callback,
+                snapshot_callback=progress_snapshot_callback,
+            )
+            reporter.update_stage(
+                'features',
+                current=1,
+                total=2,
+                overall_progress=50,
+            )
+
+    worker = workflows_module.SceneDetectionWorker(StructuredSceneLibrary())
+    worker.progress.connect(window._handle_scene_progress)
+    worker.progress_snapshot.connect(window._handle_scene_progress_snapshot)
+
+    window._show_progress('Preparing scene detection...', 0)
+    worker.run()
+    app.processEvents()
+
+    label_texts = {
+        label.text()
+        for label in window.progress_stage_list.findChildren(QLabel)
+    }
+    assert window.progress_overlay.isVisible() is True
+    assert window.progress_stage_list.isVisible() is True
+    assert window.overlay_progress_bar.isVisible() is False
+    assert 'Extracting preview features' in label_texts
+    assert '1 of 2' in label_texts
+
+    window.close()
+    del app
+
+
+def test_main_window_list_progress_counts_completed_preview_rows(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify list progress advances only after preview-backed row creation.
+
+    Thumbnail rendering happens inside ``_add_photo_item``. This regression
+    test protects the overlay from reporting ``N of N`` before the final
+    preview load has actually returned.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7430', 'dimgray'),
+            ('IMG_7431', 'darkgray'),
+        ],
+    )
+    snapshots = []
+    reporter = workflows_module.ProgressReporter(
+        'Loading folder',
+        workflows_module.LOAD_WORKFLOW_PROGRESS_STAGES,
+        snapshot_callback=snapshots.append,
+    )
+    original_get_preview_path = window.library.get_preview_path
+    active_stage = {'stage_id': 'thumbnails'}
+    progress_before_preview: list[tuple[str, int | None]] = []
+
+    def latest_stage_current(stage_id: str) -> int | None:
+        stage = next(
+            stage
+            for stage in snapshots[-1].stages
+            if stage.stage_id == stage_id
+        )
+        return stage.current
+
+    def record_get_preview_path(photo_id: str, kind: str) -> Path:
+        if kind == 'thumb':
+            progress_before_preview.append((
+                photo_id,
+                latest_stage_current(active_stage['stage_id']),
+            ))
+
+        return original_get_preview_path(photo_id, kind)
+
+    monkeypatch.setattr(
+        window.library, 'get_preview_path', record_get_preview_path
+    )
+
+    window._populate_thumbnail_list(
+        show_progress=True,
+        scroll_current_item_into_view=False,
+        progress_reporter=reporter,
+    )
+
+    assert progress_before_preview == [('IMG_7430', 0), ('IMG_7431', 1)]
+    thumbnail_stage = next(
+        stage
+        for stage in snapshots[-1].stages
+        if stage.stage_id == 'thumbnails'
+    )
+    assert thumbnail_stage.count_text() == '2 of 2'
+    assert thumbnail_stage.status == 'complete'
+
+    progress_before_preview.clear()
+    active_stage['stage_id'] = 'browse'
+    window._populate_browse_list(
+        show_progress=True,
+        scroll_current_item_into_view=False,
+        progress_reporter=reporter,
+    )
+
+    assert progress_before_preview == [('IMG_7430', 0), ('IMG_7431', 1)]
+    browse_stage = next(
+        stage for stage in snapshots[-1].stages if stage.stage_id == 'browse'
+    )
+    assert browse_stage.count_text() == '2 of 2'
+    assert browse_stage.status == 'complete'
+
+    window.close()
+    del app
+
+
 def test_main_window_handle_scene_failed_and_clear_worker_restore_ui(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2365,6 +2567,49 @@ def test_main_window_open_organizer_dialog_starts_operation_worker(
     assert window._busy is True
     assert window.progress_overlay.isVisible() is True
 
+    window.close()
+    del app
+
+
+def test_main_window_operation_worker_legacy_progress_updates_overlay(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify operation workers still wire scalar progress into the overlay.
+
+    Structured progress is the normal organizer path, but legacy-only worker
+    callables must not leave the UI stuck on the initial preparation message.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_9105', 'dimgray')],
+    )
+    monkeypatch.setattr(QThread, 'start', lambda _thread: None)
+    request = OrganizerDialogResult(
+        mode='reorganize',
+        organize_options=OrganizeFilesOptions(
+            criterion='flag',
+            action='copy',
+            output_parent=tmp_path,
+            include_untagged=False,
+            conflict_policy='fail',
+        ),
+    )
+
+    window._start_organizer_request(request)
+    assert window._operation_worker is not None
+
+    window._operation_worker.progress.emit('Legacy operation progress', 42)
+    app.processEvents()
+
+    assert window.overlay_message_label.text() == 'Legacy operation progress'
+    assert window.overlay_progress_bar.isVisible() is True
+    assert window.overlay_progress_bar.value() == 42
+
+    finished_thread = window._operation_thread
+    finished_worker = window._operation_worker
+    window._clear_operation_worker(finished_thread, finished_worker)
     window.close()
     del app
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import operator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -28,6 +29,7 @@ from easy_loupe.core.recursive_loading import (
     relative_photo_id,
     relative_posix_path,
 )
+from easy_loupe.progress import ProgressReporter, ProgressStageDefinition
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -42,6 +44,18 @@ PHOTO_SORT_MODES = frozenset({
     PHOTO_SORT_MODE_CAPTURE_TIME,
     PHOTO_SORT_MODE_FILENAME,
 })
+FOLDER_LOAD_PROGRESS_STAGES = (
+    ProgressStageDefinition('scan', 'Scanning folder'),
+    ProgressStageDefinition('metadata', 'Loading EXIF data'),
+    ProgressStageDefinition('records', 'Building photo list'),
+)
+METADATA_PROGRESS_START = 20
+METADATA_PROGRESS_END = 35
+SMALL_FOLDER_METADATA_PHOTO_LIMIT = 100
+LARGE_FOLDER_METADATA_PHOTO_MINIMUM = 500
+SMALL_FOLDER_METADATA_BATCH_SIZE = 20
+MEDIUM_FOLDER_METADATA_BATCH_SIZE = 50
+LARGE_FOLDER_METADATA_BATCH_SIZE = 100
 
 
 @dataclass(slots=True)
@@ -67,18 +81,37 @@ class PhotoExifDisplay:
     exif_display: dict[str, str]
 
 
+@dataclass(frozen=True, slots=True)
+class PhotoGroupSources:
+    """Source choices shared by metadata reading and record construction."""
+
+    sorted_group_files: list[Path]
+    jpeg_files: list[Path]
+    heif_files: list[Path]
+    raw_files: list[Path]
+    preview_source: Path
+    metadata_source: Path
+
+
+@dataclass(frozen=True, slots=True)
+class _ExifMetadataReadResult:
+    """EXIF metadata plus whether the reader explicitly supports batches."""
+
+    metadata: dict[str, dict[str, Any]]
+    supports_batch_progress: bool
+
+
 def load_folder_state(
         folder: Path,
         *,
         metadata_entries: dict[str, Any] | None = None,
         folder_label: str | None = None,
         progress_callback: Callable[[str, int], None] | None = None,
+        progress_reporter: ProgressReporter | None = None,
         sort_mode: str = DEFAULT_PHOTO_SORT_MODE,
         sort_reversed: bool = DEFAULT_PHOTO_SORT_REVERSED,
         load_recursively: bool = DEFAULT_LOAD_RECURSIVELY,
-        read_exif_metadata_fn: Callable[
-            [list[Path]], dict[str, dict[str, Any]]
-        ],
+        read_exif_metadata_fn: Callable[..., dict[str, dict[str, Any]]],
 ) -> LoadedFolderState:
     """
     Scan a folder, build photo records, and load saved folder state.
@@ -93,8 +126,12 @@ def load_folder_state(
     if not folder.is_dir():
         raise FileNotFoundError(f'{folder} is not a directory')
 
-    if progress_callback:
-        progress_callback('Scanning folder', 5)
+    reporter = progress_reporter or ProgressReporter(
+        'Loading folder',
+        FOLDER_LOAD_PROGRESS_STAGES,
+        progress_callback=progress_callback,
+    )
+    reporter.start_stage('scan', overall_progress=5)
 
     files = discover_photo_files(
         folder,
@@ -111,23 +148,51 @@ def load_folder_state(
             path
         )
 
-    if progress_callback:
-        progress_callback('Reading metadata', 20)
+    sorted_groups = sorted(groups.items(), key=operator.itemgetter(0))
+    photo_sources = [
+        _select_photo_group_sources(grouped_files)
+        for _, grouped_files in sorted_groups
+    ]
+    total_groups = len(sorted_groups)
+    reporter.complete_stage(
+        'scan',
+        message=(f'Discovered {total_groups} photos from {len(files)} files'),
+        overall_progress=METADATA_PROGRESS_START,
+    )
 
     if metadata_entries is None:
         metadata_entries = metadata_module.read_folder_metadata(folder)
 
-    exif_map = read_exif_metadata_fn(files)
+    exif_map = _read_group_exif_metadata(
+        read_exif_metadata_fn,
+        photo_sources,
+        reporter,
+    )
+    exact_exif_lookup = _uses_exact_exif_lookup(exif_map, photo_sources)
 
     records: list[PhotoRecord] = []
-    sorted_groups = sorted(groups.items(), key=operator.itemgetter(0))
-    total_groups = max(len(sorted_groups), 1)
+    reporter.update_stage(
+        'records',
+        current=0,
+        total=total_groups,
+        overall_progress=METADATA_PROGRESS_END,
+    )
     for index, (_, grouped_files) in enumerate(sorted_groups, start=1):
-        photo = _build_photo_record(folder, grouped_files, exif_map)
+        photo = _build_photo_record(
+            folder,
+            grouped_files,
+            exif_map,
+            exact_exif_lookup=exact_exif_lookup,
+        )
         records.append(photo)
-        if progress_callback:
-            progress = 35 + int((index / total_groups) * 55)
-            progress_callback('Building photo list', min(progress, 90))
+        progress = 35 + int((index / max(total_groups, 1)) * 55)
+        reporter.update_stage(
+            'records',
+            current=index,
+            total=total_groups,
+            overall_progress=min(progress, 90),
+            complete=index == total_groups,
+        )
 
     # Apply metadata after records exist so legacy-key repair can be checked
     # against the concrete IDs discovered in this folder.
@@ -155,6 +220,406 @@ def load_folder_state(
         scene_source=scene_source,
         scene_detection_done=bool(scenes),
     )
+
+
+def metadata_batch_size_for_photo_count(photo_count: int) -> int:
+    """Return the ExifTool batch size for a grouped photo count."""
+    if photo_count <= SMALL_FOLDER_METADATA_PHOTO_LIMIT:
+        return SMALL_FOLDER_METADATA_BATCH_SIZE
+
+    if photo_count < LARGE_FOLDER_METADATA_PHOTO_MINIMUM:
+        return MEDIUM_FOLDER_METADATA_BATCH_SIZE
+
+    return LARGE_FOLDER_METADATA_BATCH_SIZE
+
+
+def _read_group_exif_metadata(
+        read_exif_metadata_fn: Callable[..., dict[str, dict[str, Any]]],
+        photo_sources: list[PhotoGroupSources],
+        reporter: ProgressReporter,
+) -> dict[str, dict[str, Any]]:
+    """
+    Read grouped-photo EXIF metadata with primary and fallback sources.
+
+    Grouping happens before ExifTool so JPEG+RAW companions count as one photo
+    in progress and normally send only one metadata source. The preview-source
+    fallback preserves old record-building behavior without rereading every
+    companion file.
+    """
+    batch_size = metadata_batch_size_for_photo_count(len(photo_sources))
+    primary_sources = [sources.metadata_source for sources in photo_sources]
+    primary_total_batches = _metadata_batch_count(
+        len(primary_sources), batch_size
+    )
+    if primary_total_batches == 0:
+        reporter.complete_stage(
+            'metadata',
+            message='Loading EXIF data, no photos found',
+            overall_progress=METADATA_PROGRESS_END,
+        )
+        return {}
+
+    reporter.update_stage(
+        'metadata',
+        label=_metadata_stage_label(batch_size),
+        current=0,
+        total=primary_total_batches,
+        message=_metadata_progress_message(
+            'Loading EXIF data', 0, primary_total_batches, batch_size
+        ),
+        overall_progress=METADATA_PROGRESS_START,
+    )
+    primary_updates = 0
+
+    def handle_primary_batch(
+            batch_index: int, total_batches: int, batch_size: int
+    ) -> None:
+        nonlocal primary_updates
+        primary_updates = batch_index
+        reporter.update_stage(
+            'metadata',
+            label=_metadata_stage_label(batch_size),
+            current=batch_index,
+            total=total_batches,
+            message=_metadata_progress_message(
+                'Loading EXIF data', batch_index, total_batches, batch_size
+            ),
+            overall_progress=_metadata_overall_progress(
+                batch_index, total_batches
+            ),
+        )
+
+    primary_result = _call_read_exif_metadata(
+        read_exif_metadata_fn,
+        primary_sources,
+        batch_size=batch_size,
+        batch_progress_callback=handle_primary_batch,
+    )
+    exif_map = primary_result.metadata
+    # Test doubles and older injected readers may ignore the batch callback.
+    # Move the row forward here so the record-building stage never starts
+    # while metadata still appears to be at batch zero. Readers that
+    # explicitly support batch callbacks are allowed to stop early without
+    # showing skipped batches as complete.
+    if primary_updates == 0 and not primary_result.supports_batch_progress:
+        reporter.update_stage(
+            'metadata',
+            label=_metadata_stage_label(batch_size),
+            current=primary_total_batches,
+            total=primary_total_batches,
+            message=_metadata_progress_message(
+                'Loading EXIF data',
+                primary_total_batches,
+                primary_total_batches,
+                batch_size,
+            ),
+            overall_progress=METADATA_PROGRESS_END,
+        )
+
+    primary_reported_batches = _reported_metadata_batches(
+        primary_total_batches,
+        primary_updates,
+        supports_batch_progress=primary_result.supports_batch_progress,
+    )
+
+    # Only reread preview sources for groups whose primary source produced no
+    # metadata. This preserves JPEG fallback while avoiding a second ExifTool
+    # pass over every JPEG+RAW companion.
+    # Production EXIF maps contain resolved path keys; once those are present,
+    # basename fallback would be unsafe because recursive folders can contain
+    # same-named RAW files in different subfolders. Legacy test doubles may
+    # still provide basename-only maps, so keep basename lookup only for that
+    # older shape.
+    use_exact_primary_lookup = _uses_exact_exif_lookup(exif_map, photo_sources)
+    fallback_sources = [
+        sources.preview_source
+        for sources in photo_sources
+        if (
+            sources.preview_source != sources.metadata_source
+            and not _has_exif_metadata_for_path(
+                exif_map,
+                sources.metadata_source,
+                exact_only=use_exact_primary_lookup,
+            )
+        )
+    ]
+    fallback_total_batches = _metadata_batch_count(
+        len(fallback_sources), batch_size
+    )
+    if fallback_total_batches == 0:
+        reporter.complete_stage(
+            'metadata',
+            message=_metadata_progress_message(
+                'Loading EXIF data',
+                primary_reported_batches,
+                primary_total_batches,
+                batch_size,
+            ),
+            overall_progress=METADATA_PROGRESS_END,
+        )
+        return exif_map
+
+    combined_total_batches = primary_total_batches + fallback_total_batches
+    fallback_updates = 0
+    # ExifTool reports a batch only after it finishes. Extend the row before
+    # the fallback subprocess starts so the overlay does not look complete
+    # while JPEG fallback metadata is still being read.
+    reporter.update_stage(
+        'metadata',
+        label=_metadata_stage_label(batch_size),
+        current=primary_reported_batches,
+        total=combined_total_batches,
+        message=_metadata_progress_message(
+            'Loading fallback EXIF data',
+            primary_reported_batches,
+            combined_total_batches,
+            batch_size,
+        ),
+        overall_progress=_metadata_overall_progress(
+            primary_reported_batches, combined_total_batches
+        ),
+    )
+
+    def handle_fallback_batch(
+            batch_index: int, _total_batches: int, batch_size: int
+    ) -> None:
+        nonlocal fallback_updates
+        fallback_updates = batch_index
+        combined_index = primary_reported_batches + batch_index
+        reporter.update_stage(
+            'metadata',
+            label=_metadata_stage_label(batch_size),
+            current=combined_index,
+            total=combined_total_batches,
+            message=_metadata_progress_message(
+                'Loading fallback EXIF data',
+                combined_index,
+                combined_total_batches,
+                batch_size,
+            ),
+            overall_progress=_metadata_overall_progress(
+                combined_index, combined_total_batches
+            ),
+        )
+
+    fallback_result = _call_read_exif_metadata(
+        read_exif_metadata_fn,
+        fallback_sources,
+        batch_size=batch_size,
+        batch_progress_callback=handle_fallback_batch,
+    )
+    fallback_map = fallback_result.metadata
+    exif_map.update(fallback_map)
+    if fallback_updates == 0 and not fallback_result.supports_batch_progress:
+        reporter.update_stage(
+            'metadata',
+            label=_metadata_stage_label(batch_size),
+            current=combined_total_batches,
+            total=combined_total_batches,
+            message=_metadata_progress_message(
+                'Loading fallback EXIF data',
+                combined_total_batches,
+                combined_total_batches,
+                batch_size,
+            ),
+            overall_progress=METADATA_PROGRESS_END,
+        )
+
+    fallback_reported_batches = _reported_metadata_batches(
+        fallback_total_batches,
+        fallback_updates,
+        supports_batch_progress=fallback_result.supports_batch_progress,
+    )
+    combined_reported_batches = (
+        primary_reported_batches + fallback_reported_batches
+    )
+    reporter.complete_stage(
+        'metadata',
+        message=_metadata_progress_message(
+            'Loading EXIF data',
+            combined_reported_batches,
+            combined_total_batches,
+            batch_size,
+        ),
+        overall_progress=METADATA_PROGRESS_END,
+    )
+    return exif_map
+
+
+def _call_read_exif_metadata(
+        read_exif_metadata_fn: Callable[..., dict[str, dict[str, Any]]],
+        files: list[Path],
+        *,
+        batch_size: int,
+        batch_progress_callback: Callable[[int, int, int], None],
+) -> _ExifMetadataReadResult:
+    """
+    Call injected EXIF readers without breaking legacy one-argument readers.
+
+    ``load_folder_state`` is exported and some tests or external callers inject
+    simple ``reader(files)`` callables. Production readers accept batch
+    arguments, so this adapter preserves the old injection contract while still
+    passing progress hooks whenever the callable can receive them.
+    """
+    kwargs: dict[str, object] = {
+        'batch_size': batch_size,
+        'batch_progress_callback': batch_progress_callback,
+    }
+    try:
+        signature = inspect.signature(read_exif_metadata_fn)
+    except (TypeError, ValueError):
+        return _ExifMetadataReadResult(
+            read_exif_metadata_fn(files, **kwargs),
+            supports_batch_progress=True,
+        )
+
+    supported_kwargs = _supported_exif_reader_kwargs(signature, kwargs)
+    supports_batch_progress = _explicitly_accepts_exif_reader_kwarg(
+        signature, 'batch_progress_callback'
+    )
+    return _ExifMetadataReadResult(
+        read_exif_metadata_fn(files, **supported_kwargs),
+        supports_batch_progress=supports_batch_progress,
+    )
+
+
+def _supported_exif_reader_kwargs(
+        signature: inspect.Signature,
+        kwargs: dict[str, object],
+) -> dict[str, object]:
+    """Return batch kwargs accepted by an injected EXIF reader signature."""
+    accepts_var_keyword = any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    )
+    if accepts_var_keyword:
+        return kwargs
+
+    return {
+        name: value
+        for name, value in kwargs.items()
+        if (
+            name in signature.parameters
+            and signature.parameters[name].kind
+            in {
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
+            }
+        )
+    }
+
+
+def _explicitly_accepts_exif_reader_kwarg(
+        signature: inspect.Signature, name: str
+) -> bool:
+    parameter = signature.parameters.get(name)
+    return parameter is not None and parameter.kind in {
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        inspect.Parameter.KEYWORD_ONLY,
+    }
+
+
+def _metadata_batch_count(item_count: int, batch_size: int) -> int:
+    if item_count <= 0:
+        return 0
+
+    return ((item_count - 1) // max(1, batch_size)) + 1
+
+
+def _metadata_overall_progress(current: int, total: int) -> int:
+    if total <= 0:
+        return METADATA_PROGRESS_END
+
+    progress_span = METADATA_PROGRESS_END - METADATA_PROGRESS_START
+    return METADATA_PROGRESS_START + int((current / total) * progress_span)
+
+
+def _reported_metadata_batches(
+        total_batches: int,
+        updates_seen: int,
+        *,
+        supports_batch_progress: bool,
+) -> int:
+    """
+    Return the count that should remain visible for a completed metadata pass.
+
+    Callback-aware EXIF readers report only batches that actually finished. For
+    legacy readers with no callbacks, folder loading keeps the previous
+    behavior of treating the opaque call as complete so injected test readers
+    do not leave metadata stuck at zero.
+    """
+    if supports_batch_progress or updates_seen > 0:
+        return min(updates_seen, total_batches)
+
+    return total_batches
+
+
+def _metadata_progress_message(
+        label: str, current: int, total: int, batch_size: int
+) -> str:
+    return (
+        f'{label}, batch {current} of {total} ({batch_size} photos per batch)'
+    )
+
+
+def _metadata_stage_label(batch_size: int) -> str:
+    """Return the metadata row label shown directly above its progress bar."""
+    return f'Loading EXIF data ({batch_size} photos per batch)'
+
+
+def _exact_exif_metadata_for_path(
+        exif_map: dict[str, dict[str, Any]], path: Path
+) -> dict[str, Any]:
+    """
+    Look up EXIF metadata by path keys without basename compatibility.
+
+    Recursive folder loads can contain duplicate filenames in different
+    subfolders. Callers use this when a basename match would make one photo's
+    metadata appear to belong to a different same-named companion.
+    """
+    return (
+        exif_map.get(str(path.expanduser().resolve()))
+        or exif_map.get(path.as_posix())
+        or {}
+    )
+
+
+def _uses_exact_exif_lookup(
+        exif_map: dict[str, dict[str, Any]],
+        photo_sources: list[PhotoGroupSources],
+) -> bool:
+    """
+    Return whether the EXIF map contains production-style path metadata.
+
+    When any grouped photo source has exact metadata, basename fallback becomes
+    unsafe for all records in this load because recursive folders can contain
+    same-named photos. Basename-only injected readers still return ``False``
+    here and keep the legacy compatibility path.
+    """
+    return any(
+        _exact_exif_metadata_for_path(exif_map, sources.metadata_source)
+        or _exact_exif_metadata_for_path(exif_map, sources.preview_source)
+        for sources in photo_sources
+    )
+
+
+def _has_exif_metadata_for_path(
+        exif_map: dict[str, dict[str, Any]],
+        path: Path,
+        *,
+        exact_only: bool,
+) -> bool:
+    """
+    Return whether EXIF metadata exists with the chosen lookup contract.
+
+    ``exact_only`` is enabled for production-style path-keyed maps so fallback
+    decisions cannot be influenced by duplicate basenames. It stays disabled
+    for legacy injected readers that still return basename-only maps.
+    """
+    if exact_only:
+        return bool(_exact_exif_metadata_for_path(exif_map, path))
+
+    return bool(exif_metadata_for_path(exif_map, path))
 
 
 def load_viewer_folder_state(
@@ -240,7 +705,76 @@ def _build_photo_record(
         exif_map: dict[str, dict[str, Any]],
         *,
         focus_point_pending: bool = False,
+        exact_exif_lookup: bool = False,
 ) -> PhotoRecord:
+    sources = _select_photo_group_sources(grouped_files)
+    sorted_group_files = sources.sorted_group_files
+    jpeg_files = sources.jpeg_files
+    heif_files = sources.heif_files
+    raw_files = sources.raw_files
+    preview_source = sources.preview_source
+    metadata_source = sources.metadata_source
+
+    shared_stem = relative_photo_id(folder, preview_source)
+    exact_source_metadata = _exact_exif_metadata_for_path(
+        exif_map, metadata_source
+    ) or _exact_exif_metadata_for_path(exif_map, preview_source)
+    if exact_exif_lookup:
+        # Path-keyed maps come from production EXIF reads. In that shape,
+        # basename fallback can borrow EXIF from a same-named sibling folder,
+        # so missing exact metadata must stay missing for this record.
+        source_metadata = exact_source_metadata
+    else:
+        # Basename-only maps are still supported for legacy injected readers.
+        source_metadata = (
+            exact_source_metadata
+            or exif_metadata_for_path(exif_map, metadata_source)
+            or exif_metadata_for_path(exif_map, preview_source)
+        )
+
+    source_metadata = source_metadata or {}
+    exif_display = build_photo_exif_display(
+        source_metadata,
+        jpeg_files=jpeg_files,
+        heif_files=heif_files,
+        raw_files=raw_files,
+    )
+    focus_point = exif_module.extract_focus_point(
+        source_metadata, exif_display.image_width, exif_display.image_height
+    )
+
+    return PhotoRecord(
+        photo_id=shared_stem,
+        display_name=shared_stem,
+        files=[
+            relative_posix_path(folder, path) for path in sorted_group_files
+        ],
+        has_jpeg=bool(jpeg_files),
+        has_raw=bool(raw_files),
+        preview_source=preview_source,
+        metadata_source=metadata_source,
+        focus_point=focus_point,
+        has_heif=bool(heif_files),
+        has_raster=bool(jpeg_files or heif_files),
+        focus_point_pending=focus_point_pending,
+        capture_at=exif_display.capture_at,
+        scene_id=None,
+        image_width=exif_display.image_width,
+        image_height=exif_display.image_height,
+        exif_display=exif_display.exif_display,
+    )
+
+
+def _select_photo_group_sources(
+        grouped_files: list[Path],
+) -> PhotoGroupSources:
+    """
+    Return preview and metadata sources for one grouped photo.
+
+    Folder loading reads one primary EXIF source per grouped photo before it
+    builds records. Keeping source choice in this helper prevents that faster
+    metadata pass from drifting away from the final ``PhotoRecord`` fields.
+    """
     sorted_group_files = sorted(
         grouped_files, key=lambda path: path.name.lower()
     )
@@ -272,42 +806,13 @@ def _build_photo_record(
         preview_source = raw_files[0]
 
     metadata_source = raw_files[0] if raw_files else preview_source
-    shared_stem = relative_photo_id(folder, preview_source)
-
-    source_metadata = (
-        exif_metadata_for_path(exif_map, metadata_source)
-        or exif_metadata_for_path(exif_map, preview_source)
-        or {}
-    )
-    exif_display = build_photo_exif_display(
-        source_metadata,
+    return PhotoGroupSources(
+        sorted_group_files=sorted_group_files,
         jpeg_files=jpeg_files,
         heif_files=heif_files,
         raw_files=raw_files,
-    )
-    focus_point = exif_module.extract_focus_point(
-        source_metadata, exif_display.image_width, exif_display.image_height
-    )
-
-    return PhotoRecord(
-        photo_id=shared_stem,
-        display_name=shared_stem,
-        files=[
-            relative_posix_path(folder, path) for path in sorted_group_files
-        ],
-        has_jpeg=bool(jpeg_files),
-        has_raw=bool(raw_files),
         preview_source=preview_source,
         metadata_source=metadata_source,
-        focus_point=focus_point,
-        has_heif=bool(heif_files),
-        has_raster=bool(raster_files),
-        focus_point_pending=focus_point_pending,
-        capture_at=exif_display.capture_at,
-        scene_id=None,
-        image_width=exif_display.image_width,
-        image_height=exif_display.image_height,
-        exif_display=exif_display.exif_display,
     )
 
 

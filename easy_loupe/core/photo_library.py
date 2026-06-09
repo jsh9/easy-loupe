@@ -10,6 +10,7 @@ import easy_loupe.core.preview as _preview_module
 from easy_loupe.core.folder_loading import (
     DEFAULT_PHOTO_SORT_MODE,
     DEFAULT_PHOTO_SORT_REVERSED,
+    FOLDER_LOAD_PROGRESS_STAGES,
     PHOTO_SORT_MODE_FILENAME,
 )
 from easy_loupe.core.folder_loading import (
@@ -47,6 +48,10 @@ from easy_loupe.core.recursive_loading import (
 )
 from easy_loupe.core.recursive_loading import (
     normalize_load_recursively as _normalize_load_recursively,
+)
+from easy_loupe.progress import (
+    ProgressReporter,
+    StructuredProgressCallback,
 )
 
 if TYPE_CHECKING:
@@ -93,13 +98,24 @@ class PhotoLibrary:
             metadata_entries: dict[str, Any] | None = None,
             folder_label: str | None = None,
             progress_callback: Callable[[str, int], None] | None = None,
+            progress_snapshot_callback: StructuredProgressCallback | None = (
+                None
+            ),
+            progress_reporter: ProgressReporter | None = None,
     ) -> None:
         """Scan a folder, build photo records, and reset scene state."""
+        owns_reporter = progress_reporter is None
+        reporter = progress_reporter or ProgressReporter(
+            'Loading folder',
+            FOLDER_LOAD_PROGRESS_STAGES,
+            progress_callback=progress_callback,
+            snapshot_callback=progress_snapshot_callback,
+        )
         loaded_state = _load_folder_state(
             folder,
             metadata_entries=metadata_entries,
             folder_label=folder_label,
-            progress_callback=progress_callback,
+            progress_reporter=reporter,
             sort_mode=self.sort_mode,
             sort_reversed=self.sort_reversed,
             load_recursively=self.load_recursively,
@@ -112,8 +128,17 @@ class PhotoLibrary:
         self.scenes = loaded_state.scenes
         self.scene_source = loaded_state.scene_source
         self.scene_detection_done = loaded_state.scene_detection_done
-        if progress_callback:
-            progress_callback('Finished loading folder', 100)
+        if owns_reporter:
+            reporter.finish('Finished loading folder', 100)
+        else:
+            # Caller-owned reporters may continue into UI list/preview stages.
+            # Complete only the folder-build stage so those later rows remain
+            # pending instead of making the whole workflow look finished.
+            reporter.complete_stage(
+                'records',
+                message='Finished loading folder',
+                overall_progress=100,
+            )
 
     def load_viewer_folder(
             self,
@@ -241,13 +266,25 @@ class PhotoLibrary:
     def detect_scenes(
             self,
             progress_callback: Callable[[str, int], None] | None = None,
+            progress_snapshot_callback: StructuredProgressCallback | None = (
+                None
+            ),
     ) -> list[SceneGroup]:
         """Detect scene boundaries across the currently loaded photos."""
-        scene_groups = _analysis_scenes_module.detect_scenes(
-            self.photos,
-            self.get_preview_path,
-            progress_callback,
-        )
+        if progress_snapshot_callback is None:
+            scene_groups = _analysis_scenes_module.detect_scenes(
+                self.photos,
+                self.get_preview_path,
+                progress_callback,
+            )
+        else:
+            scene_groups = _analysis_scenes_module.detect_scenes(
+                self.photos,
+                self.get_preview_path,
+                progress_callback,
+                progress_snapshot_callback=progress_snapshot_callback,
+            )
+
         self._set_scene_groups(scene_groups, scene_source='detected')
         self.scene_detection_done = True
         if self.current_folder is not None:

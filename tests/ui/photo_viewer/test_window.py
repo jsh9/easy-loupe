@@ -6,12 +6,13 @@ import pytest
 from PySide6.QtCore import QPoint, QSettings, Qt
 from PySide6.QtGui import QKeySequence
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox
 
 import easy_loupe.ui.identity as identity_module
 import easy_loupe.ui.main_window.build as build_module
 import easy_loupe.ui.photo_viewer.window as photo_viewer_window_module
 from easy_loupe.core.photo_library import PhotoLibrary
+from easy_loupe.progress import ProgressReporter, ProgressStageDefinition
 from easy_loupe.ui.launch import CullingLaunchRequest
 from easy_loupe.ui.photo_viewer.window import PhotoViewerWindow
 from easy_loupe.ui.photo_viewer.workers import PhotoViewerExifResult
@@ -1325,6 +1326,9 @@ def test_photo_viewer_culling_handoff_waits_for_hydration(
     The viewer opens quickly from a lightweight folder load, but the culler
     needs the hydrated library. This also protects the timing edge where
     hydration has finished before the thread cleanup slot clears.
+
+    Structured hydration snapshots should be stored silently until handoff
+    waits, and stale request ids must not replace the latest valid snapshot.
     """
     create_jpeg(tmp_path / 'A.JPG', 'green')
     create_jpeg(tmp_path / 'B.JPG', 'blue')
@@ -1339,12 +1343,41 @@ def test_photo_viewer_culling_handoff_waits_for_hydration(
     window._folder_hydration_thread = object()
     window._folder_hydration_message = 'Loading folder...'
     window._folder_hydration_progress = 42
+    reporter = ProgressReporter(
+        'Loading folder',
+        (
+            ProgressStageDefinition(
+                'viewer_cache', 'Preparing photo viewer cache'
+            ),
+        ),
+    )
+    snapshot = reporter.update_stage(
+        'viewer_cache', current=4, total=37, overall_progress=42
+    )
+    window._handle_folder_hydration_progress_snapshot(
+        request_id + 1, expected_folder, snapshot
+    )
+
+    assert window._folder_hydration_snapshot is None
+
+    window._handle_folder_hydration_progress_snapshot(
+        request_id, expected_folder, snapshot
+    )
+
+    assert window.progress_overlay.isHidden() is True
 
     window._request_culling_handoff()
 
     assert requests == []
     assert window._pending_culling_handoff is True
     assert window.progress_overlay.isVisible() is True
+    assert window.overlay_progress_bar.isVisible() is False
+    label_texts = {
+        label.text()
+        for label in window.progress_stage_list.findChildren(QLabel)
+    }
+    assert 'Preparing photo viewer cache' in label_texts
+    assert '4 of 37' in label_texts
 
     window._handle_folder_hydration_finished(
         request_id, expected_folder, hydrated_library

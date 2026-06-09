@@ -5,7 +5,11 @@ from typing import TYPE_CHECKING
 import pytest
 
 from easy_loupe.core.photo_library import PhotoLibrary
-from easy_loupe.operations.common import OperationError, undo_operation
+from easy_loupe.operations.common import (
+    OperationError,
+    UndoPlan,
+    undo_operation,
+)
 from easy_loupe.operations.export import (
     OrganizeFilesOptions,
     organize_photos,
@@ -361,6 +365,83 @@ def test_organize_photos_preserves_relative_subfolder_paths(
     assert (output_parent / 'Picked' / 'subfolder_1' / 'IMG_A.JPG').exists()
     assert (output_parent / 'Picked' / 'subfolder_1' / 'IMG_A.XMP').exists()
     assert (source_folder / 'Picked').exists() is False
+
+
+def test_organize_and_undo_report_structured_progress(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify file operations expose counted structured progress stages.
+
+    This protects organize and undo overlays from regressing to scalar-only
+    progress while the filesystem operation behavior stays unchanged.
+    """
+    source_folder, library = _make_library(tmp_path, monkeypatch)
+    output_parent = tmp_path / 'organized'
+    options = OrganizeFilesOptions(
+        criterion='flag',
+        action='copy',
+        output_parent=output_parent,
+        include_untagged=False,
+        conflict_policy='fail',
+    )
+    progress_updates: list[tuple[str, int]] = []
+    progress_snapshots = []
+
+    summary = organize_photos(
+        source_folder,
+        library.get_photos(),
+        options,
+        lambda message, progress: progress_updates.append((
+            message,
+            progress,
+        )),
+        progress_snapshot_callback=progress_snapshots.append,
+    )
+
+    assert progress_updates[0] == ('Preparing photo organization', 5)
+    assert progress_updates[1] == ('Organizing photo files, 1 of 2', 52)
+    assert progress_snapshots[-2].stages[1].count_text() == '2 of 2'
+    assert progress_snapshots[-2].stages[1].status == 'complete'
+
+    undo_snapshots = []
+    undo_operation(
+        summary.undo_plan,
+        progress_snapshot_callback=undo_snapshots.append,
+    )
+
+    undo_stage = undo_snapshots[-1].stages[0]
+    assert undo_stage.status == 'complete'
+    assert undo_stage.count_text().endswith(f'of {undo_stage.total}')
+
+
+def test_empty_undo_plan_reports_complete_zero_progress() -> None:
+    """
+    Verify no-op undo still emits a completed progress stage.
+
+    Skipped or no-op operations can produce an empty undo plan. The progress
+    overlay should receive a terminal update instead of staying at its
+    preparation message until the UI hides it.
+    """
+    undo_plan = UndoPlan()
+    progress_updates: list[tuple[str, int]] = []
+    progress_snapshots = []
+
+    undo_operation(
+        undo_plan,
+        lambda message, progress: progress_updates.append((
+            message,
+            progress,
+        )),
+        progress_snapshot_callback=progress_snapshots.append,
+    )
+
+    undo_stage = progress_snapshots[-1].stages[0]
+    assert undo_plan.consumed is True
+    assert progress_updates == [('Undoing photo organization', 100)]
+    assert undo_stage.status == 'complete'
+    assert undo_stage.total == 0
+    assert undo_stage.count_text() == ''
 
 
 def _make_library(
