@@ -518,11 +518,25 @@ def _supported_exif_reader_kwargs(
 def _explicitly_accepts_exif_reader_kwarg(
         signature: inspect.Signature, name: str
 ) -> bool:
-    parameter = signature.parameters.get(name)
-    return parameter is not None and parameter.kind in {
-        inspect.Parameter.POSITIONAL_OR_KEYWORD,
-        inspect.Parameter.KEYWORD_ONLY,
-    }
+    """
+    Return whether a reader signature can receive a specific keyword argument.
+
+    ``**kwargs`` readers are treated as accepting batch-progress hooks because
+    wrapper functions can forward those hooks without naming them. That keeps
+    stopped wrapped readers from being reported as opaque legacy calls whose
+    skipped batches look complete.
+    """
+    for parameter in signature.parameters.values():
+        if parameter.kind is inspect.Parameter.VAR_KEYWORD:
+            return True
+
+        if parameter.name == name and parameter.kind in {
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        }:
+            return True
+
+    return False
 
 
 def _metadata_batch_count(item_count: int, batch_size: int) -> int:

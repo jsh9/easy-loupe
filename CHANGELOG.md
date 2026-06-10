@@ -26,6 +26,9 @@
     no longer drops EXIF metadata for the rest of the configured batch.
   - Stopped ExifTool reads no longer report skipped batches as completed, and
     later progress stages preserve the last completed EXIF batch count.
+  - Folder-loading EXIF reader wrappers that accept `**kwargs` now preserve
+    callback-aware stopped-batch progress instead of being treated as legacy
+    readers.
   - Scene and operation workers remain compatible with legacy progress-only
     callables while still supporting structured progress snapshots.
   - Empty progress stages now render as complete status-only rows instead of

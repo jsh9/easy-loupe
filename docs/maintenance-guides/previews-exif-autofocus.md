@@ -115,6 +115,10 @@ Major logic:
   callables and modern readers that accept `batch_size` plus
   `batch_progress_callback`. Keep this adapter in place when changing metadata
   batching so exported loader tests and simple fakes remain compatible.
+- EXIF reader wrappers that accept arbitrary `**kwargs` are treated as
+  callback-aware readers because they can receive and forward
+  `batch_progress_callback`. This prevents stopped wrapped readers from being
+  misreported as legacy opaque calls with every configured batch completed.
 - On Windows packaged GUI builds, ExifTool subprocesses are launched with
   Windows-specific hidden-console options to avoid flashing a terminal window
   during metadata reads.
