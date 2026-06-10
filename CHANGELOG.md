@@ -26,6 +26,8 @@
     no longer drops EXIF metadata for the rest of the configured batch.
   - Stopped ExifTool reads no longer report skipped batches as completed, and
     later progress stages preserve the last completed EXIF batch count.
+  - Partially completed primary ExifTool reads no longer start preview fallback
+    reads.
   - Folder-loading EXIF reader wrappers that accept `**kwargs` now preserve
     callback-aware stopped-batch progress instead of being treated as legacy
     readers.

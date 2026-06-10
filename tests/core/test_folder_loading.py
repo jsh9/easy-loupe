@@ -456,6 +456,60 @@ def test_folder_loading_preserves_partial_metadata_batch_progress(
     assert progress_snapshots[-1].stages[1].count_text() == '1 of 3'
 
 
+def test_folder_loading_skips_fallback_after_stopped_primary_exif_read(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify stopped primary EXIF reads do not start preview fallback reads.
+
+    A callback-aware primary reader that reports only some configured batches
+    represents a stopped ExifTool read. Starting a second fallback pass after
+    that stop can repeat the failing tool launch and muddy partial progress.
+    RAW+JPEG groups are used because missing RAW metadata would normally make
+    each JPEG preview eligible for fallback.
+    """
+    for index in range(21):
+        (tmp_path / f'IMG_{index:04d}.CR3').write_bytes(b'raw')
+        create_jpeg(tmp_path / f'IMG_{index:04d}.JPG', 'white')
+
+    calls: list[list[str]] = []
+    progress_snapshots = []
+    reporter = ProgressReporter(
+        'Loading folder',
+        folder_loading_module.FOLDER_LOAD_PROGRESS_STAGES,
+        snapshot_callback=progress_snapshots.append,
+    )
+
+    def fake_read_exif_metadata(
+            files: list[Path],
+            *,
+            batch_size: int,
+            batch_progress_callback: Any,
+    ) -> dict[str, dict[str, Any]]:
+        calls.append([path.name for path in files])
+        assert batch_size == 20
+        batch_progress_callback(1, 2, batch_size)
+        return {}
+
+    folder_loading_module.load_folder_state(
+        tmp_path,
+        progress_reporter=reporter,
+        read_exif_metadata_fn=fake_read_exif_metadata,
+    )
+
+    assert calls == [[f'IMG_{index:04d}.CR3' for index in range(21)]]
+    metadata_messages = [
+        snapshot.current_message
+        for snapshot in progress_snapshots
+        if 'EXIF data' in snapshot.current_message
+    ]
+    assert all(
+        'fallback' not in message.casefold() for message in metadata_messages
+    )
+    assert progress_snapshots[-1].stages[1].status == 'complete'
+    assert progress_snapshots[-1].stages[1].count_text() == '1 of 2'
+
+
 def test_folder_loading_treats_kwargs_exif_reader_as_batch_aware(
         tmp_path: Path,
 ) -> None:

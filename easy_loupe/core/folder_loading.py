@@ -330,6 +330,28 @@ def _read_group_exif_metadata(
         primary_updates,
         supports_batch_progress=primary_result.supports_batch_progress,
     )
+    # A reported-but-incomplete primary pass means ExifTool stopped after
+    # some configured batches. Do not start fallback reads after that tool
+    # stop; the extra pass can repeat the failure and make partial progress
+    # look like reliable fallback work. Requiring at least one callback keeps
+    # kwargs-compatible readers that never report batches on the legacy path.
+    primary_stopped_early = (
+        primary_result.supports_batch_progress
+        and primary_updates > 0
+        and primary_reported_batches < primary_total_batches
+    )
+    if primary_stopped_early:
+        reporter.complete_stage(
+            'metadata',
+            message=_metadata_progress_message(
+                'Loading EXIF data',
+                primary_reported_batches,
+                primary_total_batches,
+                batch_size,
+            ),
+            overall_progress=METADATA_PROGRESS_END,
+        )
+        return exif_map
 
     # Only reread preview sources for groups whose primary source produced no
     # metadata. This preserves JPEG fallback while avoiding a second ExifTool

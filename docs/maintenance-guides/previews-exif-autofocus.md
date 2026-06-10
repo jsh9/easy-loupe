@@ -110,7 +110,8 @@ Major logic:
   reader keeps metadata already parsed and stops further retries for that read.
   The stopped configured batch does not emit a batch-progress callback, and
   folder loading preserves the last completed EXIF batch count when later
-  stages start.
+  stages start. Primary EXIF reads that stop after reporting partial batch
+  progress do not start companion preview fallback reads.
 - Folder-loading EXIF reader injection accepts both legacy `reader(files)`
   callables and modern readers that accept `batch_size` plus
   `batch_progress_callback`. Keep this adapter in place when changing metadata
