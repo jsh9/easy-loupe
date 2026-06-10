@@ -1543,6 +1543,87 @@ def test_main_window_structured_scene_progress_does_not_show_scalar_bar(
     del app
 
 
+def test_scene_detection_finish_preserves_structured_progress_rows(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify scene-finish list rebuilds do not flash the scalar progress bar.
+
+    Scene detection uses structured progress rows, then completion rebuilds the
+    thumbnail, browse, and scene lists before hiding the overlay. The finish
+    path must keep those rows active until cleanup instead of clearing them
+    with the legacy scalar progress UI.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7435', 'dimgray'),
+            ('IMG_7436', 'blue'),
+        ],
+    )
+    reporter = workflows_module.ProgressReporter(
+        'Detecting scenes',
+        (
+            workflows_module.ProgressStageDefinition(
+                'features', 'Extracting preview features'
+            ),
+            workflows_module.ProgressStageDefinition(
+                'grouping', 'Grouping scenes'
+            ),
+        ),
+    )
+    snapshot = reporter.update_stage(
+        'grouping',
+        current=2,
+        total=2,
+        overall_progress=99,
+        complete=True,
+    )
+    window._handle_scene_progress_snapshot(snapshot)
+    app.processEvents()
+
+    set_scene_detection_result(window, [['IMG_7435', 'IMG_7436']])
+    # Capture the transient overlay state immediately before cleanup hides it.
+    # Once the method returns, the flash-prone state is gone.
+    overlay_state_before_hide: list[tuple[bool, bool, str, set[str]]] = []
+    original_hide_progress = window._hide_progress
+
+    def record_overlay_state_before_hide() -> None:
+        label_texts = {
+            label.text()
+            for label in window.progress_stage_list.findChildren(QLabel)
+        }
+        overlay_state_before_hide.append((
+            window.progress_stage_list.isVisible(),
+            window.overlay_progress_bar.isVisible(),
+            window.overlay_message_label.text(),
+            label_texts,
+        ))
+        original_hide_progress()
+
+    monkeypatch.setattr(
+        window, '_hide_progress', record_overlay_state_before_hide
+    )
+
+    window._handle_scene_finished()
+    app.processEvents()
+
+    assert len(overlay_state_before_hide) == 1
+    stage_list_visible, scalar_bar_visible, message, label_texts = (
+        overlay_state_before_hide[0]
+    )
+    assert stage_list_visible is True
+    assert scalar_bar_visible is False
+    assert message == 'Scene detection finished'
+    assert 'Grouping scenes' in label_texts
+    assert '2 of 2' in label_texts
+    assert window.progress_overlay.isHidden() is True
+
+    window.close()
+    del app
+
+
 def test_main_window_list_progress_counts_completed_preview_rows(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

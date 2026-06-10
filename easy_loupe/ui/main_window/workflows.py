@@ -410,7 +410,16 @@ class MainWindowWorkflowMixin:
 
         was_browse_mode = self._browse_mode
         was_split_view = self.viewer.is_split_view()
-        self._show_progress('Scene detection finished', 100)
+        # Structured scene progress already has its own per-stage rows.
+        # Update only the message so the list rebuild below does not briefly
+        # clear those rows with the legacy scalar progress UI.
+        if self.progress_stage_list.isVisible():
+            self.overlay_message_label.setText('Scene detection finished')
+            self._update_progress_overlay_geometry()
+            QApplication.processEvents()
+        else:
+            self._show_progress('Scene detection finished', 100)
+
         self._clear_scene_history()
         self._populate_thumbnail_list()
         self._populate_browse_list()

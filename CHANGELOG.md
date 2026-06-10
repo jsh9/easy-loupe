@@ -18,6 +18,8 @@
     completes.
   - Scene and operation progress overlays no longer flicker between scalar
     progress bars and structured stage rows.
+  - Scene detection completion no longer briefly replaces structured progress
+    rows with the scalar progress bar while rebuilding scene lists.
   - Folder-load EXIF progress now shows the photos-per-batch detail in the
     metadata row label beside the batch progress bar.
   - Failed ExifTool batches now split and retry smaller chunks so one bad file
