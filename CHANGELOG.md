@@ -33,6 +33,8 @@
     callables while still supporting structured progress snapshots.
   - Empty progress stages now render as complete status-only rows instead of
     showing incomplete `0 of 0` progress bars.
+  - Direct empty-folder loader progress now completes the zero-work photo list
+    stage instead of leaving it active.
   - Empty undo plans now emit completed zero-work progress before cleanup.
 
 ## [1.1.3] - 2026-06-07

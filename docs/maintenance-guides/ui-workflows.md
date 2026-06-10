@@ -73,9 +73,10 @@ Major logic:
   emit snapshots. Generic operation and scene workers accept legacy
   progress-only callables as well as structured progress producers. Zero-total
   stages render as status-only rows without per-stage bars; active stages with
-  unknown totals still show an indeterminate bar. Scene detection completion
-  preserves active structured rows while rebuilding scene lists; only
-  legacy-only progress should fall back to the scalar bar.
+  unknown totals still show an indeterminate bar. Empty folder loads complete
+  the zero-total EXIF and photo-list stages explicitly. Scene detection
+  completion preserves active structured rows while rebuilding scene lists;
+  only legacy-only progress should fall back to the scalar bar.
 - Folder-load scanning reports discovered grouped-photo and supported-file
   counts after discovery finishes. Do not add fake scan item counts; the total
   is not known until the filesystem walk is done. The EXIF row counts ExifTool

@@ -171,11 +171,14 @@ def load_folder_state(
     exact_exif_lookup = _uses_exact_exif_lookup(exif_map, photo_sources)
 
     records: list[PhotoRecord] = []
+    # Empty folders never enter the record-building loop, so close this
+    # zero-work stage here for direct load_folder_state progress consumers.
     reporter.update_stage(
         'records',
         current=0,
         total=total_groups,
         overall_progress=METADATA_PROGRESS_END,
+        complete=total_groups == 0,
     )
     for index, (_, grouped_files) in enumerate(sorted_groups, start=1):
         photo = _build_photo_record(
