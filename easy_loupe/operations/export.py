@@ -89,6 +89,18 @@ def organize_photos(
     skipped_paths: list[str] = []
     total_jobs = len(jobs)
     try:
+        if total_jobs == 0:
+            # No organization jobs means no filesystem loop will report
+            # progress. Complete the work stage with a zero total so the UI
+            # renders a status-only row for this no-op operation.
+            reporter.update_stage(
+                'organize',
+                current=0,
+                total=0,
+                overall_progress=99,
+                complete=True,
+            )
+
         for index, job in enumerate(jobs, start=1):
             conflicts = [
                 destination

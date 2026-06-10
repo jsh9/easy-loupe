@@ -75,6 +75,33 @@ def test_analysis_scenes_detect_scenes_groups_and_assigns_scene_ids() -> None:
     assert feature_snapshot.stages[0].status == 'complete'
 
 
+def test_analysis_scenes_empty_input_reports_zero_total_stages() -> None:
+    """
+    Verify empty scene detection reports completed zero-work stages.
+
+    Empty stage totals drive the structured overlay's status-only rendering, so
+    scene detection should not finish unknown-total rows for empty libraries.
+    """
+    progress_snapshots = []
+
+    scenes = analysis_scenes_module.detect_scenes(
+        [],
+        lambda _photo_id, _kind: Path('/tmp/unused.jpg'),
+        progress_snapshot_callback=progress_snapshots.append,
+    )
+
+    stages = {stage.stage_id: stage for stage in progress_snapshots[-1].stages}
+    assert scenes == []
+    assert stages['features'].status == 'complete'
+    assert stages['features'].current == 0
+    assert stages['features'].total == 0
+    assert stages['features'].count_text() == ''
+    assert stages['grouping'].status == 'complete'
+    assert stages['grouping'].current == 0
+    assert stages['grouping'].total == 0
+    assert stages['grouping'].count_text() == ''
+
+
 def test_scene_merge_heuristics_cover_primary_histogram_fallback_and_gap() -> (
     None
 ):

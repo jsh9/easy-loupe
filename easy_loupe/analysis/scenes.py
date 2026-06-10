@@ -71,6 +71,27 @@ def detect_scenes(
 
     features: dict[str, tuple[Any, list[float]]] = {}
     total_photos = len(photos)
+    if total_photos == 0:
+        # Empty libraries skip both scene loops. Mark the stages as explicit
+        # zero-work completions so the overlay does not show completed bars for
+        # work that never had any items.
+        reporter.update_stage(
+            'features',
+            current=0,
+            total=0,
+            overall_progress=75,
+            complete=True,
+        )
+        reporter.update_stage(
+            'grouping',
+            current=0,
+            total=0,
+            overall_progress=99,
+            complete=True,
+        )
+        reporter.finish('done', 100)
+        return []
+
     for index, photo in enumerate(photos, start=1):
         features[photo.photo_id] = analysis_features_fn(photo)
         progress = 5 + int((index / max(total_photos, 1)) * 70)

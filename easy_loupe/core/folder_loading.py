@@ -252,10 +252,16 @@ def _read_group_exif_metadata(
         len(primary_sources), batch_size
     )
     if primary_total_batches == 0:
-        reporter.complete_stage(
+        # No ExifTool batches will run for an empty folder. Record an explicit
+        # zero-total completion so structured overlays render this as a
+        # status-only row instead of an unknown-total completed bar.
+        reporter.update_stage(
             'metadata',
+            current=0,
+            total=0,
             message='Loading EXIF data, no photos found',
             overall_progress=METADATA_PROGRESS_END,
+            complete=True,
         )
         return {}
 

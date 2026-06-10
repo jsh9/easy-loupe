@@ -415,6 +415,45 @@ def test_organize_and_undo_report_structured_progress(
     assert undo_stage.count_text().endswith(f'of {undo_stage.total}')
 
 
+def test_organize_photos_empty_jobs_report_zero_total_progress(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify no-op organization reports completed zero-work progress.
+
+    When no photos match the requested organization plan, the structured
+    overlay should render the organize stage as status-only instead of an
+    unknown-total completed progress bar.
+    """
+    source_folder = tmp_path / 'source'
+    source_folder.mkdir()
+    progress_snapshots = []
+
+    summary = organize_photos(
+        source_folder,
+        [],
+        OrganizeFilesOptions(
+            criterion='flag',
+            action='copy',
+            output_parent=tmp_path / 'organized',
+            include_untagged=False,
+            conflict_policy='fail',
+        ),
+        progress_snapshot_callback=progress_snapshots.append,
+    )
+
+    organize_stage = next(
+        stage
+        for stage in progress_snapshots[-1].stages
+        if stage.stage_id == 'organize'
+    )
+    assert summary.processed_photos == 0
+    assert organize_stage.status == 'complete'
+    assert organize_stage.current == 0
+    assert organize_stage.total == 0
+    assert organize_stage.count_text() == ''
+
+
 def test_empty_undo_plan_reports_complete_zero_progress() -> None:
     """
     Verify no-op undo still emits a completed progress stage.

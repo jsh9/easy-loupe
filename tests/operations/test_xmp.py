@@ -418,6 +418,38 @@ def test_write_xmp_sidecars_reports_structured_progress(
     assert progress_snapshots[-2].stages[1].status == 'complete'
 
 
+def test_write_xmp_sidecars_empty_photos_report_zero_total_progress(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify no-op XMP writing reports completed zero-work progress.
+
+    Empty photo sets should render as status-only structured progress rows, not
+    as unknown-total completed progress bars.
+    """
+    source_folder = tmp_path / 'empty-xmp'
+    source_folder.mkdir()
+    progress_snapshots = []
+
+    summary = write_xmp_sidecars(
+        source_folder,
+        [],
+        WriteXmpOptions(merge_policy='preserve'),
+        progress_snapshot_callback=progress_snapshots.append,
+    )
+
+    write_stage = next(
+        stage
+        for stage in progress_snapshots[-1].stages
+        if stage.stage_id == 'write'
+    )
+    assert summary.processed_photos == 0
+    assert write_stage.status == 'complete'
+    assert write_stage.current == 0
+    assert write_stage.total == 0
+    assert write_stage.count_text() == ''
+
+
 def _make_library(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,

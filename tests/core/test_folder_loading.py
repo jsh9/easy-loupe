@@ -309,6 +309,41 @@ def test_folder_loading_progress_reports_scan_counts_and_metadata_batches(
     ) in progress_updates
 
 
+def test_folder_loading_empty_metadata_stage_reports_zero_total(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify empty folder metadata progress is explicit zero-work progress.
+
+    The structured renderer hides per-stage bars for ``total=0``, so folder
+    loading must not leave the metadata stage as unknown-total completion when
+    there are no grouped photos to read.
+    """
+    progress_snapshots = []
+    reporter = ProgressReporter(
+        'Loading folder',
+        folder_loading_module.FOLDER_LOAD_PROGRESS_STAGES,
+        snapshot_callback=progress_snapshots.append,
+    )
+
+    loaded_state = folder_loading_module.load_folder_state(
+        tmp_path,
+        progress_reporter=reporter,
+        read_exif_metadata_fn=lambda _files, **_kwargs: {},
+    )
+
+    metadata_stage = next(
+        stage
+        for stage in progress_snapshots[-1].stages
+        if stage.stage_id == 'metadata'
+    )
+    assert loaded_state.photos == []
+    assert metadata_stage.status == 'complete'
+    assert metadata_stage.current == 0
+    assert metadata_stage.total == 0
+    assert metadata_stage.count_text() == ''
+
+
 def test_folder_loading_metadata_stage_label_includes_batch_size(
         tmp_path: Path,
 ) -> None:

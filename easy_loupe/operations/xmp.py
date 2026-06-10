@@ -79,6 +79,18 @@ def write_xmp_sidecars(
     skipped_photos = 0
     total_photos = len(photos)
     try:
+        if total_photos == 0:
+            # No photos means the XMP loop never advances this stage. Emit a
+            # zero-total completion so the structured overlay treats the
+            # workflow as a no-op rather than unknown-size completed work.
+            reporter.update_stage(
+                'write',
+                current=0,
+                total=0,
+                overall_progress=99,
+                complete=True,
+            )
+
         for index, photo in enumerate(photos, start=1):
             sidecar_path = sidecar_path_for_photo(source_folder, photo)
             has_any_tags = (
