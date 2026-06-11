@@ -44,6 +44,75 @@ def test_metadata_batch_size_uses_grouped_photo_thresholds(
     )
 
 
+@pytest.mark.parametrize(
+    ('photo_count', 'expected_batch_size', 'expected_batches'),
+    [
+        pytest.param(101, 50, 3, id='medium-folder'),
+        pytest.param(500, 100, 5, id='large-folder'),
+    ],
+)
+def test_folder_loading_passes_adaptive_batch_size_to_exif_reader(
+        tmp_path: Path,
+        photo_count: int,
+        expected_batch_size: int,
+        expected_batches: int,
+) -> None:
+    """
+    Verify full folder loading uses adaptive EXIF batch thresholds.
+
+    The threshold helper is covered separately, but this integration test keeps
+    the actual loader wired to those thresholds and to the user-facing metadata
+    progress label.
+    """
+    for index in range(photo_count):
+        (tmp_path / f'IMG_{index:04d}.JPG').write_bytes(b'jpeg')
+
+    batch_sizes: list[int] = []
+    progress_snapshots = []
+    reporter = ProgressReporter(
+        'Loading folder',
+        folder_loading_module.FOLDER_LOAD_PROGRESS_STAGES,
+        snapshot_callback=progress_snapshots.append,
+    )
+
+    def fake_read_exif_metadata(
+            files: list[Path],
+            *,
+            batch_size: int,
+            batch_progress_callback: Any,
+    ) -> dict[str, dict[str, Any]]:
+        assert len(files) == photo_count
+        batch_sizes.append(batch_size)
+        for batch_index in range(1, expected_batches + 1):
+            batch_progress_callback(batch_index, expected_batches, batch_size)
+
+        return {path.name: {} for path in files}
+
+    folder_loading_module.load_folder_state(
+        tmp_path,
+        progress_reporter=reporter,
+        read_exif_metadata_fn=fake_read_exif_metadata,
+    )
+
+    assert batch_sizes == [expected_batch_size]
+    expected_message = (
+        f'Loading EXIF data, batch {expected_batches} of'
+        f' {expected_batches} ({expected_batch_size} photos per batch)'
+    )
+    metadata_snapshot = next(
+        snapshot
+        for snapshot in progress_snapshots
+        if snapshot.current_message == expected_message
+    )
+    metadata_stage = metadata_snapshot.stages[1]
+    assert metadata_stage.label == (
+        f'Loading EXIF data ({expected_batch_size} photos per batch)'
+    )
+    assert metadata_stage.count_text() == (
+        f'{expected_batches} of {expected_batches}'
+    )
+
+
 def test_folder_loading_load_folder_state_builds_grouped_sorted_records(
         tmp_path: Path,
 ) -> None:
@@ -307,6 +376,206 @@ def test_folder_loading_progress_reports_scan_counts_and_metadata_batches(
         'Loading EXIF data, batch 2 of 2 (20 photos per batch)',
         35,
     ) in progress_updates
+
+
+def test_folder_loading_callback_fallback_progress_combines_batch_counts(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify callback-aware JPEG fallback extends the metadata batch row.
+
+    Primary RAW reads and fallback JPEG reads are two ExifTool passes, but the
+    UI presents them as one metadata stage. This pins the combined ``N of M``
+    count when both passes report their configured batches.
+    """
+    for index in range(21):
+        (tmp_path / f'IMG_{index:04d}.CR3').write_bytes(b'raw')
+        create_jpeg(tmp_path / f'IMG_{index:04d}.JPG', 'white')
+
+    calls: list[list[str]] = []
+    progress_snapshots = []
+    reporter = ProgressReporter(
+        'Loading folder',
+        folder_loading_module.FOLDER_LOAD_PROGRESS_STAGES,
+        snapshot_callback=progress_snapshots.append,
+    )
+
+    def fake_read_exif_metadata(
+            files: list[Path],
+            *,
+            batch_size: int,
+            batch_progress_callback: Any,
+    ) -> dict[str, dict[str, Any]]:
+        names = [path.name for path in files]
+        calls.append(names)
+        assert batch_size == 20
+        for batch_index in (1, 2):
+            batch_progress_callback(batch_index, 2, batch_size)
+
+        if all(path.suffix.lower() == '.cr3' for path in files):
+            return {}
+
+        return {
+            path.name: {'DateTimeOriginal': '2024:05:01 08:00:00'}
+            for path in files
+        }
+
+    loaded_state = folder_loading_module.load_folder_state(
+        tmp_path,
+        progress_reporter=reporter,
+        read_exif_metadata_fn=fake_read_exif_metadata,
+    )
+
+    assert calls == [
+        [f'IMG_{index:04d}.CR3' for index in range(21)],
+        [f'IMG_{index:04d}.JPG' for index in range(21)],
+    ]
+    metadata_messages = [
+        snapshot.current_message
+        for snapshot in progress_snapshots
+        if 'EXIF data' in snapshot.current_message
+    ]
+    assert (
+        'Loading fallback EXIF data, batch 3 of 4 (20 photos per batch)'
+        in metadata_messages
+    )
+    assert (
+        'Loading fallback EXIF data, batch 4 of 4 (20 photos per batch)'
+        in metadata_messages
+    )
+    assert loaded_state.photo_map['IMG_0000'].capture_at == datetime(
+        2024, 5, 1, 8, 0, 0, tzinfo=UTC
+    )
+    assert progress_snapshots[-1].stages[1].status == 'complete'
+    assert progress_snapshots[-1].stages[1].count_text() == '4 of 4'
+
+
+def test_folder_loading_preserves_partial_fallback_batch_progress(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify stopped fallback reads do not mark skipped fallback batches done.
+
+    A primary pass can complete successfully and still need JPEG fallback for
+    RAW files with no metadata. If that fallback pass stops after one reported
+    batch, the metadata row should preserve the combined completed count.
+    """
+    for index in range(21):
+        (tmp_path / f'IMG_{index:04d}.CR3').write_bytes(b'raw')
+        create_jpeg(tmp_path / f'IMG_{index:04d}.JPG', 'white')
+
+    calls: list[list[str]] = []
+    progress_snapshots = []
+    reporter = ProgressReporter(
+        'Loading folder',
+        folder_loading_module.FOLDER_LOAD_PROGRESS_STAGES,
+        snapshot_callback=progress_snapshots.append,
+    )
+
+    def fake_read_exif_metadata(
+            files: list[Path],
+            *,
+            batch_size: int,
+            batch_progress_callback: Any,
+    ) -> dict[str, dict[str, Any]]:
+        calls.append([path.name for path in files])
+        assert batch_size == 20
+        if all(path.suffix.lower() == '.cr3' for path in files):
+            batch_progress_callback(1, 2, batch_size)
+            batch_progress_callback(2, 2, batch_size)
+        else:
+            batch_progress_callback(1, 2, batch_size)
+
+        return {}
+
+    folder_loading_module.load_folder_state(
+        tmp_path,
+        progress_reporter=reporter,
+        read_exif_metadata_fn=fake_read_exif_metadata,
+    )
+
+    assert calls == [
+        [f'IMG_{index:04d}.CR3' for index in range(21)],
+        [f'IMG_{index:04d}.JPG' for index in range(21)],
+    ]
+    metadata_counts = [
+        snapshot.stages[1].count_text()
+        for snapshot in progress_snapshots
+        if len(snapshot.stages) > 1
+    ]
+    metadata_messages = [
+        snapshot.current_message
+        for snapshot in progress_snapshots
+        if 'EXIF data' in snapshot.current_message
+    ]
+    assert '4 of 4' not in metadata_counts
+    assert all('batch 4 of 4' not in message for message in metadata_messages)
+    assert (
+        'Loading fallback EXIF data, batch 3 of 4 (20 photos per batch)'
+        in metadata_messages
+    )
+    assert progress_snapshots[-1].stages[1].status == 'complete'
+    assert progress_snapshots[-1].stages[1].count_text() == '3 of 4'
+
+
+def test_folder_loading_preserves_zero_callback_fallback_progress(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify stopped fallback reads can preserve zero reported fallback batches.
+
+    A callback-aware fallback reader may stop before its first configured batch
+    callback. The combined metadata row should keep the primary pass count
+    instead of treating skipped fallback batches as completed work.
+    """
+    for index in range(21):
+        (tmp_path / f'IMG_{index:04d}.CR3').write_bytes(b'raw')
+        create_jpeg(tmp_path / f'IMG_{index:04d}.JPG', 'white')
+
+    calls: list[list[str]] = []
+    progress_snapshots = []
+    reporter = ProgressReporter(
+        'Loading folder',
+        folder_loading_module.FOLDER_LOAD_PROGRESS_STAGES,
+        snapshot_callback=progress_snapshots.append,
+    )
+
+    def fake_read_exif_metadata(
+            files: list[Path],
+            *,
+            batch_size: int,
+            batch_progress_callback: Any,
+    ) -> dict[str, dict[str, Any]]:
+        calls.append([path.name for path in files])
+        assert batch_size == 20
+        if all(path.suffix.lower() == '.cr3' for path in files):
+            batch_progress_callback(1, 2, batch_size)
+            batch_progress_callback(2, 2, batch_size)
+
+        return {}
+
+    folder_loading_module.load_folder_state(
+        tmp_path,
+        progress_reporter=reporter,
+        read_exif_metadata_fn=fake_read_exif_metadata,
+    )
+
+    assert calls == [
+        [f'IMG_{index:04d}.CR3' for index in range(21)],
+        [f'IMG_{index:04d}.JPG' for index in range(21)],
+    ]
+    metadata_messages = [
+        snapshot.current_message
+        for snapshot in progress_snapshots
+        if 'EXIF data' in snapshot.current_message
+    ]
+    assert (
+        'Loading fallback EXIF data, batch 2 of 4 (20 photos per batch)'
+        in metadata_messages
+    )
+    assert all('batch 4 of 4' not in message for message in metadata_messages)
+    assert progress_snapshots[-1].stages[1].status == 'complete'
+    assert progress_snapshots[-1].stages[1].count_text() == '2 of 4'
 
 
 def test_folder_loading_empty_metadata_stage_reports_zero_total(

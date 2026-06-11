@@ -232,7 +232,10 @@ class FolderHydrationWorker(QObject):
                 'viewer_cache',
                 current=0,
                 total=total,
-                overall_progress=100,
+                overall_progress=200 if total == 0 else 100,
+                # Empty hydration skips the loop below, so close this
+                # zero-work row immediately instead of leaving it active.
+                complete=total == 0,
             )
             for index, photo in enumerate(photos, start=1):
                 if self._cancelled:

@@ -184,6 +184,43 @@ def test_scene_detection_worker_accepts_legacy_progress_only_library() -> None:
     assert failed_events == []
 
 
+def test_scene_detection_worker_passes_snapshot_callback_to_kwargs_library() -> (
+    None
+):
+    """
+    Verify ``**kwargs`` scene adapters receive structured callbacks.
+
+    Small adapters may forward keyword arguments without naming the structured
+    callback explicitly. The worker should still pass the snapshot callback so
+    those adapters do not fall back to scalar-only progress.
+    """
+    progress_events: list[tuple[str, int]] = []
+    snapshot_events: list[object] = []
+    finished_events: list[str] = []
+    seen_kwargs: list[set[str]] = []
+
+    class KwargsLibrary:
+        @staticmethod
+        def detect_scenes(**kwargs: Any) -> None:
+            seen_kwargs.append(set(kwargs))
+            kwargs['progress_snapshot_callback']('scene snapshot')
+            kwargs['progress_callback']('legacy scene progress', 55)
+
+    worker = workers_module.SceneDetectionWorker(KwargsLibrary())
+    worker.progress.connect(
+        lambda message, progress: progress_events.append((message, progress))
+    )
+    worker.progress_snapshot.connect(snapshot_events.append)
+    worker.finished.connect(lambda: finished_events.append('finished'))
+
+    worker.run()
+
+    assert seen_kwargs == [{'progress_callback', 'progress_snapshot_callback'}]
+    assert snapshot_events == ['scene snapshot']
+    assert progress_events == []
+    assert finished_events == ['finished']
+
+
 def test_operation_worker_emits_result_and_failed_state() -> None:
     finished_results: list[OperationSummary] = []
     progress_events: list[tuple[str, int]] = []
@@ -273,6 +310,44 @@ def test_operation_worker_preserves_legacy_optional_second_argument() -> None:
     assert dry_run_values == [False]
     assert progress_events == [('legacy optional operation', 45)]
     assert snapshot_events == []
+    assert finished_results == [OperationSummary(processed_photos=1)]
+
+
+def test_operation_worker_passes_snapshot_callback_to_kwargs_operation() -> (
+    None
+):
+    """
+    Verify ``**kwargs`` operation adapters receive structured callbacks.
+
+    Operation callables may accept the legacy callback positionally and forward
+    newer keyword callbacks through ``**kwargs``. The worker should preserve
+    that compatibility while still preferring structured progress output.
+    """
+    progress_events: list[tuple[str, int]] = []
+    snapshot_events: list[object] = []
+    finished_results: list[OperationSummary] = []
+    seen_kwargs: list[set[str]] = []
+
+    def kwargs_operation(
+            progress_callback: Any, **kwargs: Any
+    ) -> OperationSummary:
+        seen_kwargs.append(set(kwargs))
+        kwargs['progress_snapshot_callback']('operation snapshot')
+        progress_callback('legacy operation progress', 65)
+        return OperationSummary(processed_photos=1)
+
+    worker = workers_module.OperationWorker(kwargs_operation)
+    worker.progress.connect(
+        lambda message, progress: progress_events.append((message, progress))
+    )
+    worker.progress_snapshot.connect(snapshot_events.append)
+    worker.finished.connect(finished_results.append)
+
+    worker.run()
+
+    assert seen_kwargs == [{'progress_snapshot_callback'}]
+    assert snapshot_events == ['operation snapshot']
+    assert progress_events == []
     assert finished_results == [OperationSummary(processed_photos=1)]
 
 
@@ -658,6 +733,189 @@ def test_folder_hydration_worker_cancel_skips_preview_warming(
 
     assert len(finished_results) == 1
     assert finished_results[0].preview_calls == []
+
+
+def test_folder_hydration_worker_preview_failure_still_counts_cache_attempt(
+        tmp_path: Path, monkeypatch: Any
+) -> None:
+    """
+    Verify failed cache renders still advance the viewer-cache progress row.
+
+    Hydration treats preview warming as best-effort. A bad thumbnail or viewer
+    render should not leave the handoff overlay stuck at the previous count.
+    """
+    snapshot_events: list[tuple[int, Path, Any]] = []
+    progress_events: list[tuple[str, int]] = []
+    finished_results: list[object] = []
+
+    @dataclass
+    class Photo:
+        photo_id: str
+
+    class Library:
+        def __init__(
+                self,
+                *,
+                cache_dir: object,
+                sort_mode: str,
+                sort_reversed: bool,
+                load_recursively: bool,
+        ) -> None:
+            del cache_dir, sort_mode, sort_reversed, load_recursively
+            self.preview_calls: list[tuple[str, str]] = []
+
+        def load_folder(
+                self,
+                folder: object,
+                *,
+                progress_callback: Any | None = None,
+                progress_reporter: Any | None = None,
+        ) -> None:
+            del folder, progress_callback, progress_reporter
+            self.photos = [Photo('A')]
+
+        def get_photos(self) -> list[Photo]:
+            return self.photos
+
+        def get_preview_path(self, photo_id: str, kind: str) -> str:
+            self.preview_calls.append((photo_id, kind))
+            if kind == 'viewer':
+                raise RuntimeError('viewer render failed')
+
+            return '/tmp/preview.jpg'
+
+    monkeypatch.setattr(photo_viewer_workers_module, 'PhotoLibrary', Library)
+    worker = photo_viewer_workers_module.FolderHydrationWorker(
+        12,
+        tmp_path,
+        cache_dir=tmp_path / '.cache',
+        sort_mode='filename',
+        sort_reversed=False,
+        load_recursively=True,
+    )
+    worker.progress.connect(
+        lambda _request_id, _folder, message, progress: (
+            progress_events.append((message, progress))
+        )
+    )
+    worker.progress_snapshot.connect(
+        lambda request_id, folder, snapshot: snapshot_events.append((
+            request_id,
+            folder,
+            snapshot,
+        ))
+    )
+    worker.finished.connect(
+        lambda _request_id, _folder, library: finished_results.append(library)
+    )
+
+    worker.run()
+
+    viewer_cache_stage = next(
+        stage
+        for stage in snapshot_events[-1][2].stages
+        if stage.stage_id == 'viewer_cache'
+    )
+    assert len(finished_results) == 1
+    assert finished_results[0].preview_calls == [
+        ('A', 'thumb'),
+        ('A', 'viewer'),
+    ]
+    assert progress_events[-1] == ('Preparing photo viewer cache, 1 of 1', 200)
+    assert viewer_cache_stage.status == 'complete'
+    assert viewer_cache_stage.count_text() == '1 of 1'
+
+
+def test_folder_hydration_worker_empty_folder_completes_zero_cache_stage(
+        tmp_path: Path, monkeypatch: Any
+) -> None:
+    """
+    Verify empty hydration completes the zero-work viewer cache stage.
+
+    The standalone viewer can hand off a hydrated library with no loaded photos
+    after a direct-vs-recursive preference change. The progress row should
+    close as a status-only zero-total stage instead of staying active.
+    """
+    snapshot_events: list[tuple[int, Path, Any]] = []
+    progress_events: list[tuple[str, int]] = []
+    finished_results: list[object] = []
+
+    class Library:
+        def __init__(
+                self,
+                *,
+                cache_dir: object,
+                sort_mode: str,
+                sort_reversed: bool,
+                load_recursively: bool,
+        ) -> None:
+            del cache_dir, sort_mode, sort_reversed, load_recursively
+            self.preview_calls: list[tuple[str, str]] = []
+
+        def load_folder(
+                self,
+                folder: object,
+                *,
+                progress_callback: Any | None = None,
+                progress_reporter: Any | None = None,
+        ) -> None:
+            del folder, progress_callback
+            assert progress_reporter is not None
+            progress_reporter.complete_stage(
+                'records',
+                message='Finished loading folder',
+                overall_progress=100,
+            )
+            self.photos: list[object] = []
+
+        def get_photos(self) -> list[object]:
+            return self.photos
+
+        @staticmethod
+        def get_preview_path(photo_id: str, kind: str) -> str:
+            raise AssertionError(
+                f'empty hydration should not warm {photo_id} {kind}'
+            )
+
+    monkeypatch.setattr(photo_viewer_workers_module, 'PhotoLibrary', Library)
+    worker = photo_viewer_workers_module.FolderHydrationWorker(
+        12,
+        tmp_path,
+        cache_dir=tmp_path / '.cache',
+        sort_mode='filename',
+        sort_reversed=False,
+        load_recursively=True,
+    )
+    worker.progress.connect(
+        lambda _request_id, _folder, message, progress: (
+            progress_events.append((message, progress))
+        )
+    )
+    worker.progress_snapshot.connect(
+        lambda request_id, folder, snapshot: snapshot_events.append((
+            request_id,
+            folder,
+            snapshot,
+        ))
+    )
+    worker.finished.connect(
+        lambda _request_id, _folder, library: finished_results.append(library)
+    )
+
+    worker.run()
+
+    viewer_cache_stage = next(
+        stage
+        for stage in snapshot_events[-1][2].stages
+        if stage.stage_id == 'viewer_cache'
+    )
+    assert len(finished_results) == 1
+    assert finished_results[0].preview_calls == []
+    assert progress_events[-1] == ('Preparing photo viewer cache', 200)
+    assert viewer_cache_stage.status == 'complete'
+    assert viewer_cache_stage.current == 0
+    assert viewer_cache_stage.total == 0
+    assert viewer_cache_stage.count_text() == ''
 
 
 def test_folder_hydration_worker_cancel_between_cache_renders_is_uncounted(

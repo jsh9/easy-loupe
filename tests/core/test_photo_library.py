@@ -9,6 +9,7 @@ import pytest
 import easy_loupe.analysis.scenes as analysis_scenes_module
 import easy_loupe.core.photo_library as library_module
 from easy_loupe.core.folder_loading import (
+    FOLDER_LOAD_PROGRESS_STAGES,
     PHOTO_SORT_MODE_CAPTURE_TIME,
     PHOTO_SORT_MODE_FILENAME,
 )
@@ -19,6 +20,7 @@ from easy_loupe.core.records import (
     SUPPORTED_EXTENSIONS,
     SceneGroup,
 )
+from easy_loupe.progress import ProgressReporter, ProgressStageDefinition
 from tests.core._helpers import FakeHash, create_jpeg, stub_read_exif
 
 if TYPE_CHECKING:
@@ -295,6 +297,44 @@ def test_load_folder_sorts_by_capture_time_ignores_unsupported_files_and_reports
         2024, 5, 1, 10, 0, 5, tzinfo=UTC
     )
     assert library.photos[2].capture_at is None
+
+
+def test_load_folder_caller_owned_reporter_leaves_downstream_stages_pending(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify caller-owned load reporters do not finish later UI stages.
+
+    MainWindow and photo-viewer hydration append list/cache stages after the
+    core folder stages. ``PhotoLibrary.load_folder`` should complete only the
+    folder-build row so those downstream stages remain available to update.
+    """
+    create_jpeg(tmp_path / 'IMG_2110.JPG', 'blue')
+    stub_read_exif(monkeypatch, {})
+    progress_snapshots = []
+    reporter = ProgressReporter(
+        'Loading folder',
+        (
+            *FOLDER_LOAD_PROGRESS_STAGES,
+            ProgressStageDefinition('thumbnails', 'Preparing thumbnails'),
+            ProgressStageDefinition('browse', 'Preparing browse grid'),
+        ),
+        snapshot_callback=progress_snapshots.append,
+    )
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path, progress_reporter=reporter)
+
+    stages = {stage.stage_id: stage for stage in progress_snapshots[-1].stages}
+    assert progress_snapshots[-1].current_message == 'Finished loading folder'
+    assert stages['scan'].status == 'complete'
+    assert stages['metadata'].status == 'complete'
+    assert stages['records'].status == 'complete'
+    assert stages['records'].count_text() == '1 of 1'
+    assert stages['thumbnails'].status == 'pending'
+    assert stages['thumbnails'].current is None
+    assert stages['browse'].status == 'pending'
+    assert stages['browse'].current is None
 
 
 def test_load_folder_filename_sort_ignores_missing_capture_times(

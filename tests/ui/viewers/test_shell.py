@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 import easy_loupe.ui.viewers.shell as shell_module
-from easy_loupe.progress import ProgressStageSnapshot
+from easy_loupe.progress import ProgressSnapshot, ProgressStageSnapshot
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -77,6 +77,83 @@ def test_progress_stage_row_hides_zero_total_but_keeps_unknown_indeterminate() -
     assert row.progress_bar.maximum() == 0
 
     row.close()
+
+
+def test_progress_stage_list_removes_stale_rows_and_reorders() -> None:
+    """
+    Verify stage-list updates remove old rows and preserve snapshot order.
+
+    Structured overlays can move between workflows with different stage sets.
+    The shared renderer must not leave stale rows visible or keep rows in the
+    order from a previous snapshot.
+    """
+    app = QApplication.instance() or QApplication([])
+    stage_list = shell_module.ProgressStageListWidget()
+    stage_list.show()
+
+    stage_list.update_snapshot(
+        ProgressSnapshot(
+            workflow_label='Loading folder',
+            current_message='Preparing records',
+            overall_progress=50,
+            stages=(
+                ProgressStageSnapshot(
+                    'scan', 'Scanning folder', 1, 1, 'complete'
+                ),
+                ProgressStageSnapshot(
+                    'metadata', 'Loading EXIF data', 1, 2, 'active'
+                ),
+                ProgressStageSnapshot(
+                    'records', 'Building photo list', 0, 5, 'pending'
+                ),
+            ),
+        )
+    )
+    app.processEvents()
+
+    assert _progress_stage_row_order(stage_list) == [
+        'scan',
+        'metadata',
+        'records',
+    ]
+
+    stage_list.update_snapshot(
+        ProgressSnapshot(
+            workflow_label='Loading folder',
+            current_message='Reordered rows',
+            overall_progress=60,
+            stages=(
+                ProgressStageSnapshot(
+                    'records', 'Building photo list', 2, 5, 'active'
+                ),
+                ProgressStageSnapshot(
+                    'scan', 'Scanning folder', 1, 1, 'complete'
+                ),
+            ),
+        )
+    )
+    app.processEvents()
+
+    assert set(stage_list._rows) == {'records', 'scan'}
+    assert _progress_stage_row_order(stage_list) == ['records', 'scan']
+    assert stage_list.isVisible() is True
+
+    stage_list.close()
+
+
+def _progress_stage_row_order(
+        stage_list: shell_module.ProgressStageListWidget,
+) -> list[str]:
+    row_ids: list[str] = []
+    for index in range(stage_list._layout.count()):
+        row = stage_list._layout.itemAt(index).widget()
+        row_ids.extend(
+            stage_id
+            for stage_id, known_row in stage_list._rows.items()
+            if row is known_row
+        )
+
+    return row_ids
 
 
 def test_resolve_widget_screen_prefers_window_handle_screen(

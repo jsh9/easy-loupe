@@ -13,6 +13,7 @@ import easy_loupe.ui.main_window.build as build_module
 import easy_loupe.ui.main_window.window as main_window_module
 import easy_loupe.ui.main_window.workflows as workflows_module
 import easy_loupe.ui.theme as theme_module
+from easy_loupe.core import exif as core_exif_module
 from easy_loupe.core.records import METADATA_FILENAME
 from easy_loupe.operations.common import OperationSummary, UndoPlan
 from easy_loupe.operations.export import OrganizeFilesOptions
@@ -317,6 +318,78 @@ def test_main_window_choose_folder_empty_load_shows_no_eligible_photos_dialog(
     assert window.open_button.isEnabled() is True
     assert window.detect_button.isEnabled() is False
     assert window.organize_button.isEnabled() is False
+
+    window.close()
+    del app
+
+
+def test_main_window_empty_choose_folder_progress_reports_zero_total_rows(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify empty folder loads still render completed zero-work stage rows.
+
+    The empty-folder dialog appears after the overlay is hidden, so this
+    captures the structured progress state immediately before cleanup. It
+    protects the UI from showing fake ``0 of 0`` bars for zero-work stages.
+    """
+    monkeypatch.setattr(
+        QFileDialog,
+        'getExistingDirectory',
+        lambda *_args, **_kwargs: str(tmp_path),
+    )
+    monkeypatch.setattr(
+        QMessageBox,
+        'information',
+        lambda *_args, **_kwargs: QMessageBox.StandardButton.Ok,
+    )
+    app = QApplication.instance() or QApplication([])
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    window.show()
+    app.processEvents()
+    progress_before_hide: list[
+        tuple[set[str], dict[str, bool], bool, bool]
+    ] = []
+    original_hide_progress = window._hide_progress
+
+    def record_progress_before_hide() -> None:
+        rows = window.progress_stage_list._rows
+        progress_before_hide.append((
+            set(rows),
+            {
+                stage_id: row.progress_bar.isVisible()
+                for stage_id, row in rows.items()
+            },
+            window.progress_stage_list.isVisible(),
+            window.overlay_progress_bar.isVisible(),
+        ))
+        original_hide_progress()
+
+    monkeypatch.setattr(window, '_hide_progress', record_progress_before_hide)
+
+    window.choose_folder()
+    app.processEvents()
+
+    assert len(progress_before_hide) == 1
+    stage_ids, row_bar_visibility, stage_list_visible, scalar_bar_visible = (
+        progress_before_hide[0]
+    )
+    assert stage_ids == {
+        'scan',
+        'metadata',
+        'records',
+        'thumbnails',
+        'browse',
+    }
+    assert stage_list_visible is True
+    assert scalar_bar_visible is False
+    assert row_bar_visibility['scan'] is True
+    assert row_bar_visibility['metadata'] is False
+    assert row_bar_visibility['records'] is False
+    assert row_bar_visibility['thumbnails'] is False
+    assert row_bar_visibility['browse'] is False
+    assert window.progress_overlay.isHidden() is True
 
     window.close()
     del app
@@ -1707,6 +1780,76 @@ def test_main_window_list_progress_counts_completed_preview_rows(
     del app
 
 
+def test_main_window_scene_stack_progress_counts_scene_rows(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify scene-stack progress counts rendered scene rows, not photos.
+
+    Scene mode renders one thumbnail row per scene stack. Progress should
+    therefore advance from completed scene rows instead of the number of photos
+    contained in those scenes.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_9200', 'dimgray'),
+            ('IMG_9201', 'darkgray'),
+            ('IMG_9202', 'blue'),
+        ],
+        scene_groups=[['IMG_9200', 'IMG_9201'], ['IMG_9202']],
+    )
+    snapshots = []
+    reporter = workflows_module.ProgressReporter(
+        'Loading folder',
+        workflows_module.LOAD_WORKFLOW_PROGRESS_STAGES,
+        snapshot_callback=snapshots.append,
+    )
+    original_get_preview_path = window.library.get_preview_path
+    progress_before_preview: list[tuple[str, int | None]] = []
+
+    def latest_thumbnail_current() -> int | None:
+        stage = next(
+            stage
+            for stage in snapshots[-1].stages
+            if stage.stage_id == 'thumbnails'
+        )
+        return stage.current
+
+    def record_get_preview_path(photo_id: str, kind: str) -> Path:
+        if kind == 'thumb':
+            progress_before_preview.append((
+                photo_id,
+                latest_thumbnail_current(),
+            ))
+
+        return original_get_preview_path(photo_id, kind)
+
+    monkeypatch.setattr(
+        window.library, 'get_preview_path', record_get_preview_path
+    )
+
+    window._populate_thumbnail_list(
+        show_progress=True,
+        scroll_current_item_into_view=False,
+        progress_reporter=reporter,
+    )
+
+    thumbnail_stage = next(
+        stage
+        for stage in snapshots[-1].stages
+        if stage.stage_id == 'thumbnails'
+    )
+    assert progress_before_preview == [('IMG_9200', 0), ('IMG_9202', 1)]
+    assert thumbnail_stage.label == 'Preparing scene stacks'
+    assert thumbnail_stage.count_text() == '2 of 2'
+    assert thumbnail_stage.status == 'complete'
+
+    window.close()
+    del app
+
+
 def test_main_window_handle_scene_failed_and_clear_worker_restore_ui(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2081,6 +2224,322 @@ def test_main_window_choose_folder_success_populates_ui(
 
     assert window.current_photo_id == 'IMG_9081'
     assert window.thumbnail_list.currentRow() == 1
+
+    window.close()
+    del app
+
+
+def test_main_window_choose_folder_progress_reports_all_load_stages(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify real folder-open progress reaches every structured load stage.
+
+    Helper-level tests cover the reporter and list loops separately. This
+    integration check keeps ``choose_folder`` wired to the shared reporter
+    through folder loading, thumbnail rows, and browse-grid rows.
+    """
+    create_jpeg(tmp_path / 'IMG_9090.JPG', 'dimgray')
+    create_jpeg(tmp_path / 'IMG_9091.JPG', 'blue')
+    monkeypatch.setattr(
+        QFileDialog,
+        'getExistingDirectory',
+        lambda *_args, **_kwargs: str(tmp_path),
+    )
+
+    def fake_read_exif_metadata(
+            files: list[Path],
+            *,
+            batch_size: int,
+            batch_progress_callback: Any,
+    ) -> dict[str, dict[str, Any]]:
+        del batch_size
+        batch_progress_callback(1, 1, 20)
+        return {path.name: {} for path in files}
+
+    monkeypatch.setattr(
+        core_exif_module, 'read_exif_metadata', fake_read_exif_metadata
+    )
+    app = QApplication.instance() or QApplication([])
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    window.show()
+    app.processEvents()
+    progress_before_hide: list[
+        tuple[
+            set[str],
+            dict[str, tuple[int, int, bool]],
+            set[str],
+            bool,
+            bool,
+        ]
+    ] = []
+    original_hide_progress = window._hide_progress
+
+    def record_progress_before_hide() -> None:
+        rows = window.progress_stage_list._rows
+        progress_before_hide.append((
+            set(rows),
+            {
+                stage_id: (
+                    row.progress_bar.value(),
+                    row.progress_bar.maximum(),
+                    row.progress_bar.isVisible(),
+                )
+                for stage_id, row in rows.items()
+            },
+            {
+                label.text()
+                for label in window.progress_stage_list.findChildren(QLabel)
+                if label.text()
+            },
+            window.progress_stage_list.isVisible(),
+            window.overlay_progress_bar.isVisible(),
+        ))
+        original_hide_progress()
+
+    monkeypatch.setattr(window, '_hide_progress', record_progress_before_hide)
+
+    window.choose_folder()
+    app.processEvents()
+
+    assert len(progress_before_hide) == 1
+    (
+        stage_ids,
+        stage_progress,
+        label_texts,
+        stage_list_visible,
+        scalar_bar_visible,
+    ) = progress_before_hide[0]
+    assert stage_ids == {
+        'scan',
+        'metadata',
+        'records',
+        'thumbnails',
+        'browse',
+    }
+    assert stage_list_visible is True
+    assert scalar_bar_visible is False
+    assert stage_progress == {
+        'scan': (100, 100, True),
+        'metadata': (1, 1, True),
+        'records': (2, 2, True),
+        'thumbnails': (2, 2, True),
+        'browse': (2, 2, True),
+    }
+    assert {
+        'Scanning folder',
+        'Loading EXIF data (20 photos per batch)',
+        'Batch 1 of 1',
+        'Building photo list',
+        'Preparing thumbnails',
+        'Preparing browse grid',
+        '2 of 2',
+    } <= label_texts
+    assert window.progress_overlay.isHidden() is True
+    assert window.library.current_folder == tmp_path.resolve()
+    assert len(window.library.photos) == 2
+
+    window.close()
+    del app
+
+
+@pytest.mark.parametrize(
+    'reload_method_name',
+    [
+        pytest.param('_reload_current_folder_after_move', id='after-move'),
+        pytest.param('_reload_current_folder_after_undo', id='after-undo'),
+    ],
+)
+def test_main_window_post_operation_reload_progress_reports_all_load_stages(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        reload_method_name: str,
+) -> None:
+    """
+    Verify post-operation folder reloads keep structured progress wired.
+
+    Move and undo completion reload the current folder through separate helper
+    methods. They should reuse the same multi-stage load/list reporter as a
+    manual folder open instead of falling back to stale scalar operation text.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_9120', 'dimgray'),
+            ('IMG_9121', 'blue'),
+        ],
+    )
+
+    def fake_read_exif_metadata(
+            files: list[Path],
+            *,
+            batch_size: int,
+            batch_progress_callback: Any,
+    ) -> dict[str, dict[str, Any]]:
+        batch_progress_callback(1, 1, batch_size)
+        return {path.name: {} for path in files}
+
+    monkeypatch.setattr(
+        core_exif_module, 'read_exif_metadata', fake_read_exif_metadata
+    )
+    # This helper keeps its preview cache under ``tmp_path``. Direct loading
+    # keeps the reload assertion focused on the visible photo set instead of
+    # recursively discovering test-generated cache JPEGs.
+    window.library.set_load_recursively(False)
+    window._show_progress('Operation complete', 50)
+
+    getattr(window, reload_method_name)()
+    app.processEvents()
+
+    rows = window.progress_stage_list._rows
+    stage_progress = {
+        stage_id: (
+            row.progress_bar.value(),
+            row.progress_bar.maximum(),
+            row.progress_bar.isVisible(),
+        )
+        for stage_id, row in rows.items()
+    }
+    label_texts = {
+        label.text()
+        for label in window.progress_stage_list.findChildren(QLabel)
+        if label.text()
+    }
+
+    assert set(rows) == {
+        'scan',
+        'metadata',
+        'records',
+        'thumbnails',
+        'browse',
+    }
+    assert window.progress_stage_list.isVisible() is True
+    assert window.overlay_progress_bar.isVisible() is False
+    assert stage_progress == {
+        'scan': (100, 100, True),
+        'metadata': (1, 1, True),
+        'records': (2, 2, True),
+        'thumbnails': (2, 2, True),
+        'browse': (2, 2, True),
+    }
+    assert {
+        'Building photo list',
+        'Preparing thumbnails',
+        'Preparing browse grid',
+        '2 of 2',
+    } <= label_texts
+
+    window._hide_progress()
+    window.close()
+    del app
+
+
+def test_main_window_recursive_reload_progress_reports_all_load_stages(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify Include-subfolders reloads keep structured progress wired.
+
+    The recursive preference path reloads the current folder through a separate
+    helper from manual opens and post-operation reloads. Capture the overlay
+    immediately before cleanup so a scalar-progress regression cannot pass
+    unnoticed after the rows are hidden.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_9130', 'dimgray'),
+            ('IMG_9131', 'blue'),
+        ],
+    )
+
+    def fake_read_exif_metadata(
+            files: list[Path],
+            *,
+            batch_size: int,
+            batch_progress_callback: Any,
+    ) -> dict[str, dict[str, Any]]:
+        batch_progress_callback(1, 1, batch_size)
+        return {path.name: {} for path in files}
+
+    monkeypatch.setattr(
+        core_exif_module, 'read_exif_metadata', fake_read_exif_metadata
+    )
+    progress_before_hide: list[
+        tuple[
+            set[str],
+            dict[str, tuple[int, int, bool]],
+            set[str],
+            bool,
+            bool,
+        ]
+    ] = []
+    original_hide_progress = window._hide_progress
+
+    def record_progress_before_hide() -> None:
+        rows = window.progress_stage_list._rows
+        progress_before_hide.append((
+            set(rows),
+            {
+                stage_id: (
+                    row.progress_bar.value(),
+                    row.progress_bar.maximum(),
+                    row.progress_bar.isVisible(),
+                )
+                for stage_id, row in rows.items()
+            },
+            {
+                label.text()
+                for label in window.progress_stage_list.findChildren(QLabel)
+                if label.text()
+            },
+            window.progress_stage_list.isVisible(),
+            window.overlay_progress_bar.isVisible(),
+        ))
+        original_hide_progress()
+
+    monkeypatch.setattr(window, '_hide_progress', record_progress_before_hide)
+
+    window._reload_current_folder_after_recursive_preference_change(
+        load_recursively=False
+    )
+    app.processEvents()
+
+    assert len(progress_before_hide) == 1
+    (
+        stage_ids,
+        stage_progress,
+        label_texts,
+        stage_list_visible,
+        scalar_bar_visible,
+    ) = progress_before_hide[0]
+    assert stage_ids == {
+        'scan',
+        'metadata',
+        'records',
+        'thumbnails',
+        'browse',
+    }
+    assert stage_list_visible is True
+    assert scalar_bar_visible is False
+    assert stage_progress == {
+        'scan': (100, 100, True),
+        'metadata': (1, 1, True),
+        'records': (2, 2, True),
+        'thumbnails': (2, 2, True),
+        'browse': (2, 2, True),
+    }
+    assert {
+        'Building photo list',
+        'Preparing thumbnails',
+        'Preparing browse grid',
+        '2 of 2',
+    } <= label_texts
+    assert window.library.load_recursively is False
+    assert window.progress_overlay.isHidden() is True
 
     window.close()
     del app
@@ -2687,6 +3146,122 @@ def test_main_window_operation_worker_legacy_progress_updates_overlay(
     assert window.overlay_message_label.text() == 'Legacy operation progress'
     assert window.overlay_progress_bar.isVisible() is True
     assert window.overlay_progress_bar.value() == 42
+
+    finished_thread = window._operation_thread
+    finished_worker = window._operation_worker
+    window._clear_operation_worker(finished_thread, finished_worker)
+    window.close()
+    del app
+
+
+def test_main_window_structured_organizer_progress_updates_overlay(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify organizer snapshot progress renders stage rows in MainWindow.
+
+    Worker-level tests cover callback routing; this checks the actual main
+    window signal connection used by organizer operations.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_9110', 'dimgray')],
+    )
+    monkeypatch.setattr(QThread, 'start', lambda _thread: None)
+    request = OrganizerDialogResult(
+        mode='reorganize',
+        organize_options=OrganizeFilesOptions(
+            criterion='flag',
+            action='copy',
+            output_parent=tmp_path,
+            include_untagged=False,
+            conflict_policy='fail',
+        ),
+    )
+    reporter = workflows_module.ProgressReporter(
+        'Organizing photos',
+        (
+            workflows_module.ProgressStageDefinition(
+                'organize', 'Organizing photo files'
+            ),
+        ),
+    )
+    snapshot = reporter.update_stage(
+        'organize',
+        current=1,
+        total=2,
+        overall_progress=50,
+    )
+
+    window._start_organizer_request(request)
+    assert window._operation_worker is not None
+
+    window._operation_worker.progress_snapshot.emit(snapshot)
+    app.processEvents()
+
+    label_texts = {
+        label.text()
+        for label in window.progress_stage_list.findChildren(QLabel)
+    }
+    assert window.progress_overlay.isVisible() is True
+    assert window.progress_stage_list.isVisible() is True
+    assert window.overlay_progress_bar.isVisible() is False
+    assert 'Organizing photo files' in label_texts
+    assert '1 of 2' in label_texts
+
+    finished_thread = window._operation_thread
+    finished_worker = window._operation_worker
+    window._clear_operation_worker(finished_thread, finished_worker)
+    window.close()
+    del app
+
+
+def test_main_window_structured_undo_progress_updates_overlay(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify undo snapshot progress renders stage rows in MainWindow.
+
+    Undo uses a separate worker setup path from organizer runs, so this keeps
+    its structured progress signal connected to the overlay.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_9115', 'dimgray')],
+    )
+    monkeypatch.setattr(QThread, 'start', lambda _thread: None)
+    reporter = workflows_module.ProgressReporter(
+        'Undoing photo organization',
+        (
+            workflows_module.ProgressStageDefinition(
+                'undo', 'Undoing photo organization'
+            ),
+        ),
+    )
+    snapshot = reporter.update_stage(
+        'undo',
+        current=1,
+        total=3,
+        overall_progress=33,
+    )
+
+    window._start_undo_operation(UndoPlan())
+    assert window._operation_worker is not None
+
+    window._operation_worker.progress_snapshot.emit(snapshot)
+    app.processEvents()
+
+    label_texts = {
+        label.text()
+        for label in window.progress_stage_list.findChildren(QLabel)
+    }
+    assert window.progress_overlay.isVisible() is True
+    assert window.progress_stage_list.isVisible() is True
+    assert window.overlay_progress_bar.isVisible() is False
+    assert 'Undoing photo organization' in label_texts
+    assert '1 of 3' in label_texts
 
     finished_thread = window._operation_thread
     finished_worker = window._operation_worker
