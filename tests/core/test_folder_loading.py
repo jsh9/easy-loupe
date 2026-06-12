@@ -18,33 +18,6 @@ def test_folder_loading_module_exports_load_folder_state() -> None:
 
 
 @pytest.mark.parametrize(
-    ('photo_count', 'expected_batch_size'),
-    [
-        pytest.param(0, 20, id='empty-folder'),
-        pytest.param(1, 20, id='single-photo'),
-        pytest.param(100, 20, id='small-upper-bound'),
-        pytest.param(101, 50, id='medium-lower-bound'),
-        pytest.param(499, 50, id='medium-upper-bound'),
-        pytest.param(500, 100, id='large-lower-bound'),
-        pytest.param(3651, 100, id='large-folder'),
-    ],
-)
-def test_metadata_batch_size_uses_grouped_photo_thresholds(
-        photo_count: int, expected_batch_size: int
-) -> None:
-    """
-    Verify metadata batch sizes are based on grouped photo counts.
-
-    This protects the user-visible progress cadence where JPEG+RAW companions
-    count as one photo, and the threshold edges are easy to regress.
-    """
-    assert (
-        folder_loading_module.metadata_batch_size_for_photo_count(photo_count)
-        == expected_batch_size
-    )
-
-
-@pytest.mark.parametrize(
     ('photo_count', 'expected_batch_size', 'expected_batches'),
     [
         pytest.param(101, 50, 3, id='medium-folder'),

@@ -24,7 +24,7 @@ from easy_loupe.ui.widgets import ThumbnailItemWidget
 
 if TYPE_CHECKING:
     from easy_loupe.core.photo_library import PhotoRecord, SceneGroup
-    from easy_loupe.progress import ProgressReporter
+    from easy_loupe.progress import CountedProgressStage, ProgressReporter
     from easy_loupe.ui.main_window.window import MainWindow
 
 MULTI_PHOTO_SELECTION_COUNT = 2
@@ -196,14 +196,13 @@ class MainWindowPresentationMixin:
             self._scene_by_id = {}
             photos = self.library.get_photos()
             total = max(len(photos), 1)
-            if show_progress and progress_reporter is not None:
-                self._report_list_population_progress(
+            thumbnail_progress = None
+            if show_progress:
+                thumbnail_progress = self._start_list_population_progress(
                     progress_reporter=progress_reporter,
                     stage_id='thumbnails',
                     label='Preparing thumbnails',
-                    current=0,
                     total=len(photos),
-                    progress=100,
                 )
 
             for index, photo in enumerate(photos, start=1):
@@ -213,11 +212,10 @@ class MainWindowPresentationMixin:
                 if show_progress:
                     progress = 100 + int((index / total) * 100)
                     self._report_list_population_progress(
-                        progress_reporter=progress_reporter,
+                        progress_stage=thumbnail_progress,
                         stage_id='thumbnails',
                         label='Preparing thumbnails',
                         current=index,
-                        total=len(photos),
                         progress=progress,
                     )
 
@@ -226,14 +224,13 @@ class MainWindowPresentationMixin:
             self._rebuild_scene_lookup()
             scenes = self.library.get_scene_groups()
             total = max(len(scenes), 1)
-            if show_progress and progress_reporter is not None:
-                self._report_list_population_progress(
+            thumbnail_progress = None
+            if show_progress:
+                thumbnail_progress = self._start_list_population_progress(
                     progress_reporter=progress_reporter,
                     stage_id='thumbnails',
                     label='Preparing scene stacks',
-                    current=0,
                     total=len(scenes),
-                    progress=100,
                 )
 
             for index, scene in enumerate(scenes, start=1):
@@ -260,11 +257,10 @@ class MainWindowPresentationMixin:
                 if show_progress:
                     progress = 100 + int((index / total) * 100)
                     self._report_list_population_progress(
-                        progress_reporter=progress_reporter,
+                        progress_stage=thumbnail_progress,
                         stage_id='thumbnails',
                         label='Preparing scene stacks',
                         current=index,
-                        total=len(scenes),
                         progress=progress,
                     )
 
@@ -290,14 +286,13 @@ class MainWindowPresentationMixin:
 
         photos = self.library.get_photos()
         total = max(len(photos), 1)
-        if show_progress and progress_reporter is not None:
-            self._report_list_population_progress(
+        browse_progress = None
+        if show_progress:
+            browse_progress = self._start_list_population_progress(
                 progress_reporter=progress_reporter,
                 stage_id='browse',
                 label='Preparing browse grid',
-                current=0,
                 total=len(photos),
-                progress=100,
             )
 
         for index, photo in enumerate(photos, start=1):
@@ -307,11 +302,10 @@ class MainWindowPresentationMixin:
             if show_progress:
                 progress = 100 + int((index / total) * 100)
                 self._report_list_population_progress(
-                    progress_reporter=progress_reporter,
+                    progress_stage=browse_progress,
                     stage_id='browse',
                     label='Preparing browse grid',
                     current=index,
-                    total=len(photos),
                     progress=progress,
                 )
 
@@ -324,14 +318,35 @@ class MainWindowPresentationMixin:
         self.browse_list.blockSignals(False)
         self._refresh_browse_layout()
 
-    def _report_list_population_progress(
-            self: MainWindow,
+    @staticmethod
+    def _start_list_population_progress(
             *,
             progress_reporter: ProgressReporter | None,
             stage_id: str,
             label: str,
-            current: int,
             total: int,
+    ) -> CountedProgressStage | None:
+        if progress_reporter is None:
+            return None
+
+        progress_stage = progress_reporter.counted_stage(
+            stage_id,
+            label=label,
+            total=total,
+            start_progress=100,
+            end_progress=200,
+            zero_progress=100,
+        )
+        progress_stage.start()
+        return progress_stage
+
+    def _report_list_population_progress(
+            self: MainWindow,
+            *,
+            progress_stage: CountedProgressStage | None,
+            stage_id: str,
+            label: str,
+            current: int,
             progress: int,
     ) -> None:
         """
@@ -341,15 +356,9 @@ class MainWindowPresentationMixin:
         ``get_preview_path``. Counts represent completed rows, not the row that
         is about to start.
         """
-        if progress_reporter is not None:
-            progress_reporter.update_stage(
-                stage_id,
-                label=label,
-                current=current,
-                total=total,
-                overall_progress=progress,
-                complete=current == total,
-            )
+        del stage_id
+        if progress_stage is not None:
+            progress_stage.update(current)
             return
 
         self._show_progress(label, progress)

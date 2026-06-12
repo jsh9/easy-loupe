@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from easy_loupe.progress import ProgressReporter, ProgressStageDefinition
+import inspect
+
+from easy_loupe.progress import (
+    ProgressReporter,
+    ProgressStageDefinition,
+    accepted_keyword_arguments,
+    accepts_keyword_argument,
+)
 
 
 def test_progress_reporter_emits_legacy_and_stage_snapshots() -> None:
@@ -127,3 +134,84 @@ def test_progress_reporter_preserves_partial_determinate_completion() -> None:
     assert metadata_stage.count_text() == '1 of 3'
     assert metadata_stage.progress_value() == 1
     assert snapshots[-1].stages[0].count_text() == '1 of 3'
+
+
+def test_counted_progress_stage_completes_zero_work_with_configured_progress() -> (
+    None
+):
+    """
+    Verify counted stages centralize no-op completion semantics.
+
+    Different workflows preserve different progress values for zero-work
+    stages, so callers need an explicit zero-progress override.
+    """
+    snapshots = []
+    reporter = ProgressReporter(
+        'Loading folder',
+        (ProgressStageDefinition('records', 'Building photo list'),),
+        snapshot_callback=snapshots.append,
+    )
+    records = reporter.counted_stage(
+        'records',
+        label='Building photo list',
+        total=0,
+        start_progress=35,
+        end_progress=90,
+        zero_progress=35,
+    )
+
+    records.start()
+
+    stage = snapshots[-1].stages[0]
+    assert snapshots[-1].overall_progress == 35
+    assert stage.status == 'complete'
+    assert stage.current == 0
+    assert stage.total == 0
+    assert stage.count_text() == ''
+
+
+def test_counted_progress_stage_accepts_custom_progress_formula() -> None:
+    """Verify unusual progress curves can still use shared count handling."""
+    snapshots = []
+    reporter = ProgressReporter(
+        'Detecting scenes',
+        (ProgressStageDefinition('grouping', 'Grouping scenes'),),
+        snapshot_callback=snapshots.append,
+    )
+    grouping = reporter.counted_stage(
+        'grouping',
+        label='Grouping scenes',
+        total=3,
+        start_progress=80,
+        end_progress=99,
+        progress_value_fn=lambda current, _total: 80 if current == 1 else 99,
+    )
+
+    grouping.update(1)
+    grouping.update(3)
+
+    assert snapshots[0].overall_progress == 80
+    assert snapshots[0].stages[0].count_text() == '1 of 3'
+    assert snapshots[1].overall_progress == 99
+    assert snapshots[1].stages[0].status == 'complete'
+
+
+def test_progress_callback_signature_helpers_accept_kwargs() -> None:
+    """
+    Verify shared callback introspection treats ``**kwargs`` as opt-in.
+
+    EXIF readers and UI workers both rely on this rule to forward structured
+    progress callbacks through wrapper functions.
+    """
+
+    def callback_adapter(files: object, **kwargs: object) -> None:
+        del files, kwargs
+
+    signature = inspect.signature(callback_adapter)
+    kwargs = {
+        'batch_size': 20,
+        'batch_progress_callback': object(),
+    }
+
+    assert accepts_keyword_argument(signature, 'batch_progress_callback')
+    assert accepted_keyword_arguments(signature, kwargs) == kwargs

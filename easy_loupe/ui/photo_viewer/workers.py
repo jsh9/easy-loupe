@@ -228,15 +228,17 @@ class FolderHydrationWorker(QObject):
             library.load_folder(self._folder, progress_reporter=reporter)
             photos = library.get_photos()
             total = len(photos)
-            reporter.update_stage(
+            viewer_cache_progress = reporter.counted_stage(
                 'viewer_cache',
-                current=0,
+                label='Preparing photo viewer cache',
                 total=total,
-                overall_progress=200 if total == 0 else 100,
-                # Empty hydration skips the loop below, so close this
-                # zero-work row immediately instead of leaving it active.
-                complete=total == 0,
+                start_progress=100,
+                end_progress=200,
+                zero_progress=200,
             )
+            # Empty hydration skips the loop below, so close this zero-work
+            # row immediately instead of leaving it active.
+            viewer_cache_progress.start()
             for index, photo in enumerate(photos, start=1):
                 if self._cancelled:
                     break
@@ -252,14 +254,7 @@ class FolderHydrationWorker(QObject):
 
                 # Counts reflect completed cache attempts. Canceling between
                 # renders leaves the partial photo uncounted.
-                progress = 100 + int((index / max(total, 1)) * 100)
-                reporter.update_stage(
-                    'viewer_cache',
-                    current=index,
-                    total=total,
-                    overall_progress=progress,
-                    complete=index == total,
-                )
+                viewer_cache_progress.update(index)
         except Exception as exc:  # noqa: BLE001  # pragma: no cover - thread safety path
             self.failed.emit(self._request_id, self._folder, str(exc))
             return

@@ -10,6 +10,8 @@
   - Folder metadata loading now sends one primary ExifTool source per grouped
     photo, falls back to companion previews only when needed, and reports
     explicit EXIF batch counts in the progress overlay.
+  - Progress reporting, grouped EXIF loading, worker routing, and overlay
+    rendering are split into dedicated modules for easier maintenance.
 
 - Fixed
 

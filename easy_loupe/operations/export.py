@@ -88,18 +88,20 @@ def organize_photos(
     skipped_photos = 0
     skipped_paths: list[str] = []
     total_jobs = len(jobs)
+    organize_progress = reporter.counted_stage(
+        'organize',
+        label='Organizing photo files',
+        total=total_jobs,
+        start_progress=5,
+        end_progress=99,
+        zero_progress=99,
+    )
     try:
         if total_jobs == 0:
             # No organization jobs means no filesystem loop will report
             # progress. Complete the work stage with a zero total so the UI
             # renders a status-only row for this no-op operation.
-            reporter.update_stage(
-                'organize',
-                current=0,
-                total=0,
-                overall_progress=99,
-                complete=True,
-            )
+            organize_progress.update(0)
 
         for index, job in enumerate(jobs, start=1):
             conflicts = [
@@ -135,14 +137,7 @@ def organize_photos(
                             )
                         )
 
-            progress = 5 + int((index / max(total_jobs, 1)) * 94)
-            reporter.update_stage(
-                'organize',
-                current=index,
-                total=total_jobs,
-                overall_progress=min(progress, 99),
-                complete=index == total_jobs,
-            )
+            organize_progress.update(index)
     except Exception:
         undo_operation(undo_plan)
         raise

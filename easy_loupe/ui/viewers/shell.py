@@ -18,29 +18,23 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
-    QProgressBar,
     QVBoxLayout,
     QWidget,
 )
 
+import easy_loupe.ui.progress_overlay as progress_overlay_module
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from easy_loupe.progress import ProgressSnapshot, ProgressStageSnapshot
 
 DEFAULT_EXIF_OVERLAY_MARGIN = 14
 VIEWER_KEYBOARD_PAN_STEP = 120
-
-
-@dataclass(frozen=True, slots=True)
-class ProgressOverlayWidgets:
-    """Widget bundle for a centered progress overlay."""
-
-    overlay: QWidget
-    panel: QFrame
-    message_label: QLabel
-    progress_bar: QProgressBar
-    stage_list: ProgressStageListWidget
+ProgressOverlayController = progress_overlay_module.ProgressOverlayController
+ProgressOverlayWidgets = progress_overlay_module.ProgressOverlayWidgets
+ProgressStageListWidget = progress_overlay_module.ProgressStageListWidget
+ProgressStageRow = progress_overlay_module.ProgressStageRow
+build_progress_overlay = progress_overlay_module.build_progress_overlay
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,119 +45,6 @@ class TransientMessageOverlayWidgets:
     panel: QFrame
     message_label: QLabel
     timer: QTimer
-
-
-class ProgressStageRow(QWidget):
-    """Single progress row showing one stage label, count, and bar."""
-
-    def __init__(
-            self,
-            stage: ProgressStageSnapshot,
-            parent: QWidget | None = None,
-    ) -> None:
-        super().__init__(parent)
-        self.setObjectName('progressStageRow')
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
-
-        text_row = QHBoxLayout()
-        text_row.setContentsMargins(0, 0, 0, 0)
-        text_row.setSpacing(12)
-        self.label = QLabel('', self)
-        self.label.setObjectName('progressStageLabel')
-        self.count_label = QLabel('', self)
-        self.count_label.setObjectName('progressStageCount')
-        self.count_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        text_row.addWidget(self.label, 1)
-        text_row.addWidget(self.count_label)
-        layout.addLayout(text_row)
-
-        self.progress_bar = QProgressBar(self)
-        self.progress_bar.setTextVisible(False)
-        self.progress_bar.setFixedWidth(360)
-        layout.addWidget(self.progress_bar)
-        self.update_stage(stage)
-
-    def update_stage(self, stage: ProgressStageSnapshot) -> None:
-        """Refresh row text and progress-bar state from a stage snapshot."""
-        self.label.setText(stage.label)
-        count_text = _stage_count_text(stage)
-        self.count_label.setText(count_text)
-        self.count_label.setVisible(bool(count_text))
-
-        if stage.total is None:
-            self.progress_bar.setVisible(True)
-            if stage.status == 'active':
-                self.progress_bar.setRange(0, 0)
-            else:
-                self.progress_bar.setRange(0, 100)
-                self.progress_bar.setValue(
-                    100 if stage.status == 'complete' else 0
-                )
-
-            return
-
-        if stage.total <= 0:
-            self.progress_bar.hide()
-            return
-
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, stage.total)
-        self.progress_bar.setValue(stage.progress_value())
-
-
-def _stage_count_text(stage: ProgressStageSnapshot) -> str:
-    """Return the count text shown in a rendered progress stage row."""
-    count_text = stage.count_text()
-    if stage.stage_id == 'metadata' and count_text:
-        return f'Batch {count_text}'
-
-    return count_text
-
-
-class ProgressStageListWidget(QWidget):
-    """Reusable ordered stage-list renderer for progress overlays."""
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setObjectName('progressStageList')
-        self._layout = QVBoxLayout(self)
-        self._layout.setContentsMargins(0, 0, 0, 0)
-        self._layout.setSpacing(10)
-        self._rows: dict[str, ProgressStageRow] = {}
-        self.hide()
-
-    def update_snapshot(self, snapshot: ProgressSnapshot) -> None:
-        """Render the ordered stage rows in ``snapshot``."""
-        expected_stage_ids = {stage.stage_id for stage in snapshot.stages}
-        for stage_id, row in list(self._rows.items()):
-            if stage_id not in expected_stage_ids:
-                self._layout.removeWidget(row)
-                row.deleteLater()
-                del self._rows[stage_id]
-
-        for index, stage in enumerate(snapshot.stages):
-            row = self._rows.get(stage.stage_id)
-            if row is None:
-                row = ProgressStageRow(stage, self)
-                self._rows[stage.stage_id] = row
-                self._layout.insertWidget(index, row)
-            else:
-                self._layout.removeWidget(row)
-                self._layout.insertWidget(index, row)
-                row.update_stage(stage)
-
-        self.setVisible(bool(snapshot.stages))
-
-    def clear_stages(self) -> None:
-        """Remove all rendered stage rows and hide the list."""
-        for row in self._rows.values():
-            self._layout.removeWidget(row)
-            row.deleteLater()
-
-        self._rows.clear()
-        self.hide()
 
 
 def make_window_shortcut(
@@ -212,43 +93,6 @@ def confirm_reset_zoom_centers(parent: QWidget) -> bool:
             QMessageBox.No,
         )
         == QMessageBox.Yes
-    )
-
-
-def build_progress_overlay(parent: QWidget) -> ProgressOverlayWidgets:
-    """Build the common centered progress overlay widget bundle."""
-    overlay = QWidget(parent)
-    overlay.setObjectName('progressOverlay')
-    overlay.hide()
-    overlay_layout = QVBoxLayout(overlay)
-    overlay_layout.setContentsMargins(0, 0, 0, 0)
-    overlay_layout.addStretch(1)
-    overlay_center = QHBoxLayout()
-    overlay_center.addStretch(1)
-    panel = QFrame(overlay)
-    panel.setObjectName('progressPanel')
-    panel_layout = QVBoxLayout(panel)
-    panel_layout.setContentsMargins(24, 20, 24, 20)
-    panel_layout.setSpacing(14)
-    message_label = QLabel('', panel)
-    message_label.setAlignment(Qt.AlignCenter)
-    panel_layout.addWidget(message_label)
-    progress_bar = QProgressBar(panel)
-    progress_bar.setRange(0, 100)
-    progress_bar.setFixedWidth(360)
-    panel_layout.addWidget(progress_bar)
-    stage_list = ProgressStageListWidget(panel)
-    panel_layout.addWidget(stage_list)
-    overlay_center.addWidget(panel)
-    overlay_center.addStretch(1)
-    overlay_layout.addLayout(overlay_center)
-    overlay_layout.addStretch(1)
-    return ProgressOverlayWidgets(
-        overlay=overlay,
-        panel=panel,
-        message_label=message_label,
-        progress_bar=progress_bar,
-        stage_list=stage_list,
     )
 
 

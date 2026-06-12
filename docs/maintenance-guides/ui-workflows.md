@@ -307,6 +307,9 @@ Primary files:
 
 - `easy_loupe/analysis/scenes.py`
 - `easy_loupe/ui/workers.py`
+- `easy_loupe/ui/progress_overlay.py`
+- `easy_loupe/ui/progress_routing.py`
+- `easy_loupe/progress/`
 - `easy_loupe/ui/main_window/workflows.py`
 - `easy_loupe/ui/main_window/navigation.py`
 - `tests/analysis/`

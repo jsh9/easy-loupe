@@ -78,18 +78,20 @@ def write_xmp_sidecars(
     written_sidecars = 0
     skipped_photos = 0
     total_photos = len(photos)
+    write_progress = reporter.counted_stage(
+        'write',
+        label='Writing XMP sidecars',
+        total=total_photos,
+        start_progress=5,
+        end_progress=99,
+        zero_progress=99,
+    )
     try:
         if total_photos == 0:
             # No photos means the XMP loop never advances this stage. Emit a
             # zero-total completion so the structured overlay treats the
             # workflow as a no-op rather than unknown-size completed work.
-            reporter.update_stage(
-                'write',
-                current=0,
-                total=0,
-                overall_progress=99,
-                complete=True,
-            )
+            write_progress.update(0)
 
         for index, photo in enumerate(photos, start=1):
             sidecar_path = sidecar_path_for_photo(source_folder, photo)
@@ -110,14 +112,7 @@ def write_xmp_sidecars(
                 )
                 written_sidecars += 1
 
-            progress = 5 + int((index / max(total_photos, 1)) * 94)
-            reporter.update_stage(
-                'write',
-                current=index,
-                total=total_photos,
-                overall_progress=min(progress, 99),
-                complete=index == total_photos,
-            )
+            write_progress.update(index)
     except Exception:
         undo_operation(undo_plan)
         raise

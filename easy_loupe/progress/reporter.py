@@ -1,60 +1,21 @@
-"""Shared progress reporting primitives for long-running workflows."""
+"""Progress reporter and counted-stage helpers."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING
 
-ProgressStageStatus = Literal['pending', 'active', 'complete']
-LegacyProgressCallback = Callable[[str, int], None]
-StructuredProgressCallback = Callable[['ProgressSnapshot'], None]
+from easy_loupe.progress.models import (
+    LegacyProgressCallback,
+    ProgressSnapshot,
+    ProgressStageDefinition,
+    ProgressStageSnapshot,
+    ProgressStageStatus,
+    StructuredProgressCallback,
+)
 
-
-@dataclass(frozen=True, slots=True)
-class ProgressStageDefinition:
-    """Static description of a workflow stage."""
-
-    stage_id: str
-    label: str
-    total: int | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class ProgressStageSnapshot:
-    """Immutable progress state for one workflow stage."""
-
-    stage_id: str
-    label: str
-    current: int | None
-    total: int | None
-    status: ProgressStageStatus
-
-    def count_text(self) -> str:
-        """Return count text only for positive-total determinate stages."""
-        if self.total is None or self.total <= 0:
-            return ''
-
-        current = self.current if self.current is not None else 0
-        return f'{current} of {self.total}'
-
-    def progress_value(self) -> int:
-        """Return bounded progress value, including zero-work completion."""
-        if self.total is None or self.total <= 0:
-            return 100 if self.status == 'complete' else 0
-
-        current = self.current if self.current is not None else 0
-        return max(0, min(self.total, current))
-
-
-@dataclass(frozen=True, slots=True)
-class ProgressSnapshot:
-    """Immutable progress payload emitted to structured UI renderers."""
-
-    workflow_label: str
-    current_message: str
-    overall_progress: int | None
-    stages: tuple[ProgressStageSnapshot, ...]
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
 
 
 @dataclass(slots=True)
@@ -64,6 +25,76 @@ class _ProgressStageState:
     current: int | None
     total: int | None
     status: ProgressStageStatus
+
+
+class CountedProgressStage:
+    """Small helper for loop-backed progress stages."""
+
+    def __init__(
+            self,
+            reporter: ProgressReporter,
+            stage_id: str,
+            *,
+            label: str,
+            total: int,
+            start_progress: int,
+            end_progress: int,
+            zero_progress: int | None = None,
+            progress_value_fn: Callable[[int, int], int] | None = None,
+    ) -> None:
+        self._reporter = reporter
+        self._stage_id = stage_id
+        self._label = label
+        self._total = max(0, total)
+        self._start_progress = start_progress
+        self._end_progress = end_progress
+        self._zero_progress = zero_progress
+        self._progress_value_fn = progress_value_fn
+
+    @property
+    def total(self) -> int:
+        """Return the stage's determinate item count."""
+        return self._total
+
+    def start(self, *, message: str | None = None) -> ProgressSnapshot:
+        """Emit the initial stage state, completing zero-work stages."""
+        return self.update(0, message=message, complete=self._total == 0)
+
+    def update(
+            self,
+            current: int,
+            *,
+            message: str | None = None,
+            complete: bool | None = None,
+    ) -> ProgressSnapshot:
+        """Update the stage with a completed item count."""
+        current = max(0, current)
+        should_complete = (
+            current >= self._total if complete is None else complete
+        )
+        return self._reporter.update_stage(
+            self._stage_id,
+            label=self._label,
+            current=current,
+            total=self._total,
+            message=message,
+            overall_progress=self._overall_progress(current),
+            complete=should_complete,
+        )
+
+    def _overall_progress(self, current: int) -> int:
+        if self._total <= 0:
+            return (
+                self._zero_progress
+                if self._zero_progress is not None
+                else self._end_progress
+            )
+
+        span = self._end_progress - self._start_progress
+        if self._progress_value_fn is not None:
+            return self._progress_value_fn(current, self._total)
+
+        return self._start_progress + int((current / self._total) * span)
 
 
 class ProgressReporter:
@@ -112,6 +143,29 @@ class ProgressReporter:
                 total=max(0, total) if total is not None else None,
                 status='pending',
             )
+        )
+
+    def counted_stage(
+            self,
+            stage_id: str,
+            *,
+            label: str,
+            total: int,
+            start_progress: int,
+            end_progress: int,
+            zero_progress: int | None = None,
+            progress_value_fn: Callable[[int, int], int] | None = None,
+    ) -> CountedProgressStage:
+        """Return a helper for a determinate, loop-backed stage."""
+        return CountedProgressStage(
+            self,
+            stage_id,
+            label=label,
+            total=total,
+            start_progress=start_progress,
+            end_progress=end_progress,
+            zero_progress=zero_progress,
+            progress_value_fn=progress_value_fn,
         )
 
     def start_stage(

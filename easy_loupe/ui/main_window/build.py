@@ -43,6 +43,10 @@ from easy_loupe.core.recursive_loading import (
 )
 from easy_loupe.ui.defaults import DEFAULT_SHOW_AF_POINT
 from easy_loupe.ui.identity import APP_NAME, APP_VERSION
+from easy_loupe.ui.progress_overlay import (
+    ProgressOverlayController,
+    build_progress_overlay,
+)
 from easy_loupe.ui.theme import NO_METADATA_TEXT
 from easy_loupe.ui.viewers.compare_photo_viewer import (
     COMPARE_PHOTO_LIMIT_OPTIONS,
@@ -53,7 +57,6 @@ from easy_loupe.ui.viewers.exif_overlay import ExifOverlayWidget
 from easy_loupe.ui.viewers.main_photo_viewer import MainPhotoViewer
 from easy_loupe.ui.viewers.shell import (
     VIEWER_KEYBOARD_PAN_STEP,
-    build_progress_overlay,
     build_transient_message_overlay,
     build_viewer_shortcuts,
     confirm_reset_zoom_centers,
@@ -329,6 +332,10 @@ class MainWindowBuildMixin:
         self.overlay_message_label = overlay.message_label
         self.overlay_progress_bar = overlay.progress_bar
         self.progress_stage_list = overlay.stage_list
+        self.progress_overlay_controller = ProgressOverlayController(
+            overlay,
+            update_geometry=self._update_progress_overlay_geometry,
+        )
 
     def _build_transient_message_overlay(self: MainWindow) -> None:
         overlay = build_transient_message_overlay(

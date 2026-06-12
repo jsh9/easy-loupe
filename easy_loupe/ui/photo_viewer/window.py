@@ -50,6 +50,10 @@ from easy_loupe.ui.photo_viewer.workers import (
     PhotoViewerExifWorker,
     ViewerPrefetchWorker,
 )
+from easy_loupe.ui.progress_overlay import (
+    ProgressOverlayController,
+    build_progress_overlay,
+)
 from easy_loupe.ui.threading import (
     ThreadSlot,
     ThreadSlotGroup,
@@ -58,7 +62,6 @@ from easy_loupe.ui.viewers.exif_overlay import ExifOverlayWidget
 from easy_loupe.ui.viewers.main_photo_viewer import MainPhotoViewer
 from easy_loupe.ui.viewers.shell import (
     VIEWER_KEYBOARD_PAN_STEP,
-    build_progress_overlay,
     build_transient_message_overlay,
     build_viewer_shortcuts,
     confirm_reset_zoom_centers,
@@ -278,6 +281,10 @@ class PhotoViewerWindow(QMainWindow):
         self.overlay_message_label = overlay.message_label
         self.overlay_progress_bar = overlay.progress_bar
         self.progress_stage_list = overlay.stage_list
+        self.progress_overlay_controller = ProgressOverlayController(
+            overlay,
+            update_geometry=self._update_progress_overlay_geometry,
+        )
 
     def _build_transient_message_overlay(self) -> None:
         overlay = build_transient_message_overlay(
@@ -1298,31 +1305,18 @@ class PhotoViewerWindow(QMainWindow):
             if progress > PERCENT_COMPLETE
             else PERCENT_COMPLETE
         )
-        self.progress_overlay.show()
-        self.progress_overlay.raise_()
-        self.overlay_message_label.setText(message)
-        self.progress_stage_list.clear_stages()
-        self.overlay_progress_bar.setRange(0, max_value)
-        self.overlay_progress_bar.setVisible(True)
-        self.overlay_progress_bar.setValue(max(0, min(max_value, progress)))
-        self._update_progress_overlay_geometry()
+        self.progress_overlay_controller.show_scalar(
+            message,
+            progress,
+            max_value=max_value,
+        )
 
     def _show_progress_snapshot(self, snapshot: ProgressSnapshot) -> None:
         self.exif_overlay.hide()
-        self.progress_overlay.show()
-        self.progress_overlay.raise_()
-        self.overlay_message_label.setText(snapshot.current_message)
-        # Stage rows include their own bars, so hide the legacy aggregate bar
-        # to avoid showing two competing progress scales for one workflow.
-        self.overlay_progress_bar.setVisible(False)
-        self.progress_stage_list.update_snapshot(snapshot)
-        self._update_progress_overlay_geometry()
+        self.progress_overlay_controller.show_snapshot(snapshot)
 
     def _hide_progress(self) -> None:
-        self.progress_overlay.hide()
-        self.overlay_progress_bar.setVisible(True)
-        self.overlay_progress_bar.setRange(0, 100)
-        self.progress_stage_list.clear_stages()
+        self.progress_overlay_controller.hide()
         self._refresh_info_overlay()
 
     def _show_transient_message(

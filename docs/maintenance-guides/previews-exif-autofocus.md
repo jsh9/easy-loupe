@@ -75,8 +75,11 @@ Major logic:
 Primary files:
 
 - `easy_loupe/core/exif.py`
+- `easy_loupe/core/grouped_exif.py`
+- `easy_loupe/core/photo_groups.py`
 - `easy_loupe/core/metadata.py`
 - `scripts/build_app/`
+- `tests/core/test_grouped_exif.py`
 - `tests/core/test_metadata.py`
 
 Major logic:

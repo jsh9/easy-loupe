@@ -413,9 +413,10 @@ class MainWindowWorkflowMixin:
         # Structured scene progress already has its own per-stage rows.
         # Update only the message so the list rebuild below does not briefly
         # clear those rows with the legacy scalar progress UI.
-        if self.progress_stage_list.isVisible():
-            self.overlay_message_label.setText('Scene detection finished')
-            self._update_progress_overlay_geometry()
+        if self.progress_overlay_controller.has_structured_rows():
+            self.progress_overlay_controller.set_message_preserving_rows(
+                'Scene detection finished'
+            )
             QApplication.processEvents()
         else:
             self._show_progress('Scene detection finished', 100)
@@ -774,14 +775,12 @@ class MainWindowWorkflowMixin:
         )
         self._set_interaction_enabled(enabled=False)
         self._busy = True
-        self.progress_overlay.show()
-        self.progress_overlay.raise_()
-        self.overlay_message_label.setText(message)
-        self.progress_stage_list.clear_stages()
-        self.overlay_progress_bar.setVisible(show_bar)
-        self.overlay_progress_bar.setRange(0, max_value)
-        self.overlay_progress_bar.setValue(max(0, min(max_value, progress)))
-        self._update_progress_overlay_geometry()
+        self.progress_overlay_controller.show_scalar(
+            message,
+            progress,
+            max_value=max_value,
+            show_bar=show_bar,
+        )
         self._refresh_info_overlay()
         QApplication.processEvents()
 
@@ -791,24 +790,12 @@ class MainWindowWorkflowMixin:
         """Show a structured, multi-stage progress snapshot."""
         self._set_interaction_enabled(enabled=False)
         self._busy = True
-        self.progress_overlay.show()
-        self.progress_overlay.raise_()
-        self.overlay_message_label.setText(snapshot.current_message)
-        # Stage rows include their own bars, so hide the legacy aggregate bar
-        # to avoid showing two competing progress scales for one workflow.
-        self.overlay_progress_bar.setVisible(False)
-        self.progress_stage_list.update_snapshot(snapshot)
-        self._update_progress_overlay_geometry()
+        self.progress_overlay_controller.show_snapshot(snapshot)
         self._refresh_info_overlay()
         QApplication.processEvents()
 
     def _hide_progress(self: MainWindow) -> None:
-        self.progress_overlay.hide()
-        self.overlay_progress_bar.setVisible(True)
-        self.overlay_progress_bar.setRange(0, 100)
-        self.overlay_progress_bar.setValue(0)
-        self.overlay_message_label.setText('')
-        self.progress_stage_list.clear_stages()
+        self.progress_overlay_controller.hide()
         self._busy = False
         self._set_interaction_enabled(enabled=True)
         self._refresh_info_overlay()

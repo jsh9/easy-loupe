@@ -141,26 +141,21 @@ def undo_operation(
         progress_callback=progress_callback,
         snapshot_callback=progress_snapshot_callback,
     )
+    undo_progress = reporter.counted_stage(
+        'undo',
+        label='Undoing photo organization',
+        total=total_entries,
+        start_progress=0,
+        end_progress=100,
+        zero_progress=100,
+    )
     try:
         if total_entries == 0:
-            reporter.update_stage(
-                'undo',
-                current=0,
-                total=0,
-                overall_progress=100,
-                complete=True,
-            )
+            undo_progress.update(0)
 
         for index, entry in enumerate(entries, start=1):
             _undo_entry(entry)
-            progress = int((index / max(total_entries, 1)) * 100)
-            reporter.update_stage(
-                'undo',
-                current=index,
-                total=total_entries,
-                overall_progress=progress,
-                complete=index == total_entries,
-            )
+            undo_progress.update(index)
     finally:
         backup_root = undo_plan.backup_root
         if backup_root is not None and backup_root.exists():
