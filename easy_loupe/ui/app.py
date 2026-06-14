@@ -34,6 +34,17 @@ class EasyLoupeApplication(QApplication):
     def __init__(self, argv: list[str]) -> None:
         super().__init__(argv)
         self._pending_open_files: list[Path] = []
+        self._quit_handler: Callable[[], bool] | None = None
+
+    def set_quit_handler(self, handler: Callable[[], bool] | None) -> None:
+        """
+        Set the application-level quit policy hook.
+
+        The handler returns ``True`` to let Qt finish the current quit event,
+        or ``False`` to keep the event loop alive while hidden windows finish
+        background cleanup.
+        """
+        self._quit_handler = handler
 
     def event(self, event: QEvent) -> bool:
         """Forward macOS Finder file-open events to the main window."""
@@ -46,6 +57,14 @@ class EasyLoupeApplication(QApplication):
                 self._pending_open_files.append(path)
                 self.file_opened.emit(path)
                 return True
+
+        if (
+            event.type() == QEvent.Type.Quit
+            and self._quit_handler is not None
+            and not self._quit_handler()
+        ):
+            event.ignore()
+            return True
 
         return super().event(event)
 
@@ -67,6 +86,9 @@ class _ManagedWindow(Protocol):
     """Top-level EasyLoupe window retained until its ``destroyed`` signal."""
 
     destroyed: _WindowSignal
+
+    def close(self) -> None:
+        """Close the managed window."""
 
     def setAttribute(  # noqa: N802 - Qt API naming
             self,
@@ -90,9 +112,6 @@ class _PhotoHandoffWindow(_ManagedWindow, Protocol):
 
     culling_requested: _WindowSignal
 
-    def close(self) -> None:
-        """Close the handoff window after culling opens."""
-
 
 class _CullingWindowFactory(Protocol):
     """Callable that builds a culling ``MainWindow`` for a launch request."""
@@ -112,6 +131,22 @@ class _PhotoWindowFactory(Protocol):
         """Create a photo-viewer window."""
 
 
+class _ManagedApplication(Protocol):
+    """Application hooks used by ``WindowManager`` for controlled shutdown."""
+
+    def setQuitOnLastWindowClosed(  # noqa: N802 - Qt API naming
+            self,
+            should_quit: bool,  # noqa: FBT001
+    ) -> None:
+        """Set Qt's implicit last-window quit policy."""
+
+    def set_quit_handler(self, handler: Callable[[], bool] | None) -> None:
+        """Set the application-level quit policy hook."""
+
+    def quit(self) -> None:
+        """Request application shutdown."""
+
+
 class WindowManager:
     """Own live EasyLoupe windows and create one window per opened photo."""
 
@@ -119,10 +154,19 @@ class WindowManager:
             self,
             culling_window_factory: _CullingWindowFactory = MainWindow,
             photo_window_factory: _PhotoWindowFactory = PhotoViewerWindow,
+            app: _ManagedApplication | None = None,
     ) -> None:
         self._culling_window_factory = culling_window_factory
         self._photo_window_factory = photo_window_factory
+        self._app = app
+        self._quit_requested = False
         self._windows: list[_ManagedWindow] = []
+        if self._app is not None:
+            # Qt otherwise quits when the last visible window closes. Hidden
+            # deferred-close windows still own QThreads, so WindowManager keeps
+            # the event loop alive until those windows emit ``destroyed``.
+            self._app.setQuitOnLastWindowClosed(False)
+            self._app.set_quit_handler(self._handle_application_quit)
 
     def windows(self) -> list[_ManagedWindow]:
         """Return the currently managed live windows."""
@@ -198,6 +242,30 @@ class WindowManager:
             self._windows.remove(window)
         except ValueError:
             return
+
+        if not self._windows and self._app is not None:
+            self._app.quit()
+
+    def _handle_application_quit(self) -> bool:
+        """
+        Close managed windows and defer app quit until they are destroyed.
+
+        Hidden deferred-close windows may still own active QThreads. Keeping
+        the event loop alive until ``destroyed`` avoids PySide finalization
+        deleting those thread objects while they are still running.
+        """
+        if not self._windows:
+            return True
+
+        if not self._quit_requested:
+            # A consumed Qt quit event can be delivered again. Close retained
+            # windows once so hidden deferred-close windows keep draining their
+            # worker cleanup instead of receiving repeated close requests.
+            self._quit_requested = True
+            for window in list(self._windows):
+                window.close()
+
+        return not self._windows
 
 
 class StartupCoordinator:
@@ -364,7 +432,7 @@ def main(argv: list[str] | None = None) -> int:
     startup_files = _extract_startup_files(argv)
     pending_open_files = app.take_pending_open_files()
 
-    window_manager = WindowManager()
+    window_manager = WindowManager(app=app)
     startup_coordinator = StartupCoordinator(window_manager)
     app.file_opened.connect(startup_coordinator.open_file_from_system)
     startup_coordinator.start(startup_files, pending_open_files)

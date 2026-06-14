@@ -4,6 +4,9 @@
 
 - Fixed
 
+  - Closing the last culling or standalone photo-viewer window while hidden
+    worker cleanup is still draining no longer lets Qt app shutdown delete
+    active `QThread` objects.
   - Temporary click-and-hold zoom in fit-to-window views now keeps the clicked
     image point under the cursor when possible, instead of drifting toward the
     viewport center for off-center clicks.

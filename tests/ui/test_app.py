@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QApplication
@@ -17,7 +18,7 @@ import easy_loupe.ui.widgets as widgets_module
 import easy_loupe.ui.workers as workers_module
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Callable
     from typing import ClassVar
 
 
@@ -224,6 +225,36 @@ class _FakeTimer:
         self.timeout.emit()
 
 
+class _FakeApplication:
+    """Small app stand-in for WindowManager shutdown tests."""
+
+    def __init__(self) -> None:
+        self.quit_on_last_window_closed: bool | None = None
+        self.quit_handler: Callable[[], bool] | None = None
+        self.quit_calls = 0
+
+    def setQuitOnLastWindowClosed(  # noqa: N802
+            self, should_quit: bool
+    ) -> None:
+        """Record Qt's implicit last-window quit setting."""
+        self.quit_on_last_window_closed = should_quit
+
+    def set_quit_handler(self, handler: Callable[[], bool] | None) -> None:
+        """Record the application quit-event handler."""
+        self.quit_handler = handler
+
+    def quit(self) -> None:
+        """Record explicit application quit requests."""
+        self.quit_calls += 1
+
+    def request_quit(self) -> bool:
+        """Invoke the installed quit handler like a Qt quit event would."""
+        if self.quit_handler is None:
+            return True
+
+        return bool(self.quit_handler())
+
+
 class _FakeCullingWindow:
     def __init__(self, launch_request: object = None) -> None:
         self.launch_request = launch_request
@@ -232,6 +263,9 @@ class _FakeCullingWindow:
         self.geometry_calls: list[object] = []
         self.move_calls: list[object] = []
         self.show_maximized_calls = 0
+        self.close_calls = 0
+        self.closed = False
+        self._destroyed = False
 
     def setAttribute(  # noqa: N802 - Qt naming in fake
             self, attribute: object, enabled: bool
@@ -247,8 +281,28 @@ class _FakeCullingWindow:
     def showMaximized(self) -> None:  # noqa: N802 - Qt naming in fake
         self.show_maximized_calls += 1
 
+    def close(self) -> None:
+        self.close_calls += 1
+        self.closed = True
+        self.destroy()
+
     def destroy(self) -> None:
+        if self._destroyed:
+            return
+
+        self._destroyed = True
         self.destroyed.emit()
+
+
+class _DeferredCloseCullingWindow(_FakeCullingWindow):
+    """Window fake whose first close leaves it retained like worker cleanup."""
+
+    def close(self) -> None:
+        self.close_calls += 1
+        self.closed = True
+
+    def finish_close(self) -> None:
+        self.destroy()
 
 
 class _FakePhotoWindow:
@@ -260,6 +314,8 @@ class _FakePhotoWindow:
         self.screen: object | None = None
         self.show_maximized_calls = 0
         self.closed = False
+        self.close_calls = 0
+        self._destroyed = False
 
     def setAttribute(  # noqa: N802 - Qt naming in fake
             self, attribute: object, enabled: bool
@@ -270,8 +326,9 @@ class _FakePhotoWindow:
         self.show_maximized_calls += 1
 
     def close(self) -> None:
+        self.close_calls += 1
         self.closed = True
-        self.destroyed.emit()
+        self.destroy()
 
     def windowHandle(self) -> object | None:  # noqa: N802 - Qt naming in fake
         if self.screen is None:
@@ -280,6 +337,10 @@ class _FakePhotoWindow:
         return _FakeWindowHandle(self.screen)
 
     def destroy(self) -> None:
+        if self._destroyed:
+            return
+
+        self._destroyed = True
         self.destroyed.emit()
 
 
@@ -312,6 +373,117 @@ def _fake_window_manager() -> app_module.WindowManager:
         culling_window_factory=_FakeCullingWindow,
         photo_window_factory=_FakePhotoWindow,
     )
+
+
+def test_window_manager_disables_implicit_last_window_quit() -> None:
+    """
+    Verify managed app shutdown does not depend on visible-window state.
+
+    Hidden deferred-close windows must keep the Qt event loop alive while
+    worker-thread cleanup drains, so the manager disables Qt's implicit
+    last-visible-window quit policy and installs its own quit handler.
+    """
+    app = _FakeApplication()
+
+    app_module.WindowManager(
+        culling_window_factory=_FakeCullingWindow,
+        photo_window_factory=_FakePhotoWindow,
+        app=app,
+    )
+
+    assert app.quit_on_last_window_closed is False
+    assert app.quit_handler is not None
+
+
+def test_window_manager_quits_after_last_window_is_destroyed() -> None:
+    """
+    Quit the app only after the final retained window is destroyed.
+
+    A normal close can destroy immediately; background-close windows reach the
+    same path later from their deferred final close.
+    """
+    app = _FakeApplication()
+    manager = app_module.WindowManager(
+        culling_window_factory=_FakeCullingWindow,
+        photo_window_factory=_FakePhotoWindow,
+        app=app,
+    )
+
+    window = manager.open_culling_window()
+    window.destroy()
+
+    assert manager.windows() == []
+    assert app.quit_calls == 1
+
+
+def test_window_manager_quit_request_closes_retained_windows() -> None:
+    """
+    Close retained windows when Qt delivers an application quit request.
+
+    Synchronously destroyed windows can allow the current quit event to proceed
+    because no hidden worker-owning windows remain retained.
+    """
+    app = _FakeApplication()
+    manager = app_module.WindowManager(
+        culling_window_factory=_FakeCullingWindow,
+        photo_window_factory=_FakePhotoWindow,
+        app=app,
+    )
+    first = manager.open_culling_window()
+    second = manager.open_photo_window(Path('IMG_1000.JPG'))
+
+    assert app.request_quit() is True
+
+    assert first.close_calls == 1
+    assert second.close_calls == 1
+    assert manager.windows() == []
+
+
+def test_window_manager_deferred_quit_waits_for_window_destroyed() -> None:
+    """
+    Keep the app alive while a close-hidden window is still retained.
+
+    This is the regression path from the crash report: the first close hides
+    the window but worker cleanup has not emitted ``destroyed`` yet, so the
+    application-level quit event must be consumed until final teardown.
+    """
+    app = _FakeApplication()
+    manager = app_module.WindowManager(
+        culling_window_factory=_DeferredCloseCullingWindow,
+        photo_window_factory=_FakePhotoWindow,
+        app=app,
+    )
+    window = manager.open_culling_window()
+
+    assert app.request_quit() is False
+
+    assert window.close_calls == 1
+    assert window.closed is True
+    assert manager.windows() == [window]
+    assert app.quit_calls == 0
+
+    window.finish_close()
+
+    assert manager.windows() == []
+    assert app.quit_calls == 1
+    assert app.request_quit() is True
+
+
+def test_window_manager_allows_quit_with_no_windows() -> None:
+    """
+    Allow the current quit event when there are no retained windows.
+
+    Once the manager has no window-owned QThreads left to protect, Qt can exit
+    the event loop normally.
+    """
+    app = _FakeApplication()
+    app_module.WindowManager(
+        culling_window_factory=_FakeCullingWindow,
+        photo_window_factory=_FakePhotoWindow,
+        app=app,
+    )
+
+    assert app.request_quit() is True
 
 
 def test_startup_coordinator_opens_plain_window_without_startup_files() -> (
@@ -487,11 +659,25 @@ def test_main_keeps_pending_file_events_separate_from_argv(
         def __init__(self, argv: list[str]) -> None:
             self.argv = argv
             self.file_opened = _FakeSignal()
+            self.quit_handler: Callable[[], bool] | None = None
+            self.quit_on_last_window_closed: bool | None = None
             self.__class__.instances.append(self)
+
+        def setQuitOnLastWindowClosed(  # noqa: N802
+                self, should_quit: bool
+        ) -> None:
+            self.quit_on_last_window_closed = should_quit
+
+        def set_quit_handler(self, handler: Callable[[], bool] | None) -> None:
+            self.quit_handler = handler
 
         @staticmethod
         def take_pending_open_files() -> list[Path]:
             return [pending_photo]
+
+        @staticmethod
+        def quit() -> None:
+            return
 
         @staticmethod
         def exec() -> int:

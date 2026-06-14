@@ -403,6 +403,12 @@ threads. Only workers with an explicit `cancel()` hook are cooperatively
 cancellable; file-operation workers drain to completion while teardown remains
 deferred invisibly.
 
+`WindowManager` owns application quit deferral for these hidden-close paths:
+the app disables implicit last-visible-window quit and exits only after the
+manager has forgotten every destroyed window. Preserve that boundary so
+`QThread` child objects are not destroyed by PySide application finalization
+while their worker code is still running.
+
 ## 7. Verification Pointers
 
 - For shutdown fixes involving `QThread` cleanup, verify both source runs and
