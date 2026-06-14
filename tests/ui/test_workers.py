@@ -448,10 +448,10 @@ def test_photo_viewer_exif_worker_emits_current_photo_focus_point(
         tmp_path: Path, monkeypatch: Any
 ) -> None:
     """
-    Verify the viewer EXIF worker emits focus and full file-size display data.
+    Verify the viewer EXIF worker emits focus and formatted display data.
 
     The standalone viewer loads metadata asynchronously, so this protects the
-    worker path that fills in focus points plus JPEG, HEIF, and RAW size rows
+    worker path that fills in focus points, exposure rows, and file-size rows
     after the initial lightweight record has already been shown.
     """
     finished_events: list[tuple[int, str, object]] = []
@@ -476,6 +476,8 @@ def test_photo_viewer_exif_worker_emits_current_photo_focus_point(
                 'LensModel': 'NIKKOR Z 50mm f/1.8 S',
                 'FNumber': '2.8',
                 'ExposureTime': '0.004',
+                'ExposureProgram': 3,
+                'ExposureCompensation': -0.333333,
                 'ISO': 800,
                 'FocalLength': '50',
             }
@@ -519,6 +521,8 @@ def test_photo_viewer_exif_worker_emits_current_photo_focus_point(
         'Focal Length': '50\u00a0mm',
         'Aperture': '\u0192/2.8',
         'Shutter Speed': '1/250\u00a0s',
+        'Shooting Mode': 'Aperture Priority',
+        'Exposure Compensation': '-1/3',
         'ISO': '800',
         'Resolution': '1000 x 500 pixels (0.5 MP)',
         'File Size': 'JPG: 1 KB, HEIF: 1 KB, RAW: 1 KB',

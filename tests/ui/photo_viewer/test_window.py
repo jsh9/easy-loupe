@@ -932,6 +932,9 @@ def test_photo_viewer_info_overlay_shows_exif_loading_placeholders(
     The standalone viewer opens before full metadata is available, so pressing
     ``I`` should show the panel shape immediately instead of an empty EXIF area
     until the worker finishes.
+
+    The placeholder labels mirror the formatter order so late-arriving
+    shooting-mode and exposure-compensation values do not reshape the pane.
     """
     create_jpeg(tmp_path / 'A.JPG', 'green', size=(2000, 1500))
     app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
@@ -947,6 +950,8 @@ def test_photo_viewer_info_overlay_shows_exif_loading_placeholders(
         'Focal Length': 'Loading...',
         'Aperture': 'Loading...',
         'Shutter Speed': 'Loading...',
+        'Shooting Mode': 'Loading...',
+        'Exposure Compensation': 'Loading...',
         'ISO': 'Loading...',
         'Resolution': 'Loading...',
         'File Size': 'Loading...',

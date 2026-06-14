@@ -115,6 +115,14 @@ Major logic:
   folder loading preserves the last completed EXIF batch count when later
   stages start. Primary EXIF reads that stop after reporting partial batch
   progress do not start companion preview fallback reads.
+- EXIF overlay display rows are formatted in `easy_loupe/core/exif.py`.
+  Shooting mode uses standard `ExposureProgram` values, and exposure
+  compensation prefers `ExposureCompensation` over `ExposureBiasValue`.
+- Standalone photo-viewer loading placeholders intentionally include common
+  optional EXIF rows while the async EXIF worker is pending. This can make the
+  pending overlay require more vertical space than the final populated rows for
+  photos that do not have those tags; keep that tradeoff explicit if changing
+  placeholder rows or overlay fit checks.
 - Folder-loading EXIF reader injection accepts both legacy `reader(files)`
   callables and modern readers that accept `batch_size` plus
   `batch_progress_callback`. Keep this adapter in place when changing metadata
