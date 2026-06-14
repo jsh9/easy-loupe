@@ -920,6 +920,61 @@ def test_photo_viewer_hold_zoom_temporarily_zooms_pans_and_restores_fit(
     viewer.close()
 
 
+def test_photo_viewer_hold_zoom_anchors_off_center_cursor(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify hold zoom keeps the clicked image point under the mouse cursor.
+
+    This guards against treating the clicked point as the viewport center,
+    which drifts increasingly far from the cursor for off-center clicks.
+    """
+    create_jpeg(tmp_path / 'IMG_7015.JPG', 'white', size=(640, 480))
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer(hold_zoom_enabled=True)
+    viewer.resize(320, 240)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_photo(tmp_path / 'IMG_7015.JPG', (0.5, 0.5))
+
+    click_pos = QPoint(200, 120)
+    clicked_scene_pos = viewer.mapToScene(click_pos)
+
+    QTest.mousePress(
+        viewer.viewport(),
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        click_pos,
+    )
+    app.processEvents()
+
+    anchored_scene_pos = viewer.mapToScene(click_pos)
+
+    assert viewer._hold_zoom_active is True
+    assert viewer._current_scale == pytest.approx(1.0)
+    assert anchored_scene_pos.x() == pytest.approx(
+        clicked_scene_pos.x(), abs=1.0
+    )
+    assert anchored_scene_pos.y() == pytest.approx(
+        clicked_scene_pos.y(), abs=1.0
+    )
+
+    QTest.mouseRelease(
+        viewer.viewport(),
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        click_pos,
+    )
+    app.processEvents()
+
+    assert viewer._hold_zoom_active is False
+    assert viewer._mode == 'fit'
+
+    viewer.close()
+
+
 def test_photo_viewer_hold_zoom_does_not_change_remembered_manual_zoom(
         tmp_path: Path,
 ) -> None:

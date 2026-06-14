@@ -1,5 +1,13 @@
 # Change Log
 
+## [Unreleased]
+
+- Fixed
+
+  - Temporary click-and-hold zoom in fit-to-window views now keeps the clicked
+    image point under the cursor when possible, instead of drifting toward the
+    viewport center for off-center clicks.
+
 ## [1.2.3]
 
 - Added
