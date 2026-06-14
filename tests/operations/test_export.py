@@ -415,6 +415,52 @@ def test_organize_and_undo_report_structured_progress(
     assert undo_stage.count_text().endswith(f'of {undo_stage.total}')
 
 
+def test_organize_skip_conflict_reports_completed_progress(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify skipped organizer jobs still advance counted progress.
+
+    Conflict-policy ``skip`` bypasses the file-copy loop for one photo, but it
+    still represents a completed job from the user's progress perspective.
+    """
+    source_folder, library = _make_library(tmp_path, monkeypatch)
+    conflict_path = source_folder / 'Picked' / 'IMG_A.JPG'
+    conflict_path.parent.mkdir(parents=True)
+    conflict_path.write_bytes(b'conflict')
+    progress_updates: list[tuple[str, int]] = []
+    progress_snapshots = []
+
+    summary = organize_photos(
+        source_folder,
+        library.get_photos(),
+        OrganizeFilesOptions(
+            criterion='flag',
+            action='copy',
+            output_parent=source_folder,
+            include_untagged=False,
+            conflict_policy='skip',
+        ),
+        lambda message, progress: progress_updates.append((
+            message,
+            progress,
+        )),
+        progress_snapshot_callback=progress_snapshots.append,
+    )
+
+    organize_stage = next(
+        stage
+        for stage in progress_snapshots[-2].stages
+        if stage.stage_id == 'organize'
+    )
+    assert summary.skipped_photos == 1
+    assert progress_updates[1] == ('Organizing photo files, 1 of 2', 52)
+    assert progress_updates[2] == ('Organizing photo files, 2 of 2', 99)
+    assert organize_stage.status == 'complete'
+    assert organize_stage.count_text() == '2 of 2'
+    assert conflict_path.read_bytes() == b'conflict'
+
+
 def test_organize_photos_empty_jobs_report_zero_total_progress(
         tmp_path: Path,
 ) -> None:
