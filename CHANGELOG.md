@@ -42,6 +42,9 @@
   - Standalone photo-viewer hydration now completes the zero-work cache stage
     when no photos are available to prewarm.
   - Empty undo plans now emit completed zero-work progress before cleanup.
+  - Determinate progress counts now stay bounded by their totals, including
+    during standalone photo-viewer culling handoff waits before structured
+    hydration snapshots arrive.
 
 ## [1.1.3] - 2026-06-07
 

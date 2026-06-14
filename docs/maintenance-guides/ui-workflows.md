@@ -78,6 +78,10 @@ Major logic:
   hydration completes the zero-total viewer-cache stage explicitly. Scene
   detection completion preserves active structured rows while rebuilding scene
   lists; only legacy-only progress should fall back to the scalar bar.
+  Determinate structured counts are bounded at reporter/model boundaries so
+  progress rows cannot show impossible labels such as `4 of 3`. Standalone
+  photo-viewer culling handoff shows scalar hydration progress until the first
+  structured hydration snapshot is available.
 - Folder-load scanning reports discovered grouped-photo and supported-file
   counts after discovery finishes. Do not add fake scan item counts; the total
   is not known until the filesystem walk is done. The EXIF row counts ExifTool

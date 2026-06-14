@@ -31,12 +31,11 @@ class ProgressStageSnapshot:
     status: ProgressStageStatus
 
     def count_text(self) -> str:
-        """Return count text only for positive-total determinate stages."""
+        """Return bounded count text for positive-total determinate stages."""
         if self.total is None or self.total <= 0:
             return ''
 
-        current = self.current if self.current is not None else 0
-        return f'{current} of {self.total}'
+        return f'{self.progress_value()} of {self.total}'
 
     def progress_value(self) -> int:
         """Return bounded progress value, including zero-work completion."""

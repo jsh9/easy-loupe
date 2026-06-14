@@ -5,6 +5,7 @@ import inspect
 from easy_loupe.progress import (
     ProgressReporter,
     ProgressStageDefinition,
+    ProgressStageSnapshot,
     accepted_keyword_arguments,
     accepts_keyword_argument,
 )
@@ -105,6 +106,60 @@ def test_progress_reporter_handles_zero_total_stage_without_counts() -> None:
     assert snapshots[1].stages[0].count_text() == ''
     assert snapshots[1].stages[0].progress_value() == 100
     assert snapshots[1].stages[0].status == 'complete'
+
+
+def test_progress_reporter_bounds_determinate_stage_counts() -> None:
+    """
+    Verify determinate progress cannot render impossible count text.
+
+    Shared progress rows should clamp negative and over-total counts so callers
+    do not leak labels such as ``4 of 3`` into the UI.
+    """
+    legacy_updates: list[tuple[str, int]] = []
+    snapshots = []
+    reporter = ProgressReporter(
+        'Loading folder',
+        (ProgressStageDefinition('records', 'Building photo list'),),
+        progress_callback=lambda message, progress: legacy_updates.append((
+            message,
+            progress,
+        )),
+        snapshot_callback=snapshots.append,
+    )
+
+    reporter.update_stage('records', current=-2, total=3, overall_progress=10)
+    reporter.update_stage('records', current=4, total=3, overall_progress=40)
+    records = reporter.counted_stage(
+        'records',
+        label='Building photo list',
+        total=3,
+        start_progress=40,
+        end_progress=70,
+    )
+    records.update(4)
+    direct_stage = ProgressStageSnapshot(
+        stage_id='records',
+        label='Building photo list',
+        current=4,
+        total=3,
+        status='active',
+    )
+
+    # Renderers can receive snapshots constructed outside ProgressReporter, so
+    # the immutable model keeps display text defensive too.
+    negative_stage = snapshots[0].stages[0]
+    over_total_stage = snapshots[1].stages[0]
+    counted_stage = snapshots[2].stages[0]
+    assert legacy_updates[0] == ('Building photo list, 0 of 3', 10)
+    assert legacy_updates[1] == ('Building photo list, 3 of 3', 40)
+    assert negative_stage.current == 0
+    assert negative_stage.count_text() == '0 of 3'
+    assert over_total_stage.current == 3
+    assert over_total_stage.count_text() == '3 of 3'
+    assert counted_stage.current == 3
+    assert counted_stage.count_text() == '3 of 3'
+    assert snapshots[2].overall_progress == 70
+    assert direct_stage.count_text() == '3 of 3'
 
 
 def test_progress_reporter_preserves_partial_determinate_completion() -> None:

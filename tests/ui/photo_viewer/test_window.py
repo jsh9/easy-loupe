@@ -1394,6 +1394,60 @@ def test_photo_viewer_culling_handoff_waits_for_hydration(
     window.close()
 
 
+def test_photo_viewer_handoff_without_snapshot_shows_scalar_progress(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify culling handoff has a scalar fallback before snapshots arrive.
+
+    Hydration usually emits a structured snapshot quickly, but a handoff can
+    wait after only legacy scalar progress has arrived. The viewer should show
+    that scalar state until a snapshot becomes available.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    create_jpeg(tmp_path / 'B.JPG', 'blue')
+    _app, window = _open_viewer(tmp_path, monkeypatch)
+    requests: list[object] = []
+    window.culling_requested.connect(requests.append)
+    request_id = window._folder_hydration_request_id = 4
+    expected_folder = tmp_path.resolve()
+    window._folder_hydration_folder = expected_folder
+    window._folder_hydration_thread = object()
+    window._folder_hydration_snapshot = None
+    window._folder_hydration_message = 'Loading folder...'
+    window._folder_hydration_progress = 42
+
+    window._request_culling_handoff()
+
+    assert requests == []
+    assert window._pending_culling_handoff is True
+    assert window.progress_overlay.isVisible() is True
+    assert window.overlay_message_label.text() == 'Loading folder...'
+    assert window.overlay_progress_bar.isVisible() is True
+    assert window.overlay_progress_bar.maximum() == 100
+    assert window.overlay_progress_bar.value() == 42
+    assert window.progress_stage_list.isHidden() is True
+
+    window._handle_folder_hydration_progress(
+        request_id,
+        expected_folder,
+        'Preparing photo viewer cache',
+        150,
+    )
+
+    assert window.overlay_message_label.text() == (
+        'Preparing photo viewer cache'
+    )
+    assert window.overlay_progress_bar.maximum() == 200
+    assert window.overlay_progress_bar.value() == 150
+    assert window.progress_stage_list.isHidden() is True
+
+    window._pending_culling_handoff = False
+    window._folder_hydration_thread = None
+    window.close()
+
+
 def test_photo_viewer_handoff_keeps_snapshot_rows_after_scalar_hydration_update(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,

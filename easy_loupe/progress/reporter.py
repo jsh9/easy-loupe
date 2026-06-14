@@ -68,7 +68,10 @@ class CountedProgressStage:
             complete: bool | None = None,
     ) -> ProgressSnapshot:
         """Update the stage with a completed item count."""
-        current = max(0, current)
+        # Bound first because the same count drives completion, row text, and
+        # aggregate progress; callers that over-report should not push the UI
+        # past the determinate stage end.
+        current = _bounded_stage_current(current, self._total)
         should_complete = (
             current >= self._total if complete is None else complete
         )
@@ -131,6 +134,13 @@ class ProgressReporter:
             stage.label = label
             if total is not None:
                 stage.total = max(0, total)
+                if stage.current is not None:
+                    # Re-adding a stage can lower the total after current was
+                    # set, so re-bound the cached count to keep labels and bars
+                    # coherent.
+                    stage.current = _bounded_stage_current(
+                        stage.current, stage.total
+                    )
 
             return
 
@@ -211,7 +221,12 @@ class ProgressReporter:
             stage.total = max(0, total)
 
         if current is not None:
-            stage.current = max(0, current)
+            stage.current = current
+
+        if stage.current is not None:
+            # Normalize at the reporter boundary because snapshots and legacy
+            # messages both render this mutable stage state.
+            stage.current = _bounded_stage_current(stage.current, stage.total)
 
         if complete:
             self._mark_stage_complete(stage_id)
@@ -320,6 +335,18 @@ def _mark_stage_state_complete(stage: _ProgressStageState) -> None:
 
     if stage.current is None or stage.current >= stage.total:
         stage.current = stage.total
+
+
+def _bounded_stage_current(current: int, total: int | None) -> int:
+    """Return a UI-safe current value bounded by determinate totals."""
+    if total is not None and total <= 0:
+        return 0
+
+    current = max(0, current)
+    if total is None:
+        return current
+
+    return min(current, total)
 
 
 def stage_message(stage: _ProgressStageState) -> str:
