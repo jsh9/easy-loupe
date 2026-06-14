@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 import subprocess  # noqa: S404 - explicit exiftool integration
 import sys
 from collections.abc import Callable
 from datetime import UTC, datetime
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +36,23 @@ _BUNDLED_EXIFTOOL_CANDIDATES = (
 )
 DEFAULT_EXIF_BATCH_SIZE = 150
 ExifBatchProgressCallback = Callable[[int, int, int], None]
+EXPOSURE_PROGRAM_LABELS = {
+    1: 'Manual',
+    2: 'Program',
+    3: 'Aperture Priority',
+    4: 'Shutter Priority',
+    5: 'Creative',
+    6: 'Action',
+    7: 'Portrait',
+    8: 'Landscape',
+    9: 'Bulb',
+}
+EXPOSURE_COMPENSATION_KEYS = [
+    'ExposureCompensation',
+    'ExposureBiasValue',
+]
+EXPOSURE_COMPENSATION_DENOMINATOR = 3
+EXPOSURE_COMPENSATION_TOLERANCE = 0.01
 
 
 class _ExifToolBatchError(RuntimeError):
@@ -273,7 +292,7 @@ def format_exif_display(metadata: dict[str, Any]) -> dict[str, str]:
 
     Returns a dict of label → formatted string for fields that are present.
     Example keys: 'Camera Model', 'Lens Model', 'Aperture', 'Shutter Speed',
-    'ISO', 'Focal Length', and 'GPS'.
+    'Shooting Mode', 'Exposure Compensation', 'ISO', 'Focal Length', and 'GPS'.
     """
     result: dict[str, str] = {}
 
@@ -312,6 +331,14 @@ def format_exif_display(metadata: dict[str, Any]) -> dict[str, str]:
             result['Shutter Speed'] = f'1/{denom}\u00a0s'
         else:
             result['Shutter Speed'] = f'{exposure:g}\u00a0s'
+
+    shooting_mode = _format_shooting_mode(metadata.get('ExposureProgram'))
+    if shooting_mode:
+        result['Shooting Mode'] = shooting_mode
+
+    exposure_compensation = _format_exposure_compensation(metadata)
+    if exposure_compensation:
+        result['Exposure Compensation'] = exposure_compensation
 
     iso = metadata.get('ISO')
     if iso is not None:
@@ -409,6 +436,115 @@ def _coerce_float(value: Any) -> float | None:
             return None
 
     return None
+
+
+def _format_shooting_mode(value: Any) -> str:
+    """Return a readable exposure program label for standard EXIF values."""
+    program = _coerce_int(value)
+    if program is None:
+        return ''
+
+    return EXPOSURE_PROGRAM_LABELS.get(program, '')
+
+
+def _coerce_int(value: Any) -> int | None:
+    """Convert an integral scalar value to int when possible."""
+    if isinstance(value, int):
+        return value
+
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+
+        try:
+            numeric = float(text)
+        except ValueError:
+            return None
+
+        if numeric.is_integer():
+            return int(numeric)
+
+    return None
+
+
+def _format_exposure_compensation(metadata: dict[str, Any]) -> str:
+    """Return the first usable exposure compensation as a display string."""
+    # Prefer the canonical ExifTool key while keeping ExposureBiasValue as a
+    # fallback because cameras can expose the same EV offset under either name.
+    for key in EXPOSURE_COMPENSATION_KEYS:
+        value = _coerce_rational_float(metadata.get(key))
+        if value is not None:
+            return _format_signed_third(value)
+
+    return ''
+
+
+def _coerce_rational_float(value: Any) -> float | None:
+    """Convert decimal or simple fractional scalar values to float."""
+    if isinstance(value, (int, float)):
+        candidate = float(value)
+        return candidate if math.isfinite(candidate) else None
+
+    if not isinstance(value, str):
+        return None
+
+    text = value.strip()
+    if not text:
+        return None
+
+    try:
+        candidate = float(text)
+    except ValueError:
+        pass
+    else:
+        return candidate if math.isfinite(candidate) else None
+
+    try:
+        candidate = float(Fraction(text))
+    except (ValueError, ZeroDivisionError):
+        return None
+
+    return candidate if math.isfinite(candidate) else None
+
+
+def _format_signed_third(value: float) -> str:
+    """
+    Format an EV offset as camera-style thirds or a signed decimal fallback.
+
+    Cameras usually step exposure compensation in thirds, but EXIF readers can
+    return rounded floats, so comparisons use tolerance before falling back to
+    raw decimal display.
+    """
+    if abs(value) < EXPOSURE_COMPENSATION_TOLERANCE:
+        return '0'
+
+    sign = '+' if value > 0 else '-'
+    absolute = abs(value)
+    nearest_whole = round(absolute)
+    if abs(absolute - nearest_whole) < EXPOSURE_COMPENSATION_TOLERANCE:
+        return f'{sign}{nearest_whole:g}'
+
+    # Limit to thirds to match camera compensation dials; values that do not
+    # round-trip within tolerance stay decimal instead of being guessed.
+    fraction = Fraction(absolute).limit_denominator(
+        EXPOSURE_COMPENSATION_DENOMINATOR
+    )
+    if abs(float(fraction) - absolute) >= EXPOSURE_COMPENSATION_TOLERANCE:
+        return f'{value:+g}'
+
+    whole = fraction.numerator // fraction.denominator
+    remainder = fraction.numerator % fraction.denominator
+    if whole and remainder:
+        return f'{sign}{whole:g} {remainder}/{fraction.denominator}'
+
+    if whole:
+        return f'{sign}{whole:g}'
+
+    return f'{sign}{remainder}/{fraction.denominator}'
 
 
 def _first_string(metadata: dict[str, Any], keys: list[str]) -> str:

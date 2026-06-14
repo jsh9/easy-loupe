@@ -1,5 +1,12 @@
 # Change Log
 
+## [1.2.3]
+
+- Added
+
+  - EXIF overlays now include shooting mode and exposure compensation rows when
+    those values are available in source metadata.
+
 ## [1.2.1]
 
 - Fixed

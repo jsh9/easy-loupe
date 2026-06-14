@@ -96,6 +96,8 @@ PHOTO_VIEWER_PROGRESS_FONT_SIZE_PX = 16
 PHOTO_VIEWER_TRANSIENT_FONT_SIZE_PX = 28
 PHOTO_VIEWER_OVERLAY_FONT_WEIGHT = 600
 EXIF_LOADING_VALUE = 'Loading...'
+# Common standalone-viewer rows shown while the async EXIF worker fills in real
+# values; uncommon metadata rows can still appear once the worker finishes.
 PHOTO_VIEWER_EXIF_PLACEHOLDER_LABELS = (
     'Captured',
     'Camera Model',
@@ -103,6 +105,8 @@ PHOTO_VIEWER_EXIF_PLACEHOLDER_LABELS = (
     'Focal Length',
     'Aperture',
     'Shutter Speed',
+    'Shooting Mode',
+    'Exposure Compensation',
     'ISO',
     'Resolution',
     'File Size',

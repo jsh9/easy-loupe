@@ -26,6 +26,12 @@ def test_exif_module_re_exports_extract_focus_point() -> None:
 
 
 def test_format_exif_display_returns_human_readable_fields() -> None:
+    """
+    Verify the full EXIF display row order used by the overlay.
+
+    The overlay renders insertion order, so this protects exposure rows from
+    drifting away from the neighboring camera-setting rows.
+    """
     metadata = {
         'Make': 'NIKON CORPORATION',
         'Model': 'Z 8',
@@ -34,6 +40,8 @@ def test_format_exif_display_returns_human_readable_fields() -> None:
         'LensModel': 'NIKKOR Z 50mm f/1.8 S',
         'FNumber': '2.8',
         'ExposureTime': '0.004',
+        'ExposureProgram': 3,
+        'ExposureCompensation': 0.333333,
         'ISO': 800,
         'FocalLength': '50',
         'GPSLatitude': 40.712776,
@@ -41,18 +49,20 @@ def test_format_exif_display_returns_human_readable_fields() -> None:
         'GPSAltitude': 12.4,
     }
 
-    assert core_exif_module.format_exif_display(metadata) == {
-        'Camera Make': 'NIKON CORPORATION',
-        'Camera Model': 'Z 8',
-        'Lens ID': 'NIKKOR Z 50mm f/1.8 S',
-        'Lens Make': 'Nikon',
-        'Lens Model': 'NIKKOR Z 50mm f/1.8 S',
-        'Focal Length': '50\u00a0mm',
-        'Aperture': '\u0192/2.8',
-        'Shutter Speed': '1/250\u00a0s',
-        'ISO': '800',
-        'GPS': '40.712776º, -74.005974º, 12.4\u00a0m',
-    }
+    assert list(core_exif_module.format_exif_display(metadata).items()) == [
+        ('Camera Make', 'NIKON CORPORATION'),
+        ('Camera Model', 'Z 8'),
+        ('Lens ID', 'NIKKOR Z 50mm f/1.8 S'),
+        ('Lens Make', 'Nikon'),
+        ('Lens Model', 'NIKKOR Z 50mm f/1.8 S'),
+        ('Focal Length', '50\u00a0mm'),
+        ('Aperture', '\u0192/2.8'),
+        ('Shutter Speed', '1/250\u00a0s'),
+        ('Shooting Mode', 'Aperture Priority'),
+        ('Exposure Compensation', '+1/3'),
+        ('ISO', '800'),
+        ('GPS', '40.712776º, -74.005974º, 12.4\u00a0m'),
+    ]
 
 
 def test_format_exif_display_uses_lens_fallback_and_long_exposure() -> None:
@@ -71,6 +81,165 @@ def test_format_exif_display_uses_lens_fallback_and_long_exposure() -> None:
 
 def test_format_exif_display_omits_missing_fields() -> None:
     assert core_exif_module.format_exif_display({}) == {}
+
+
+@pytest.mark.parametrize(
+    ('program', 'expected'),
+    [
+        pytest.param(1, 'Manual', id='manual'),
+        pytest.param(2, 'Program', id='program'),
+        pytest.param(3, 'Aperture Priority', id='aperture-priority'),
+        pytest.param(4, 'Shutter Priority', id='shutter-priority'),
+        pytest.param(5, 'Creative', id='creative'),
+        pytest.param(6, 'Action', id='action'),
+        pytest.param(7, 'Portrait', id='portrait'),
+        pytest.param(8, 'Landscape', id='landscape'),
+        pytest.param(9, 'Bulb', id='bulb'),
+    ],
+)
+def test_format_exif_display_maps_standard_exposure_programs(
+        program: int,
+        expected: str,
+) -> None:
+    """
+    Verify standard EXIF exposure programs get readable labels.
+
+    ExifTool returns these as numeric codes, so the overlay needs stable labels
+    instead of raw integers.
+    """
+    assert core_exif_module.format_exif_display({
+        'ExposureProgram': program
+    }) == {'Shooting Mode': expected}
+
+
+@pytest.mark.parametrize(
+    'program',
+    [
+        pytest.param(0, id='not-defined'),
+        pytest.param(100, id='camera-specific'),
+        pytest.param('Manual', id='string-label'),
+    ],
+)
+def test_format_exif_display_omits_unknown_exposure_programs(
+        program: object,
+) -> None:
+    """
+    Verify unknown shooting modes are omitted instead of guessed.
+
+    Vendor-specific codes can collide across camera brands, so showing no row
+    is clearer than displaying a wrong mode.
+    """
+    assert (
+        core_exif_module.format_exif_display({'ExposureProgram': program})
+        == {}
+    )
+
+
+@pytest.mark.parametrize(
+    ('metadata', 'expected'),
+    [
+        pytest.param({'ExposureCompensation': 0}, '0', id='zero'),
+        pytest.param(
+            {'ExposureCompensation': 0.333333},
+            '+1/3',
+            id='positive-third',
+        ),
+        pytest.param(
+            {'ExposureCompensation': 0.666667},
+            '+2/3',
+            id='positive-two-thirds',
+        ),
+        pytest.param(
+            {'ExposureCompensation': -0.333333},
+            '-1/3',
+            id='negative-third',
+        ),
+        pytest.param({'ExposureCompensation': -1}, '-1', id='negative-one'),
+        pytest.param(
+            {'ExposureCompensation': 1.333333},
+            '+1 1/3',
+            id='mixed-positive',
+        ),
+        pytest.param(
+            {'ExposureCompensation': 0.4},
+            '+0.4',
+            id='decimal-fallback',
+        ),
+        pytest.param(
+            {'ExposureBiasValue': '-2/3'},
+            '-2/3',
+            id='bias-value-fallback',
+        ),
+        pytest.param(
+            {
+                'ExposureCompensation': 0.666667,
+                'ExposureBiasValue': -1,
+            },
+            '+2/3',
+            id='preferred-key',
+        ),
+    ],
+)
+def test_format_exif_display_formats_exposure_compensation(
+        metadata: dict[str, object],
+        expected: str,
+) -> None:
+    """
+    Verify exposure compensation uses signed camera-style fractions.
+
+    The EXIF pane should match camera UI notation for thirds while keeping a
+    decimal fallback for non-standard values.
+    """
+    assert core_exif_module.format_exif_display(metadata) == {
+        'Exposure Compensation': expected
+    }
+
+
+@pytest.mark.parametrize(
+    ('metadata', 'expected'),
+    [
+        pytest.param(
+            {'ExposureCompensation': float('nan')},
+            {},
+            id='float-nan',
+        ),
+        pytest.param(
+            {'ExposureCompensation': 'NaN'},
+            {},
+            id='string-nan',
+        ),
+        pytest.param(
+            {'ExposureCompensation': float('inf')},
+            {},
+            id='float-infinity',
+        ),
+        pytest.param(
+            {'ExposureCompensation': '-inf'},
+            {},
+            id='string-negative-infinity',
+        ),
+        pytest.param(
+            {
+                'ExposureCompensation': 'NaN',
+                'ExposureBiasValue': '-2/3',
+            },
+            {'Exposure Compensation': '-2/3'},
+            id='fallback-after-invalid-preferred-key',
+        ),
+    ],
+)
+def test_format_exif_display_omits_non_finite_exposure_compensation(
+        metadata: dict[str, object],
+        expected: dict[str, str],
+) -> None:
+    """
+    Verify invalid non-finite EV values are skipped without crashing.
+
+    Metadata can contain malformed scalar values, and the shared formatter runs
+    during folder loading, so bad compensation data must behave like a missing
+    row while still allowing the fallback key to be used.
+    """
+    assert core_exif_module.format_exif_display(metadata) == expected
 
 
 @pytest.mark.parametrize(
