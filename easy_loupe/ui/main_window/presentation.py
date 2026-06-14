@@ -24,6 +24,7 @@ from easy_loupe.ui.widgets import ThumbnailItemWidget
 
 if TYPE_CHECKING:
     from easy_loupe.core.photo_library import PhotoRecord, SceneGroup
+    from easy_loupe.progress import CountedProgressStage, ProgressReporter
     from easy_loupe.ui.main_window.window import MainWindow
 
 MULTI_PHOTO_SELECTION_COUNT = 2
@@ -183,6 +184,7 @@ class MainWindowPresentationMixin:
             *,
             show_progress: bool = False,
             scroll_current_item_into_view: bool = True,
+            progress_reporter: ProgressReporter | None = None,
     ) -> None:
         self.thumbnail_list.blockSignals(True)
         self.thumbnail_list.clear()
@@ -194,21 +196,43 @@ class MainWindowPresentationMixin:
             self._scene_by_id = {}
             photos = self.library.get_photos()
             total = max(len(photos), 1)
-            for index, photo in enumerate(photos, start=1):
-                if show_progress:
-                    self._show_progress(
-                        'Preparing thumbnails',
-                        100 + int((index / total) * 100),
-                    )
+            thumbnail_progress = None
+            if show_progress:
+                thumbnail_progress = self._start_list_population_progress(
+                    progress_reporter=progress_reporter,
+                    stage_id='thumbnails',
+                    label='Preparing thumbnails',
+                    total=len(photos),
+                )
 
+            for index, photo in enumerate(photos, start=1):
                 self._add_photo_item(
                     self.thumbnail_list, photo, frame_size=QSize(220, 165)
                 )
+                if show_progress:
+                    progress = 100 + int((index / total) * 100)
+                    self._report_list_population_progress(
+                        progress_stage=thumbnail_progress,
+                        stage_id='thumbnails',
+                        label='Preparing thumbnails',
+                        current=index,
+                        progress=progress,
+                    )
+
                 self._thumbnail_photo_rows[photo.photo_id] = index - 1
         else:
             self._rebuild_scene_lookup()
             scenes = self.library.get_scene_groups()
             total = max(len(scenes), 1)
+            thumbnail_progress = None
+            if show_progress:
+                thumbnail_progress = self._start_list_population_progress(
+                    progress_reporter=progress_reporter,
+                    stage_id='thumbnails',
+                    label='Preparing scene stacks',
+                    total=len(scenes),
+                )
+
             for index, scene in enumerate(scenes, start=1):
                 cover = self.library.get_photo(scene.photo_ids[0])
                 scene_count = len(scene.photo_ids)
@@ -216,12 +240,6 @@ class MainWindowPresentationMixin:
                     self.library.get_photo(photo_id).flag == 'rejected'
                     for photo_id in scene.photo_ids
                 )
-                if show_progress:
-                    self._show_progress(
-                        'Preparing scene stacks',
-                        100 + int((index / total) * 100),
-                    )
-
                 self._add_photo_item(
                     self.thumbnail_list,
                     cover,
@@ -236,6 +254,16 @@ class MainWindowPresentationMixin:
                     scene_count=scene_count if scene_count > 1 else None,
                     stacked=scene_count > 1,
                 )
+                if show_progress:
+                    progress = 100 + int((index / total) * 100)
+                    self._report_list_population_progress(
+                        progress_stage=thumbnail_progress,
+                        stage_id='thumbnails',
+                        label='Preparing scene stacks',
+                        current=index,
+                        progress=progress,
+                    )
+
                 self._thumbnail_photo_rows[cover.photo_id] = index - 1
                 self._thumbnail_scene_rows[scene.scene_id] = index - 1
 
@@ -249,6 +277,7 @@ class MainWindowPresentationMixin:
             *,
             show_progress: bool = False,
             scroll_current_item_into_view: bool = True,
+            progress_reporter: ProgressReporter | None = None,
     ) -> None:
         self.browse_list.blockSignals(True)
         self.browse_list.clear()
@@ -257,15 +286,29 @@ class MainWindowPresentationMixin:
 
         photos = self.library.get_photos()
         total = max(len(photos), 1)
-        for index, photo in enumerate(photos, start=1):
-            if show_progress:
-                self._show_progress(
-                    'Preparing browse grid', 100 + int((index / total) * 100)
-                )
+        browse_progress = None
+        if show_progress:
+            browse_progress = self._start_list_population_progress(
+                progress_reporter=progress_reporter,
+                stage_id='browse',
+                label='Preparing browse grid',
+                total=len(photos),
+            )
 
+        for index, photo in enumerate(photos, start=1):
             self._add_photo_item(
                 self.browse_list, photo, frame_size=QSize(220, 165)
             )
+            if show_progress:
+                progress = 100 + int((index / total) * 100)
+                self._report_list_population_progress(
+                    progress_stage=browse_progress,
+                    stage_id='browse',
+                    label='Preparing browse grid',
+                    current=index,
+                    progress=progress,
+                )
+
             self._browse_photo_rows[photo.photo_id] = index - 1
             self._photo_position_by_id[photo.photo_id] = index
 
@@ -274,6 +317,51 @@ class MainWindowPresentationMixin:
         )
         self.browse_list.blockSignals(False)
         self._refresh_browse_layout()
+
+    @staticmethod
+    def _start_list_population_progress(
+            *,
+            progress_reporter: ProgressReporter | None,
+            stage_id: str,
+            label: str,
+            total: int,
+    ) -> CountedProgressStage | None:
+        if progress_reporter is None:
+            return None
+
+        progress_stage = progress_reporter.counted_stage(
+            stage_id,
+            label=label,
+            total=total,
+            start_progress=100,
+            end_progress=200,
+            zero_progress=100,
+        )
+        progress_stage.start()
+        return progress_stage
+
+    def _report_list_population_progress(
+            self: MainWindow,
+            *,
+            progress_stage: CountedProgressStage | None,
+            stage_id: str,
+            label: str,
+            current: int,
+            progress: int,
+    ) -> None:
+        """
+        Report list-population progress after preview-backed work completes.
+
+        ``_add_photo_item`` may render or load a thumbnail through
+        ``get_preview_path``. Counts represent completed rows, not the row that
+        is about to start.
+        """
+        del stage_id
+        if progress_stage is not None:
+            progress_stage.update(current)
+            return
+
+        self._show_progress(label, progress)
 
     def _select_left_item_for_current_photo(
             self: MainWindow,
@@ -572,6 +660,19 @@ class MainWindowPresentationMixin:
         self.progress_label.setStyleSheet(label_style)
         self.overlay_message_label.setStyleSheet(
             f'QLabel {{ color: {ttc}; font-size: 16px; font-weight: 600; }}'
+        )
+        self.progress_stage_list.setStyleSheet(
+            f"""
+            QLabel#progressStageLabel {{
+                color: {ttc};
+                font-size: 13px;
+                font-weight: 600;
+            }}
+            QLabel#progressStageCount {{
+                color: {ttc};
+                font-size: 13px;
+            }}
+            """
         )
         self.progress_overlay.setStyleSheet(
             """

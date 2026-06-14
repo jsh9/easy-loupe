@@ -17,6 +17,11 @@ from easy_loupe.core.records import (
     PhotoRecord,
     SceneGroup,
 )
+from easy_loupe.progress import (
+    ProgressReporter,
+    ProgressStageDefinition,
+    StructuredProgressCallback,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -39,6 +44,7 @@ def detect_scenes(
         get_preview_path_fn: Callable[[str, str], Path],
         progress_callback: Callable[[str, int], None] | None = None,
         *,
+        progress_snapshot_callback: StructuredProgressCallback | None = None,
         analysis_features_fn: Callable[[PhotoRecord], tuple[Any, list[float]]]
         | None = None,
 ) -> list[SceneGroup]:
@@ -50,18 +56,50 @@ def detect_scenes(
         ) -> tuple[Any, list[float]]:
             return _analysis_features(photo, get_preview_path_fn)
 
-    if progress_callback:
-        progress_callback('preparing files', 5)
+    reporter = ProgressReporter(
+        'Detecting scenes',
+        (
+            ProgressStageDefinition('features', 'Extracting preview features'),
+            ProgressStageDefinition('grouping', 'Grouping scenes'),
+        ),
+        progress_callback=progress_callback,
+        snapshot_callback=progress_snapshot_callback,
+    )
+    reporter.start_stage(
+        'features', message='Preparing files', overall_progress=5
+    )
 
     features: dict[str, tuple[Any, list[float]]] = {}
-    total_photos = max(len(photos), 1)
+    total_photos = len(photos)
+    feature_progress = reporter.counted_stage(
+        'features',
+        label='Extracting preview features',
+        total=total_photos,
+        start_progress=5,
+        end_progress=75,
+        zero_progress=75,
+    )
+    grouping_progress = reporter.counted_stage(
+        'grouping',
+        label='Grouping scenes',
+        total=total_photos,
+        start_progress=80,
+        end_progress=99,
+        zero_progress=99,
+        progress_value_fn=_grouping_overall_progress,
+    )
+    if total_photos == 0:
+        # Empty libraries skip both scene loops. Mark the stages as explicit
+        # zero-work completions so the overlay does not show completed bars for
+        # work that never had any items.
+        feature_progress.update(0)
+        grouping_progress.update(0)
+        reporter.finish('done', 100)
+        return []
+
     for index, photo in enumerate(photos, start=1):
         features[photo.photo_id] = analysis_features_fn(photo)
-        if progress_callback:
-            progress = 5 + int((index / total_photos) * 70)
-            progress_callback(
-                'extracting previews/features', min(progress, 75)
-            )
+        feature_progress.update(index)
 
     scene_groups: list[SceneGroup] = []
     current_scene: SceneGroup | None = None
@@ -74,8 +112,7 @@ def detect_scenes(
             )
             photo.scene_id = current_scene.scene_id
             previous_photo = photo
-            if progress_callback:
-                progress_callback('grouping scenes', 80)
+            grouping_progress.update(index)
 
             continue
 
@@ -90,15 +127,12 @@ def detect_scenes(
 
         photo.scene_id = current_scene.scene_id
         previous_photo = photo
-        if progress_callback:
-            progress = 80 + int((index / total_photos) * 19)
-            progress_callback('grouping scenes', min(progress, 99))
+        grouping_progress.update(index)
 
     if current_scene is not None:
         scene_groups.append(current_scene)
 
-    if progress_callback:
-        progress_callback('done', 100)
+    reporter.finish('done', 100)
 
     return scene_groups
 
@@ -131,6 +165,13 @@ def _analysis_features(
         total = sum(combined) or 1.0
         normalized = [value / total for value in combined]
         return perceptual_hash, normalized
+
+
+def _grouping_overall_progress(current: int, total: int) -> int:
+    if current <= 1:
+        return 80
+
+    return min(80 + int((current / max(total, 1)) * 19), 99)
 
 
 def _should_merge_scene(

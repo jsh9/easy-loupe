@@ -6,12 +6,13 @@ import pytest
 from PySide6.QtCore import QPoint, QSettings, Qt
 from PySide6.QtGui import QKeySequence
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox
 
 import easy_loupe.ui.identity as identity_module
 import easy_loupe.ui.main_window.build as build_module
 import easy_loupe.ui.photo_viewer.window as photo_viewer_window_module
 from easy_loupe.core.photo_library import PhotoLibrary
+from easy_loupe.progress import ProgressReporter, ProgressStageDefinition
 from easy_loupe.ui.launch import CullingLaunchRequest
 from easy_loupe.ui.photo_viewer.window import PhotoViewerWindow
 from easy_loupe.ui.photo_viewer.workers import PhotoViewerExifResult
@@ -1325,6 +1326,9 @@ def test_photo_viewer_culling_handoff_waits_for_hydration(
     The viewer opens quickly from a lightweight folder load, but the culler
     needs the hydrated library. This also protects the timing edge where
     hydration has finished before the thread cleanup slot clears.
+
+    Structured hydration snapshots should be stored silently until handoff
+    waits, and stale request ids must not replace the latest valid snapshot.
     """
     create_jpeg(tmp_path / 'A.JPG', 'green')
     create_jpeg(tmp_path / 'B.JPG', 'blue')
@@ -1339,12 +1343,41 @@ def test_photo_viewer_culling_handoff_waits_for_hydration(
     window._folder_hydration_thread = object()
     window._folder_hydration_message = 'Loading folder...'
     window._folder_hydration_progress = 42
+    reporter = ProgressReporter(
+        'Loading folder',
+        (
+            ProgressStageDefinition(
+                'viewer_cache', 'Preparing photo viewer cache'
+            ),
+        ),
+    )
+    snapshot = reporter.update_stage(
+        'viewer_cache', current=4, total=37, overall_progress=42
+    )
+    window._handle_folder_hydration_progress_snapshot(
+        request_id + 1, expected_folder, snapshot
+    )
+
+    assert window._folder_hydration_snapshot is None
+
+    window._handle_folder_hydration_progress_snapshot(
+        request_id, expected_folder, snapshot
+    )
+
+    assert window.progress_overlay.isHidden() is True
 
     window._request_culling_handoff()
 
     assert requests == []
     assert window._pending_culling_handoff is True
     assert window.progress_overlay.isVisible() is True
+    assert window.overlay_progress_bar.isVisible() is False
+    label_texts = {
+        label.text()
+        for label in window.progress_stage_list.findChildren(QLabel)
+    }
+    assert 'Preparing photo viewer cache' in label_texts
+    assert '4 of 37' in label_texts
 
     window._handle_folder_hydration_finished(
         request_id, expected_folder, hydrated_library
@@ -1358,6 +1391,180 @@ def test_photo_viewer_culling_handoff_waits_for_hydration(
     assert request.enter_browse is True
     assert request.preloaded_library is hydrated_library
     window._folder_hydration_thread = None
+    window.close()
+
+
+def test_photo_viewer_handoff_without_snapshot_shows_scalar_progress(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify culling handoff has a scalar fallback before snapshots arrive.
+
+    Hydration usually emits a structured snapshot quickly, but a handoff can
+    wait after only legacy scalar progress has arrived. The viewer should show
+    that scalar state until a snapshot becomes available.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    create_jpeg(tmp_path / 'B.JPG', 'blue')
+    _app, window = _open_viewer(tmp_path, monkeypatch)
+    requests: list[object] = []
+    window.culling_requested.connect(requests.append)
+    request_id = window._folder_hydration_request_id = 4
+    expected_folder = tmp_path.resolve()
+    window._folder_hydration_folder = expected_folder
+    window._folder_hydration_thread = object()
+    window._folder_hydration_snapshot = None
+    window._folder_hydration_message = 'Loading folder...'
+    window._folder_hydration_progress = 42
+
+    window._request_culling_handoff()
+
+    assert requests == []
+    assert window._pending_culling_handoff is True
+    assert window.progress_overlay.isVisible() is True
+    assert window.overlay_message_label.text() == 'Loading folder...'
+    assert window.overlay_progress_bar.isVisible() is True
+    assert window.overlay_progress_bar.maximum() == 100
+    assert window.overlay_progress_bar.value() == 42
+    assert window.progress_stage_list.isHidden() is True
+
+    window._handle_folder_hydration_progress(
+        request_id,
+        expected_folder,
+        'Preparing photo viewer cache',
+        150,
+    )
+
+    assert window.overlay_message_label.text() == (
+        'Preparing photo viewer cache'
+    )
+    assert window.overlay_progress_bar.maximum() == 200
+    assert window.overlay_progress_bar.value() == 150
+    assert window.progress_stage_list.isHidden() is True
+
+    window._pending_culling_handoff = False
+    window._folder_hydration_thread = None
+    window.close()
+
+
+def test_photo_viewer_handoff_keeps_snapshot_rows_after_scalar_hydration_update(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify scalar hydration updates do not replace active snapshot rows.
+
+    Background hydration emits both callback styles. Once handoff is waiting
+    with structured rows visible, a later scalar update should update stored
+    progress only and leave the row overlay intact.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    create_jpeg(tmp_path / 'B.JPG', 'blue')
+    _app, window = _open_viewer(tmp_path, monkeypatch)
+    request_id = window._folder_hydration_request_id = 5
+    expected_folder = tmp_path.resolve()
+    window._folder_hydration_folder = expected_folder
+    window._folder_hydration_thread = object()
+    reporter = ProgressReporter(
+        'Loading folder',
+        (
+            ProgressStageDefinition(
+                'viewer_cache', 'Preparing photo viewer cache'
+            ),
+        ),
+    )
+    snapshot = reporter.update_stage(
+        'viewer_cache', current=4, total=37, overall_progress=42
+    )
+    window._handle_folder_hydration_progress_snapshot(
+        request_id, expected_folder, snapshot
+    )
+
+    window._request_culling_handoff()
+    window._handle_folder_hydration_progress(
+        request_id,
+        expected_folder,
+        'Scalar hydration update',
+        88,
+    )
+
+    label_texts = {
+        label.text()
+        for label in window.progress_stage_list.findChildren(QLabel)
+    }
+    assert window._folder_hydration_message == 'Scalar hydration update'
+    assert window._folder_hydration_progress == 88
+    assert window.overlay_message_label.text() == snapshot.current_message
+    assert window.overlay_progress_bar.isVisible() is False
+    assert window.progress_stage_list.isVisible() is True
+    assert 'Preparing photo viewer cache' in label_texts
+    assert '4 of 37' in label_texts
+
+    window._pending_culling_handoff = False
+    window._folder_hydration_thread = None
+    window.close()
+
+
+@pytest.mark.parametrize(
+    'cleanup_action',
+    [
+        pytest.param('worker-finished', id='worker-finished'),
+        pytest.param('replacement', id='replacement'),
+        pytest.param('close-stop', id='close-stop'),
+    ],
+)
+def test_photo_viewer_hydration_snapshot_is_cleared_by_cleanup_paths(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        cleanup_action: str,
+) -> None:
+    """
+    Verify stored hydration snapshots do not survive cleanup boundaries.
+
+    Background hydration stores snapshots silently until a handoff waits for
+    them. Worker cleanup, viewer replacement, and close-time shutdown should
+    all clear that cache so a later handoff cannot show stale stage rows.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    create_jpeg(tmp_path / 'B.JPG', 'blue')
+    _app, window = _open_viewer(tmp_path, monkeypatch)
+    request_id = window._folder_hydration_request_id = 8
+    expected_folder = tmp_path.resolve()
+    finished_thread = object()
+    finished_worker = object()
+    reporter = ProgressReporter(
+        'Loading folder',
+        (
+            ProgressStageDefinition(
+                'viewer_cache', 'Preparing photo viewer cache'
+            ),
+        ),
+    )
+    snapshot = reporter.update_stage(
+        'viewer_cache', current=1, total=2, overall_progress=150
+    )
+    window._folder_hydration_folder = expected_folder
+    window._folder_hydration_thread = finished_thread
+    window._folder_hydration_worker = finished_worker
+    window._folder_hydration_snapshot = snapshot
+
+    if cleanup_action == 'worker-finished':
+        window._clear_folder_hydration_worker(
+            request_id,
+            expected_folder,
+            finished_thread,
+            finished_worker,
+        )
+    elif cleanup_action == 'replacement':
+        window._cancel_background_tasks_for_replacement()
+    else:
+        window._stop_photo_viewer_background_tasks()
+
+    assert window._folder_hydration_snapshot is None
+
+    window._folder_hydration_thread = None
+    window._folder_hydration_worker = None
     window.close()
 
 

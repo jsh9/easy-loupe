@@ -377,6 +377,122 @@ def test_write_xmp_sidecars_writes_nested_sidecar_beside_photo(
     assert _element_text(description, XMP_NAMESPACE, 'Rating') == '4'
 
 
+def test_write_xmp_sidecars_reports_structured_progress(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify XMP writing exposes counted structured progress stages.
+
+    This keeps the XMP overlay contract covered without coupling the test to
+    XML-writing details that are asserted elsewhere.
+    """
+    source_folder, library = _make_library(
+        tmp_path,
+        monkeypatch,
+        stem='IMG_5100',
+        create_raw=True,
+        create_jpeg_file=True,
+    )
+    library.update_metadata(
+        'IMG_5100',
+        rating=5,
+        fields={'rating'},
+    )
+    progress_updates: list[tuple[str, int]] = []
+    progress_snapshots = []
+
+    write_xmp_sidecars(
+        source_folder,
+        library.get_photos(),
+        WriteXmpOptions(merge_policy='preserve'),
+        lambda message, progress: progress_updates.append((
+            message,
+            progress,
+        )),
+        progress_snapshot_callback=progress_snapshots.append,
+    )
+
+    assert progress_updates[0] == ('Preparing XMP sidecars', 5)
+    assert progress_updates[1] == ('Writing XMP sidecars, 1 of 1', 99)
+    assert progress_snapshots[-2].stages[1].count_text() == '1 of 1'
+    assert progress_snapshots[-2].stages[1].status == 'complete'
+
+
+def test_write_xmp_sidecars_skipped_photo_reports_completed_progress(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify skipped XMP photos still advance counted progress.
+
+    Untagged photos without existing sidecars do not write files, but they are
+    still completed loop items and should not leave the progress row behind.
+    """
+    source_folder, library = _make_library(
+        tmp_path,
+        monkeypatch,
+        stem='IMG_7100',
+        create_raw=True,
+        create_jpeg_file=False,
+    )
+    progress_updates: list[tuple[str, int]] = []
+    progress_snapshots = []
+
+    summary = write_xmp_sidecars(
+        source_folder,
+        library.get_photos(),
+        WriteXmpOptions(merge_policy='preserve'),
+        lambda message, progress: progress_updates.append((
+            message,
+            progress,
+        )),
+        progress_snapshot_callback=progress_snapshots.append,
+    )
+
+    write_stage = next(
+        stage
+        for stage in progress_snapshots[-2].stages
+        if stage.stage_id == 'write'
+    )
+    assert summary.skipped_photos == 1
+    assert summary.written_sidecars == 0
+    assert progress_updates[1] == ('Writing XMP sidecars, 1 of 1', 99)
+    assert write_stage.status == 'complete'
+    assert write_stage.count_text() == '1 of 1'
+    assert (source_folder / 'IMG_7100.XMP').exists() is False
+
+
+def test_write_xmp_sidecars_empty_photos_report_zero_total_progress(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify no-op XMP writing reports completed zero-work progress.
+
+    Empty photo sets should render as status-only structured progress rows, not
+    as unknown-total completed progress bars.
+    """
+    source_folder = tmp_path / 'empty-xmp'
+    source_folder.mkdir()
+    progress_snapshots = []
+
+    summary = write_xmp_sidecars(
+        source_folder,
+        [],
+        WriteXmpOptions(merge_policy='preserve'),
+        progress_snapshot_callback=progress_snapshots.append,
+    )
+
+    write_stage = next(
+        stage
+        for stage in progress_snapshots[-1].stages
+        if stage.stage_id == 'write'
+    )
+    assert summary.processed_photos == 0
+    assert write_stage.status == 'complete'
+    assert write_stage.current == 0
+    assert write_stage.total == 0
+    assert write_stage.count_text() == ''
+
+
 def _make_library(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,

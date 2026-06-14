@@ -17,6 +17,11 @@ from easy_loupe.operations.common import (
     sidecar_path_for_photo,
     undo_operation,
 )
+from easy_loupe.progress import (
+    ProgressReporter,
+    ProgressStageDefinition,
+    StructuredProgressCallback,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -50,20 +55,44 @@ def write_xmp_sidecars(
         photos: list[PhotoRecord],
         options: WriteXmpOptions,
         progress_callback: ProgressCallback | None = None,
+        *,
+        progress_snapshot_callback: StructuredProgressCallback | None = None,
 ) -> OperationSummary:
     """Create or update per-stem XMP sidecars for the provided photos."""
     source_folder = current_folder.expanduser().resolve()
     if not source_folder.is_dir():
         raise FileNotFoundError(f'{source_folder} is not a directory')
 
-    if progress_callback:
-        progress_callback('Preparing XMP sidecars', 5)
+    reporter = ProgressReporter(
+        'Writing XMP sidecars',
+        (
+            ProgressStageDefinition('prepare', 'Preparing XMP sidecars'),
+            ProgressStageDefinition('write', 'Writing XMP sidecars'),
+        ),
+        progress_callback=progress_callback,
+        snapshot_callback=progress_snapshot_callback,
+    )
+    reporter.start_stage('prepare', overall_progress=5)
 
     undo_plan = UndoPlan()
     written_sidecars = 0
     skipped_photos = 0
-    total_photos = max(len(photos), 1)
+    total_photos = len(photos)
+    write_progress = reporter.counted_stage(
+        'write',
+        label='Writing XMP sidecars',
+        total=total_photos,
+        start_progress=5,
+        end_progress=99,
+        zero_progress=99,
+    )
     try:
+        if total_photos == 0:
+            # No photos means the XMP loop never advances this stage. Emit a
+            # zero-total completion so the structured overlay treats the
+            # workflow as a no-op rather than unknown-size completed work.
+            write_progress.update(0)
+
         for index, photo in enumerate(photos, start=1):
             sidecar_path = sidecar_path_for_photo(source_folder, photo)
             has_any_tags = (
@@ -83,15 +112,12 @@ def write_xmp_sidecars(
                 )
                 written_sidecars += 1
 
-            if progress_callback:
-                progress = 5 + int((index / total_photos) * 94)
-                progress_callback('Writing XMP sidecars', min(progress, 99))
+            write_progress.update(index)
     except Exception:
         undo_operation(undo_plan)
         raise
 
-    if progress_callback:
-        progress_callback('XMP sidecar writing complete', 100)
+    reporter.finish('XMP sidecar writing complete', 100)
 
     return OperationSummary(
         processed_photos=len(photos),

@@ -145,6 +145,8 @@ Major logic:
 - Undo for organization/XMP workflows is explicit, filesystem-based, and a
   given `UndoPlan` is intended to be consumed at most once.
 - Successful undo reloads the current folder and then shows confirmation.
+- Empty undo plans still emit a completed zero-total undo progress stage before
+  cleanup so the overlay receives a terminal update.
 - Undo plans should continue to describe the exact files created, moved, backed
   up, or removed by recursive operations.
 

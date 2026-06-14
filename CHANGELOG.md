@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+- Added
+
+  - Long-running progress overlays now show granular counted stages for folder
+    loading, hydration, scene detection, organization, XMP writing, and undo
+    workflows.
+
+- Changed
+
+  - Folder metadata loading now sends one primary ExifTool source per grouped
+    photo, falls back to companion previews only when needed, and reads
+    metadata in adaptive batches.
+  - Progress reporting, grouped EXIF loading, worker routing, and overlay
+    rendering are split into dedicated modules for easier maintenance.
+
 ## [1.1.3] - 2026-06-07
 
 - Added

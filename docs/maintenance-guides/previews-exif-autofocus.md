@@ -75,8 +75,11 @@ Major logic:
 Primary files:
 
 - `easy_loupe/core/exif.py`
+- `easy_loupe/core/grouped_exif.py`
+- `easy_loupe/core/photo_groups.py`
 - `easy_loupe/core/metadata.py`
 - `scripts/build_app/`
+- `tests/core/test_grouped_exif.py`
 - `tests/core/test_metadata.py`
 
 Major logic:
@@ -90,6 +93,36 @@ Major logic:
 - Packaged app builds include their own ExifTool payload.
 - If `exiftool` is missing or fails, the library falls back to empty EXIF
   metadata rather than crashing.
+- Folder loading groups discovered files before the first EXIF pass. Each
+  grouped photo sends one primary metadata source to ExifTool: RAW when
+  present, otherwise the selected preview source. JPEG+RAW companions therefore
+  normally count as one photo and send only the RAW file.
+- If the primary metadata source returns no metadata and the preview source is
+  a different file, folder loading reads only that group's preview source as a
+  fallback. This preserves JPEG fallback metadata without rereading every
+  companion file.
+- Metadata reads use adaptive ExifTool batches based on grouped photo count: 20
+  photos per batch through 100 photos, 50 through 499 photos, and 100 for 500
+  or more photos. Folder-load progress reports EXIF data as batch counts,
+  including the batch size shown to the user.
+- If one configured ExifTool batch fails or returns invalid JSON, the reader
+  recursively splits that batch to preserve metadata from good files and skips
+  only single files that still fail on their own. Later configured batches
+  continue after recoverable per-batch failures.
+- If ExifTool cannot be launched after earlier batches have succeeded, the
+  reader keeps metadata already parsed and stops further retries for that read.
+  The stopped configured batch does not emit a batch-progress callback, and
+  folder loading preserves the last completed EXIF batch count when later
+  stages start. Primary EXIF reads that stop after reporting partial batch
+  progress do not start companion preview fallback reads.
+- Folder-loading EXIF reader injection accepts both legacy `reader(files)`
+  callables and modern readers that accept `batch_size` plus
+  `batch_progress_callback`. Keep this adapter in place when changing metadata
+  batching so exported loader tests and simple fakes remain compatible.
+- EXIF reader wrappers that accept arbitrary `**kwargs` are treated as
+  callback-aware readers because they can receive and forward
+  `batch_progress_callback`. This prevents stopped wrapped readers from being
+  misreported as legacy opaque calls with every configured batch completed.
 - On Windows packaged GUI builds, ExifTool subprocesses are launched with
   Windows-specific hidden-console options to avoid flashing a terminal window
   during metadata reads.

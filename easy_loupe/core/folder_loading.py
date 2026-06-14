@@ -8,14 +8,17 @@ from typing import TYPE_CHECKING, Any
 
 import easy_loupe.core.exif as exif_module
 import easy_loupe.core.metadata as metadata_module
+from easy_loupe.core.grouped_exif import (
+    METADATA_PROGRESS_END,
+    METADATA_PROGRESS_START,
+    exact_exif_metadata_for_path,
+    read_grouped_exif_metadata,
+)
+from easy_loupe.core.photo_groups import select_photo_group_sources
 from easy_loupe.core.records import (
     COLOR_LABELS,
-    HEIF_EXTENSIONS,
-    JPEG_EXTENSIONS,
     MAX_RATING,
     MIN_RATING,
-    RASTER_EXTENSIONS,
-    RAW_EXTENSIONS,
     SUPPORTED_EXTENSIONS,
     PhotoRecord,
     SceneGroup,
@@ -28,6 +31,7 @@ from easy_loupe.core.recursive_loading import (
     relative_photo_id,
     relative_posix_path,
 )
+from easy_loupe.progress import ProgressReporter, ProgressStageDefinition
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -42,6 +46,11 @@ PHOTO_SORT_MODES = frozenset({
     PHOTO_SORT_MODE_CAPTURE_TIME,
     PHOTO_SORT_MODE_FILENAME,
 })
+FOLDER_LOAD_PROGRESS_STAGES = (
+    ProgressStageDefinition('scan', 'Scanning folder'),
+    ProgressStageDefinition('metadata', 'Loading EXIF data'),
+    ProgressStageDefinition('records', 'Building photo list'),
+)
 
 
 @dataclass(slots=True)
@@ -73,12 +82,11 @@ def load_folder_state(
         metadata_entries: dict[str, Any] | None = None,
         folder_label: str | None = None,
         progress_callback: Callable[[str, int], None] | None = None,
+        progress_reporter: ProgressReporter | None = None,
         sort_mode: str = DEFAULT_PHOTO_SORT_MODE,
         sort_reversed: bool = DEFAULT_PHOTO_SORT_REVERSED,
         load_recursively: bool = DEFAULT_LOAD_RECURSIVELY,
-        read_exif_metadata_fn: Callable[
-            [list[Path]], dict[str, dict[str, Any]]
-        ],
+        read_exif_metadata_fn: Callable[..., dict[str, dict[str, Any]]],
 ) -> LoadedFolderState:
     """
     Scan a folder, build photo records, and load saved folder state.
@@ -93,8 +101,12 @@ def load_folder_state(
     if not folder.is_dir():
         raise FileNotFoundError(f'{folder} is not a directory')
 
-    if progress_callback:
-        progress_callback('Scanning folder', 5)
+    reporter = progress_reporter or ProgressReporter(
+        'Loading folder',
+        FOLDER_LOAD_PROGRESS_STAGES,
+        progress_callback=progress_callback,
+    )
+    reporter.start_stage('scan', overall_progress=5)
 
     files = discover_photo_files(
         folder,
@@ -111,23 +123,48 @@ def load_folder_state(
             path
         )
 
-    if progress_callback:
-        progress_callback('Reading metadata', 20)
+    sorted_groups = sorted(groups.items(), key=operator.itemgetter(0))
+    photo_sources = [
+        select_photo_group_sources(grouped_files)
+        for _, grouped_files in sorted_groups
+    ]
+    total_groups = len(sorted_groups)
+    reporter.complete_stage(
+        'scan',
+        message=(f'Discovered {total_groups} photos from {len(files)} files'),
+        overall_progress=METADATA_PROGRESS_START,
+    )
 
     if metadata_entries is None:
         metadata_entries = metadata_module.read_folder_metadata(folder)
 
-    exif_map = read_exif_metadata_fn(files)
+    exif_result = read_grouped_exif_metadata(
+        read_exif_metadata_fn,
+        photo_sources,
+        reporter,
+    )
+    exif_map = exif_result.metadata
+    exact_exif_lookup = exif_result.exact_exif_lookup
 
     records: list[PhotoRecord] = []
-    sorted_groups = sorted(groups.items(), key=operator.itemgetter(0))
-    total_groups = max(len(sorted_groups), 1)
+    record_progress = reporter.counted_stage(
+        'records',
+        label='Building photo list',
+        total=total_groups,
+        start_progress=METADATA_PROGRESS_END,
+        end_progress=90,
+        zero_progress=METADATA_PROGRESS_END,
+    )
+    record_progress.start()
     for index, (_, grouped_files) in enumerate(sorted_groups, start=1):
-        photo = _build_photo_record(folder, grouped_files, exif_map)
+        photo = _build_photo_record(
+            folder,
+            grouped_files,
+            exif_map,
+            exact_exif_lookup=exact_exif_lookup,
+        )
         records.append(photo)
-        if progress_callback:
-            progress = 35 + int((index / total_groups) * 55)
-            progress_callback('Building photo list', min(progress, 90))
+        record_progress.update(index)
 
     # Apply metadata after records exist so legacy-key repair can be checked
     # against the concrete IDs discovered in this folder.
@@ -240,45 +277,34 @@ def _build_photo_record(
         exif_map: dict[str, dict[str, Any]],
         *,
         focus_point_pending: bool = False,
+        exact_exif_lookup: bool = False,
 ) -> PhotoRecord:
-    sorted_group_files = sorted(
-        grouped_files, key=lambda path: path.name.lower()
-    )
-    raster_files = [
-        path
-        for path in sorted_group_files
-        if path.suffix.lower() in RASTER_EXTENSIONS
-    ]
-    jpeg_files = [
-        path for path in raster_files if path.suffix.lower() in JPEG_EXTENSIONS
-    ]
-    heif_files = [
-        path for path in raster_files if path.suffix.lower() in HEIF_EXTENSIONS
-    ]
-    raw_files = [
-        path
-        for path in sorted_group_files
-        if path.suffix.lower() in RAW_EXTENSIONS
-    ]
+    sources = select_photo_group_sources(grouped_files)
+    sorted_group_files = sources.sorted_group_files
+    jpeg_files = sources.jpeg_files
+    heif_files = sources.heif_files
+    raw_files = sources.raw_files
+    preview_source = sources.preview_source
+    metadata_source = sources.metadata_source
 
-    # Preserve alphabetical file listing, but choose previews by format
-    # priority. JPEG is the safest raster source; HEIF is still preferred over
-    # RAW because it avoids the slower RAW render path.
-    if jpeg_files:
-        preview_source = jpeg_files[0]
-    elif heif_files:
-        preview_source = heif_files[0]
-    else:
-        preview_source = raw_files[0]
-
-    metadata_source = raw_files[0] if raw_files else preview_source
     shared_stem = relative_photo_id(folder, preview_source)
+    exact_source_metadata = exact_exif_metadata_for_path(
+        exif_map, metadata_source
+    ) or exact_exif_metadata_for_path(exif_map, preview_source)
+    if exact_exif_lookup:
+        # Path-keyed maps come from production EXIF reads. In that shape,
+        # basename fallback can borrow EXIF from a same-named sibling folder,
+        # so missing exact metadata must stay missing for this record.
+        source_metadata = exact_source_metadata
+    else:
+        # Basename-only maps are still supported for legacy injected readers.
+        source_metadata = (
+            exact_source_metadata
+            or exif_metadata_for_path(exif_map, metadata_source)
+            or exif_metadata_for_path(exif_map, preview_source)
+        )
 
-    source_metadata = (
-        exif_metadata_for_path(exif_map, metadata_source)
-        or exif_metadata_for_path(exif_map, preview_source)
-        or {}
-    )
+    source_metadata = source_metadata or {}
     exif_display = build_photo_exif_display(
         source_metadata,
         jpeg_files=jpeg_files,
@@ -301,7 +327,7 @@ def _build_photo_record(
         metadata_source=metadata_source,
         focus_point=focus_point,
         has_heif=bool(heif_files),
-        has_raster=bool(raster_files),
+        has_raster=bool(jpeg_files or heif_files),
         focus_point_pending=focus_point_pending,
         capture_at=exif_display.capture_at,
         scene_id=None,

@@ -18,26 +18,23 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
-    QProgressBar,
     QVBoxLayout,
     QWidget,
 )
 
+import easy_loupe.ui.progress_overlay as progress_overlay_module
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+
 DEFAULT_EXIF_OVERLAY_MARGIN = 14
 VIEWER_KEYBOARD_PAN_STEP = 120
-
-
-@dataclass(frozen=True, slots=True)
-class ProgressOverlayWidgets:
-    """Widget bundle for a centered progress overlay."""
-
-    overlay: QWidget
-    panel: QFrame
-    message_label: QLabel
-    progress_bar: QProgressBar
+ProgressOverlayController = progress_overlay_module.ProgressOverlayController
+ProgressOverlayWidgets = progress_overlay_module.ProgressOverlayWidgets
+ProgressStageListWidget = progress_overlay_module.ProgressStageListWidget
+ProgressStageRow = progress_overlay_module.ProgressStageRow
+build_progress_overlay = progress_overlay_module.build_progress_overlay
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,40 +93,6 @@ def confirm_reset_zoom_centers(parent: QWidget) -> bool:
             QMessageBox.No,
         )
         == QMessageBox.Yes
-    )
-
-
-def build_progress_overlay(parent: QWidget) -> ProgressOverlayWidgets:
-    """Build the common centered progress overlay widget bundle."""
-    overlay = QWidget(parent)
-    overlay.setObjectName('progressOverlay')
-    overlay.hide()
-    overlay_layout = QVBoxLayout(overlay)
-    overlay_layout.setContentsMargins(0, 0, 0, 0)
-    overlay_layout.addStretch(1)
-    overlay_center = QHBoxLayout()
-    overlay_center.addStretch(1)
-    panel = QFrame(overlay)
-    panel.setObjectName('progressPanel')
-    panel_layout = QVBoxLayout(panel)
-    panel_layout.setContentsMargins(24, 20, 24, 20)
-    panel_layout.setSpacing(14)
-    message_label = QLabel('', panel)
-    message_label.setAlignment(Qt.AlignCenter)
-    panel_layout.addWidget(message_label)
-    progress_bar = QProgressBar(panel)
-    progress_bar.setRange(0, 100)
-    progress_bar.setFixedWidth(360)
-    panel_layout.addWidget(progress_bar)
-    overlay_center.addWidget(panel)
-    overlay_center.addStretch(1)
-    overlay_layout.addLayout(overlay_center)
-    overlay_layout.addStretch(1)
-    return ProgressOverlayWidgets(
-        overlay=overlay,
-        panel=panel,
-        message_label=message_label,
-        progress_bar=progress_bar,
     )
 
 

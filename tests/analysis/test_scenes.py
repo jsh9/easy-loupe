@@ -11,7 +11,12 @@ def test_analysis_scenes_module_exports_detect_scenes() -> None:
 
 
 def test_analysis_scenes_detect_scenes_groups_and_assigns_scene_ids() -> None:
-    """Analysis scene orchestration groups photos and assigns scene ids."""
+    """
+    Verify scene grouping plus counted feature progress snapshots.
+
+    This keeps the analysis-level progress contract covered while feature
+    extraction and grouping share one orchestration path.
+    """
     base_time = datetime(2024, 5, 1, 10, 0, 0, tzinfo=UTC)
     photos = [
         type(
@@ -44,11 +49,13 @@ def test_analysis_scenes_detect_scenes_groups_and_assigns_scene_ids() -> None:
         'IMG_C': (FakeHash(18), [0.1, 0.9]),
     }
     progress_updates: list[tuple[str, int]] = []
+    progress_snapshots = []
 
     scenes = analysis_scenes_module.detect_scenes(
         photos,
         lambda _photo_id, _kind: Path('/tmp/unused.jpg'),
         lambda message, progress: progress_updates.append((message, progress)),
+        progress_snapshot_callback=progress_snapshots.append,
         analysis_features_fn=lambda photo: fake_features[photo.photo_id],
     )
 
@@ -59,6 +66,40 @@ def test_analysis_scenes_detect_scenes_groups_and_assigns_scene_ids() -> None:
     assert photos[0].scene_id == photos[1].scene_id
     assert photos[2].scene_id != photos[1].scene_id
     assert progress_updates[-1] == ('done', 100)
+    feature_snapshot = next(
+        snapshot
+        for snapshot in progress_snapshots
+        if snapshot.current_message == 'Extracting preview features, 3 of 3'
+    )
+    assert feature_snapshot.stages[0].count_text() == '3 of 3'
+    assert feature_snapshot.stages[0].status == 'complete'
+
+
+def test_analysis_scenes_empty_input_reports_zero_total_stages() -> None:
+    """
+    Verify empty scene detection reports completed zero-work stages.
+
+    Empty stage totals drive the structured overlay's status-only rendering, so
+    scene detection should not finish unknown-total rows for empty libraries.
+    """
+    progress_snapshots = []
+
+    scenes = analysis_scenes_module.detect_scenes(
+        [],
+        lambda _photo_id, _kind: Path('/tmp/unused.jpg'),
+        progress_snapshot_callback=progress_snapshots.append,
+    )
+
+    stages = {stage.stage_id: stage for stage in progress_snapshots[-1].stages}
+    assert scenes == []
+    assert stages['features'].status == 'complete'
+    assert stages['features'].current == 0
+    assert stages['features'].total == 0
+    assert stages['features'].count_text() == ''
+    assert stages['grouping'].status == 'complete'
+    assert stages['grouping'].current == 0
+    assert stages['grouping'].total == 0
+    assert stages['grouping'].count_text() == ''
 
 
 def test_scene_merge_heuristics_cover_primary_histogram_fallback_and_gap() -> (

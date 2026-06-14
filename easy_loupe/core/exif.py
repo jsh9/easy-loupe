@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess  # noqa: S404 - explicit exiftool integration
 import sys
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -31,53 +32,148 @@ _BUNDLED_EXIFTOOL_CANDIDATES = (
     Path('easy_loupe/vendor/exiftool/windows/exiftool.exe'),
     Path('easy_loupe/vendor/exiftool/macos/exiftool'),
 )
+DEFAULT_EXIF_BATCH_SIZE = 150
+ExifBatchProgressCallback = Callable[[int, int, int], None]
 
 
-def read_exif_metadata(files: list[Path]) -> dict[str, dict[str, Any]]:
-    """Read EXIF metadata for a list of files using exiftool."""
+class _ExifToolBatchError(RuntimeError):
+    """Recoverable failure while reading one ExifTool batch."""
+
+
+class _ExifToolLaunchError(RuntimeError):
+    """Tool-level ExifTool launch failure that should stop retries."""
+
+
+def read_exif_metadata(
+        files: list[Path],
+        *,
+        batch_size: int = DEFAULT_EXIF_BATCH_SIZE,
+        batch_progress_callback: ExifBatchProgressCallback | None = None,
+) -> dict[str, dict[str, Any]]:
+    """
+    Read EXIF metadata for files using ExifTool.
+
+    ``batch_progress_callback`` is called after each successful batch parse so
+    folder loading can advance the UI while still using multi-file ExifTool
+    subprocesses instead of one process per photo.
+    """
     exiftool_path = _resolve_exiftool_path()
     if not exiftool_path or not files:
         return {}
 
     records: dict[str, dict[str, Any]] = {}
-    batch_size = 150
+    batch_size = max(1, batch_size)
+    total_batches = _batch_count(len(files), batch_size)
     for start in range(0, len(files), batch_size):
+        batch_index = (start // batch_size) + 1
         batch = files[start : start + batch_size]
-        command = [
-            exiftool_path,
-            '-j',
-            '-n',
-            '-struct',
-            *[str(path) for path in batch],
-        ]
-        try:
-            result = subprocess.run(  # noqa: S603 - explicit exiftool argv over local files
-                command,
-                check=True,
-                capture_output=True,
-                text=True,
-                **_exiftool_subprocess_kwargs(),
-            )
-        except (subprocess.CalledProcessError, OSError):
-            return {}
+        batch_records, stop_after_batch = _read_exif_batch_with_recovery(
+            exiftool_path, batch
+        )
+        records.update(batch_records)
 
-        try:
-            batch_records = json.loads(result.stdout)
-        except json.JSONDecodeError:
-            return {}
+        if stop_after_batch:
+            break
 
-        for record in batch_records:
-            source_file = record.get('SourceFile')
-            if source_file:
-                source_path = Path(source_file)
-                # Recursive scans can contain duplicate filenames in different
-                # subfolders, so folder loading needs a resolved-path key.
-                # Keep the basename key for existing flat-folder tests and
-                # callers that stub EXIF maps by filename.
-                records[str(source_path.expanduser().resolve())] = record
-                records[source_path.name] = record
+        # Report the original configured batch after any split recovery
+        # finishes. The UI shows top-level batch counts, while recursive
+        # retries stay an internal salvage detail. Stopped batches are not
+        # reported as complete because later configured batches were skipped.
+        if batch_progress_callback is not None:
+            batch_progress_callback(batch_index, total_batches, batch_size)
 
     return records
+
+
+def _read_exif_batch_with_recovery(
+        exiftool_path: str, files: list[Path]
+) -> tuple[dict[str, dict[str, Any]], bool]:
+    """
+    Read one configured batch, splitting recoverable failures.
+
+    A bad file can make ExifTool fail the whole subprocess. Retrying smaller
+    chunks isolates that file while preserving metadata for the rest of the
+    batch. ``OSError`` means the tool cannot be launched reliably, so callers
+    should stop after keeping records parsed before this point.
+    """
+    try:
+        return _read_exif_batch(exiftool_path, files), False
+    except _ExifToolLaunchError:
+        return {}, True
+    except _ExifToolBatchError:
+        if len(files) <= 1:
+            return {}, False
+
+    midpoint = len(files) // 2
+    left_records, left_stop = _read_exif_batch_with_recovery(
+        exiftool_path, files[:midpoint]
+    )
+    if left_stop:
+        return left_records, True
+
+    right_records, right_stop = _read_exif_batch_with_recovery(
+        exiftool_path, files[midpoint:]
+    )
+    left_records.update(right_records)
+    return left_records, right_stop
+
+
+def _read_exif_batch(
+        exiftool_path: str, files: list[Path]
+) -> dict[str, dict[str, Any]]:
+    command = [
+        exiftool_path,
+        '-j',
+        '-n',
+        '-struct',
+        *[str(path) for path in files],
+    ]
+    try:
+        result = subprocess.run(  # noqa: S603 - explicit exiftool argv over local files
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            **_exiftool_subprocess_kwargs(),
+        )
+    except OSError as exc:
+        raise _ExifToolLaunchError from exc
+    except subprocess.CalledProcessError as exc:
+        raise _ExifToolBatchError from exc
+
+    try:
+        batch_records = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise _ExifToolBatchError from exc
+
+    return _metadata_records_by_source(batch_records)
+
+
+def _metadata_records_by_source(
+        batch_records: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    records: dict[str, dict[str, Any]] = {}
+    for record in batch_records:
+        source_file = record.get('SourceFile')
+        if source_file:
+            source_path = Path(source_file)
+            # Recursive scans can contain duplicate filenames in different
+            # subfolders, so folder loading needs a resolved-path key. Keep
+            # the basename key for existing flat-folder tests and callers that
+            # stub EXIF maps by filename.
+            records[str(source_path.expanduser().resolve())] = record
+            records[source_path.name] = record
+
+    return records
+
+
+def _batch_count(item_count: int, batch_size: int) -> int:
+    """Return the number of positive-sized batches needed for item count."""
+    if item_count <= 0:
+        return 0
+
+    batch_size = max(1, batch_size)
+    return ((item_count - 1) // batch_size) + 1
 
 
 def _exiftool_subprocess_kwargs() -> dict[str, Any]:
