@@ -1116,11 +1116,13 @@ def test_photo_viewer_close_waits_for_stored_background_thread_slot(
         monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
-    Verify close waits for finished cleanup even after a thread stops running.
+    Verify close hides first and destroys only after worker cleanup.
 
     Qt can report a thread as not running before its finished cleanup slot has
-    cleared the Python owner reference. Close must still defer until that slot
-    runs so widget teardown cannot race queued worker deletion events.
+    cleared the Python owner reference. The visible viewer should disappear
+    immediately, while widget teardown still waits for that cleanup slot. This
+    observes ``destroyed`` because visibility is already false before the
+    queued final close runs.
     """
 
     class FakeThread:
@@ -1138,24 +1140,37 @@ def test_photo_viewer_close_waits_for_stored_background_thread_slot(
     app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
     fake_thread = FakeThread()
     fake_worker = object()
+    destroyed: list[str] = []
+    # Match production ownership so `destroyed` proves the deferred final close
+    # accepted, rather than only proving that the first close hid the window.
+    window.setAttribute(Qt.WA_DeleteOnClose, True)
+    window.destroyed.connect(lambda *_args: destroyed.append('destroyed'))
     window._photo_viewer_exif_thread = fake_thread
     window._photo_viewer_exif_worker = fake_worker
 
     window.close()
     app.processEvents()
 
-    assert window.isVisible() is True
+    assert window.isVisible() is False
+    assert window.progress_overlay.isHidden() is True
+    assert window.overlay_message_label.text() != 'Closing...'
     assert window._close_after_background_tasks is True
     assert window._photo_viewer_exif_thread is fake_thread
     assert fake_thread.quit_calls == 0
+    assert destroyed == []
 
     window._clear_photo_viewer_exif_worker(fake_thread, fake_worker)
 
-    assert window.isVisible() is True
-
-    app.processEvents()
-
     assert window.isVisible() is False
+    assert window._close_after_background_tasks is False
+    assert destroyed == []
+
+    # The cleanup path posts a zero-delay close, and Qt delivers deletion on a
+    # later event turn. Drain both turns so the assertion observes teardown.
+    for _ in range(2):
+        app.processEvents()
+
+    assert destroyed == ['destroyed']
 
 
 def test_photo_viewer_replacement_cleanup_clears_inactive_thread_slot(

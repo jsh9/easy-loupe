@@ -1362,13 +1362,16 @@ class PhotoViewerWindow(QMainWindow):
         return super().eventFilter(watched, event)
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - Qt API
-        """Cancel background work before allowing the viewer to close."""
+        """Hide immediately, then wait for cleanup before teardown."""
         if self._photo_viewer_background_tasks_active():
+            # The viewer owns worker QObject wrappers that may still receive
+            # queued signals. Ignore native close and keep the hidden window as
+            # the cleanup owner so users see an immediate close without racing
+            # Qt teardown.
             event.ignore()
             self._closing = True
             self._close_after_background_tasks = True
-            self._show_progress('Closing...', 0)
-            self.overlay_progress_bar.setRange(0, 0)
+            self.hide()
             self._stop_photo_viewer_background_tasks()
             return
 

@@ -390,13 +390,14 @@ Current shortcut coverage in code includes:
 Keyboard shortcuts are part of the product behavior, not incidental
 implementation.
 
-Window close while scene detection or organizer/undo work is active must
-request best-effort worker shutdown and defer the actual close until the
-relevant `QThread.finished` cleanup clears the stored thread slot. Standalone
-photo-viewer close follows the same rule for EXIF refresh, prefetch, and
-folder-hydration threads. Only workers with an explicit `cancel()` hook are
-cooperatively cancellable; file-operation workers drain to completion while
-close remains deferred.
+Window close while scene detection or organizer/undo work is active must hide
+the visible window immediately, request best-effort worker shutdown, and defer
+the actual Qt teardown until the relevant `QThread.finished` cleanup clears the
+stored thread slot. Standalone photo-viewer close follows the same visible hide
+plus deferred-teardown rule for EXIF refresh, prefetch, and folder-hydration
+threads. Only workers with an explicit `cancel()` hook are cooperatively
+cancellable; file-operation workers drain to completion while teardown remains
+deferred invisibly.
 
 ## 7. Verification Pointers
 
