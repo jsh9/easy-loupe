@@ -1239,19 +1239,19 @@ class MainWindowBuildMixin:
             self.choose_folder()
 
     def closeEvent(self: MainWindow, event: QCloseEvent) -> None:  # noqa: N802 - Qt API
-        """Stop pending prompts and wait for background work before closing."""
+        """Hide immediately, then wait for cleanup before teardown."""
         self._initial_folder_prompt_pending = False
         self._initial_folder_prompt_timer.stop()
         if self._background_task_active():
             # Qt close would destroy child widgets while worker-thread signals
             # can still be queued. Ignore this event, request shutdown, and let
             # the QThread.finished cleanup path re-enter close once wrappers
-            # have been cleared.
+            # have been cleared. The visible window still disappears now so
+            # close has immediate effect for the user.
             event.ignore()
             self._closing = True
             self._close_after_background_tasks = True
-            self._show_progress('Closing...', 0)
-            self.overlay_progress_bar.setRange(0, 0)
+            self.hide()
             self._stop_main_window_background_tasks()
             return
 

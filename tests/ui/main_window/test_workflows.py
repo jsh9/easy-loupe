@@ -521,11 +521,13 @@ def test_main_window_close_defers_until_scene_thread_clears(
         monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
-    Verify app shutdown does not delete scene-thread wrappers while active.
+    Verify close hides immediately without deleting active thread wrappers.
 
-    The crash logs point at PySide/Shiboken object teardown during background
-    work, so close should request shutdown and wait for the normal finished
-    cleanup path before allowing the window to close.
+    Background scene detection can still have queued Qt cleanup work after the
+    user closes the window. The visible window should disappear immediately,
+    while final teardown still waits for the normal finished cleanup path. This
+    observes ``destroyed`` because visibility is already false before the
+    queued final close runs.
     """
 
     class FakeThread:
@@ -546,24 +548,36 @@ def test_main_window_close_defers_until_scene_thread_clears(
     )
     fake_thread = FakeThread()
     fake_worker = object()
+    destroyed: list[str] = []
+    # Match production ownership so `destroyed` proves the deferred final close
+    # accepted, rather than only proving that the first close hid the window.
+    window.setAttribute(Qt.WA_DeleteOnClose, True)
+    window.destroyed.connect(lambda *_args: destroyed.append('destroyed'))
     window._scene_thread = fake_thread
     window._scene_worker = fake_worker
 
     window.close()
     app.processEvents()
 
-    assert window.isVisible() is True
+    assert window.isVisible() is False
+    assert window.progress_overlay.isHidden() is True
     assert window._close_after_background_tasks is True
     assert fake_thread.quit_calls == expected_quit_calls
+    assert destroyed == []
 
     fake_thread.running = False
     window._clear_scene_worker(fake_thread, fake_worker)
 
-    assert window.isVisible() is True
-
-    app.processEvents()
-
     assert window.isVisible() is False
+    assert window._close_after_background_tasks is False
+    assert destroyed == []
+
+    # The cleanup path posts a zero-delay close, and Qt delivers deletion on a
+    # later event turn. Drain both turns so the assertion observes teardown.
+    for _ in range(2):
+        app.processEvents()
+
+    assert destroyed == ['destroyed']
     del app
 
 
@@ -3284,11 +3298,12 @@ def test_main_window_close_defers_until_operation_thread_clears(
         monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
-    Verify close waits for organizer/undo worker-thread cleanup.
+    Verify close hides while organizer/undo thread cleanup is pending.
 
-    The operation slot uses the same deferred-close lifecycle as scene
-    detection, so active file operations cannot lose their Python Qt wrappers
-    while the OS is terminating the window.
+    File-operation workers may drain after the user closes the window. The
+    visible culling window should disappear immediately, while final teardown
+    still waits for stored Qt wrapper cleanup. This observes ``destroyed``
+    because visibility is already false before the queued final close runs.
     """
 
     class FakeThread:
@@ -3309,24 +3324,36 @@ def test_main_window_close_defers_until_operation_thread_clears(
     )
     fake_thread = FakeThread()
     fake_worker = object()
+    destroyed: list[str] = []
+    # Match production ownership so `destroyed` proves the deferred final close
+    # accepted, rather than only proving that the first close hid the window.
+    window.setAttribute(Qt.WA_DeleteOnClose, True)
+    window.destroyed.connect(lambda *_args: destroyed.append('destroyed'))
     window._operation_thread = fake_thread
     window._operation_worker = fake_worker
 
     window.close()
     app.processEvents()
 
-    assert window.isVisible() is True
+    assert window.isVisible() is False
+    assert window.progress_overlay.isHidden() is True
     assert window._close_after_background_tasks is True
     assert fake_thread.quit_calls == expected_quit_calls
+    assert destroyed == []
 
     fake_thread.running = False
     window._clear_operation_worker(fake_thread, fake_worker)
 
-    assert window.isVisible() is True
-
-    app.processEvents()
-
     assert window.isVisible() is False
+    assert window._close_after_background_tasks is False
+    assert destroyed == []
+
+    # The cleanup path posts a zero-delay close, and Qt delivers deletion on a
+    # later event turn. Drain both turns so the assertion observes teardown.
+    for _ in range(2):
+        app.processEvents()
+
+    assert destroyed == ['destroyed']
     del app
 
 

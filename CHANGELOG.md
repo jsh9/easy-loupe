@@ -1,6 +1,13 @@
 # Change Log
 
-## [Unreleased]
+## [1.2.1]
+
+- Fixed
+
+  - Closing culling or standalone photo-viewer windows during background work
+    now hides the window immediately while Qt worker cleanup drains invisibly.
+
+## [1.2.0]
 
 - Added
 
