@@ -223,6 +223,10 @@ Major logic:
   a fixed-screen-size red square at the photo's extracted AF point in fit view,
   manual/focus zoom, and both panes of split view.
 - The `F` shortcut toggles `Show AF point`.
+- In fit-to-window panes, left click-and-hold temporarily zooms to 100% while
+  anchoring the clicked image point under the cursor when possible. Near the
+  photo edges and corners, the viewport clamps inward to keep the zoomed view
+  inside the image bounds.
 - `Shift+F` in manual zoom temporarily recenters the active zoomed pane on the
   photo's AF point or image center without replacing remembered manual zoom
   memory. Pressing `Shift+F` again restores the remembered manual center when

@@ -734,7 +734,17 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
             self._current_scale = min(
                 self._max_scale(), max(1.0, self._fit_scale)
             )
-            self._center_point = QPointF(scene_pos.x(), scene_pos.y())
+            viewport = self.viewport().size()
+            viewport_center = QPointF(
+                viewport.width() / 2, viewport.height() / 2
+            )
+            cursor_offset = event.position() - viewport_center
+            # Convert cursor anchoring into the scene center that centerOn()
+            # needs; otherwise off-center clicks move the clicked point to the
+            # viewport center. _apply_transform() still clamps edge cases.
+            self._center_point = scene_pos - (
+                cursor_offset / max(self._current_scale, 0.001)
+            )
             self._apply_transform()
             event.accept()
             return
