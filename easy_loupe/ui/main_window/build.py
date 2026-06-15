@@ -47,6 +47,10 @@ from easy_loupe.ui.progress_overlay import (
     ProgressOverlayController,
     build_progress_overlay,
 )
+from easy_loupe.ui.shortcut_help import (
+    ShortcutHelpContext,
+    ShortcutHelpOverlay,
+)
 from easy_loupe.ui.theme import NO_METADATA_TEXT
 from easy_loupe.ui.viewers.compare_photo_viewer import (
     COMPARE_PHOTO_LIMIT_OPTIONS,
@@ -108,8 +112,10 @@ class MainWindowBuildMixin:
         self._build_view_mode_ui(root)
         self._build_progress_overlay()
         self._build_transient_message_overlay()
+        self._build_shortcut_help_overlay()
         self._update_progress_overlay_geometry()
         self._update_transient_message_overlay_geometry()
+        self._update_shortcut_help_overlay_geometry()
         self._apply_theme()
 
     def _build_top_bar(self: MainWindow, top_bar: QHBoxLayout) -> None:
@@ -349,6 +355,9 @@ class MainWindowBuildMixin:
         self.transient_message_timer.timeout.connect(
             self._hide_transient_message
         )
+
+    def _build_shortcut_help_overlay(self: MainWindow) -> None:
+        self.shortcut_help_overlay = ShortcutHelpOverlay(self.central_widget)
 
     def _build_menu(self: MainWindow) -> None:
         menu_bar = self.menuBar()
@@ -878,6 +887,9 @@ class MainWindowBuildMixin:
         self.info_overlay_shortcut = self._make_shortcut(
             'I', self._toggle_info_overlay
         )
+        self.shortcut_help_shortcut = self._make_shortcut(
+            '?', self._toggle_shortcut_help
+        )
         self.compare_mode_shortcut = self._make_shortcut(
             'C', self._enter_compare_mode
         )
@@ -953,7 +965,9 @@ class MainWindowBuildMixin:
         )
         self.info_overlay_shortcut.setEnabled(bool(self.library.photos))
         self.exit_compare_shortcut.setEnabled(
-            self._compare_mode or self.transient_message_overlay.isVisible()
+            self._compare_mode
+            or self.transient_message_overlay.isVisible()
+            or self.shortcut_help_overlay.isVisible()
         )
         for shortcut in self._viewer_shortcuts:
             shortcut.setEnabled(viewer_shortcuts_enabled)
@@ -1015,6 +1029,10 @@ class MainWindowBuildMixin:
         self.viewer.reset_manual_view_centers()
 
     def _handle_escape_shortcut(self: MainWindow) -> None:
+        if self.shortcut_help_overlay.isVisible():
+            self._hide_shortcut_help()
+            return
+
         if self.transient_message_overlay.isVisible():
             self._hide_transient_message()
             return
@@ -1068,6 +1086,32 @@ class MainWindowBuildMixin:
         """Toggle the EXIF and histogram overlay preference."""
         self._info_overlay_enabled = not self._info_overlay_enabled
         self._refresh_info_overlay()
+
+    def _shortcut_help_context(self: MainWindow) -> ShortcutHelpContext:
+        """Return the shortcut-help context for the current culling state."""
+        if not self.library.photos:
+            return ShortcutHelpContext.CULLING_EMPTY
+
+        if self._compare_mode:
+            if self.compare_viewer.is_selected_photo_view():
+                return ShortcutHelpContext.COMPARE_SELECTED_PHOTO
+
+            return ShortcutHelpContext.COMPARE_GRID
+
+        if self._browse_mode:
+            return ShortcutHelpContext.BROWSE
+
+        return ShortcutHelpContext.CULLING_VIEW
+
+    def _toggle_shortcut_help(self: MainWindow) -> None:
+        self.shortcut_help_overlay.toggle_context(
+            self._shortcut_help_context()
+        )
+        self._update_mode_shortcuts()
+
+    def _hide_shortcut_help(self: MainWindow) -> None:
+        self.shortcut_help_overlay.hide()
+        self._update_mode_shortcuts()
 
     def _refresh_info_overlay(
             self: MainWindow, *, allow_defer: bool = True
@@ -1176,6 +1220,10 @@ class MainWindowBuildMixin:
         """Match the transient message overlay to the central widget bounds."""
         self.transient_message_overlay.setGeometry(self.central_widget.rect())
 
+    def _update_shortcut_help_overlay_geometry(self: MainWindow) -> None:
+        """Match the shortcut-help overlay to the central widget bounds."""
+        self.shortcut_help_overlay.update_geometry()
+
     def _show_transient_message(
             self: MainWindow,
             message: str,
@@ -1204,6 +1252,9 @@ class MainWindowBuildMixin:
 
         if hasattr(self, 'transient_message_overlay'):
             self._update_transient_message_overlay_geometry()
+
+        if hasattr(self, 'shortcut_help_overlay'):
+            self._update_shortcut_help_overlay_geometry()
 
         if hasattr(self, 'exif_overlay'):
             self._update_info_overlay_geometry()

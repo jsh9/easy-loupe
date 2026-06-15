@@ -370,6 +370,48 @@ def test_photo_viewer_escape_dismisses_transient_message_overlay(
     window.close()
 
 
+def test_photo_viewer_shortcut_help_toggles_and_esc_closes_first(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify standalone viewer help uses ? and wins the first Esc press.
+
+    The viewer already uses Esc to dismiss transient messages, so this guards
+    the new shortcut-help overlay from being skipped by that older behavior.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+
+    assert (
+        window.shortcut_help_shortcut.key().toString(QKeySequence.PortableText)
+        == '?'
+    )
+
+    window._show_transient_message('Ready')
+    window.shortcut_help_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.transient_message_overlay.isVisible() is True
+    assert window.shortcut_help_overlay.isVisible() is True
+    assert window.shortcut_help_overlay.title_label.text() == (
+        'Photo Viewer Shortcuts'
+    )
+
+    window.dismiss_message_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.shortcut_help_overlay.isHidden() is True
+    assert window.transient_message_overlay.isVisible() is True
+
+    window.dismiss_message_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.transient_message_overlay.isHidden() is True
+    window.close()
+    app.processEvents()
+
+
 def test_photo_viewer_shortcuts_control_split_zoom_and_keyboard_pan(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,

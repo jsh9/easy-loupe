@@ -54,6 +54,10 @@ from easy_loupe.ui.progress_overlay import (
     ProgressOverlayController,
     build_progress_overlay,
 )
+from easy_loupe.ui.shortcut_help import (
+    ShortcutHelpContext,
+    ShortcutHelpOverlay,
+)
 from easy_loupe.ui.threading import (
     ThreadSlot,
     ThreadSlotGroup,
@@ -275,6 +279,7 @@ class PhotoViewerWindow(QMainWindow):
         self.exif_overlay.hide()
         self._build_progress_overlay()
         self._build_transient_message_overlay()
+        self._build_shortcut_help_overlay()
         self._apply_overlay_style()
         self.viewer_stack_widget.installEventFilter(self)
 
@@ -302,6 +307,9 @@ class PhotoViewerWindow(QMainWindow):
         self.transient_message_timer.timeout.connect(
             self._hide_transient_message
         )
+
+    def _build_shortcut_help_overlay(self) -> None:
+        self.shortcut_help_overlay = ShortcutHelpOverlay(self.central_widget)
 
     def _apply_overlay_style(self) -> None:
         """Apply readable fixed styling to photo-viewer overlays."""
@@ -392,7 +400,10 @@ class PhotoViewerWindow(QMainWindow):
             'I', self._toggle_info_overlay
         )
         self.dismiss_message_shortcut = self._make_shortcut(
-            Qt.Key_Escape, self._hide_transient_message
+            Qt.Key_Escape, self._handle_escape_shortcut
+        )
+        self.shortcut_help_shortcut = self._make_shortcut(
+            '?', self._toggle_shortcut_help
         )
         self._viewer_shortcuts = build_viewer_shortcuts(
             self._make_shortcut,
@@ -448,6 +459,18 @@ class PhotoViewerWindow(QMainWindow):
             return
 
         self.viewer.reset_manual_view_centers()
+
+    def _toggle_shortcut_help(self) -> None:
+        self.shortcut_help_overlay.toggle_context(
+            ShortcutHelpContext.PHOTO_VIEWER
+        )
+
+    def _handle_escape_shortcut(self) -> None:
+        if self.shortcut_help_overlay.isVisible():
+            self.shortcut_help_overlay.hide()
+            return
+
+        self._hide_transient_message()
 
     def open_file(self, file_path: object) -> None:
         """Open a photo file into the lightweight viewer state."""
@@ -1346,11 +1369,15 @@ class PhotoViewerWindow(QMainWindow):
     def _update_transient_message_overlay_geometry(self) -> None:
         self.transient_message_overlay.setGeometry(self.central_widget.rect())
 
+    def _update_shortcut_help_overlay_geometry(self) -> None:
+        self.shortcut_help_overlay.update_geometry()
+
     def resizeEvent(self, event: object) -> None:  # noqa: N802 - Qt API
         """Keep overlays anchored when the viewer window resizes."""
         super().resizeEvent(event)
         self._update_progress_overlay_geometry()
         self._update_transient_message_overlay_geometry()
+        self._update_shortcut_help_overlay_geometry()
         self._update_minimap_geometry()
         self._update_info_overlay_geometry()
 

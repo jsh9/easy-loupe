@@ -314,6 +314,8 @@ Common transitions:
 
 ## 5. Keyboard Shortcuts
 
+- Shortcut help: `?` opens or closes the context-aware shortcut overlay; `Esc`
+  closes the overlay before other Esc behavior
 - Ratings: `1`-`5` assign, `0` clears
 - Color labels: `6` red, `7` yellow, `8` green, `9` blue, `` ` `` clears, and
   purple is available from `Assign to Photo > Color Label`

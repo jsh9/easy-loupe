@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Added
+
+  - Pressing `?` now shows a context-aware keyboard shortcut overlay in the
+    standalone photo viewer, culling view, browse view, and compare modes.
+
 - Fixed
 
   - Closing the last culling or standalone photo-viewer window while hidden

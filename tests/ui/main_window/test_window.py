@@ -17,6 +17,7 @@ from easy_loupe.core.folder_loading import (
 )
 from easy_loupe.core.photo_library import PhotoLibrary
 from easy_loupe.ui.launch import CullingLaunchRequest
+from easy_loupe.ui.shortcut_help import ShortcutHelpContext
 from easy_loupe.ui.viewers.compare_photo_viewer import (
     COMPARE_PHOTO_LIMIT_OPTIONS,
     DEFAULT_COMPARE_PHOTO_LIMIT,
@@ -294,6 +295,10 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:  # no
         == 'I'
     )
     assert (
+        window.shortcut_help_shortcut.key().toString(QKeySequence.PortableText)
+        == '?'
+    )
+    assert (
         window.open_button.toolTip()
         == main_window_module.MainWindow._shortcut_tooltip(
             'Open Folder', 'Ctrl+O'
@@ -346,6 +351,99 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:  # no
 
     window.close()
     del app
+
+
+def test_main_window_shortcut_help_tracks_current_view(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify ``?`` shows context-specific help and Esc closes it first.
+
+    Compare mode already uses Esc for navigation, so the help overlay must win
+    the first Esc press without exiting compare or selected-photo compare.
+    """
+    _theme, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_1000', 'red'),
+            ('IMG_1001', 'green'),
+            ('IMG_1002', 'blue'),
+        ],
+    )
+
+    assert window._shortcut_help_context() == ShortcutHelpContext.CULLING_VIEW
+    window.shortcut_help_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.shortcut_help_overlay.isVisible() is True
+    assert window.shortcut_help_overlay.title_label.text() == (
+        'Culling View Shortcuts'
+    )
+
+    window.shortcut_help_shortcut.activated.emit()
+    app.processEvents()
+    assert window.shortcut_help_overlay.isHidden() is True
+
+    window.browse_mode_shortcut.activated.emit()
+    app.processEvents()
+    assert window._shortcut_help_context() == ShortcutHelpContext.BROWSE
+
+    window.shortcut_help_shortcut.activated.emit()
+    app.processEvents()
+    assert window.shortcut_help_overlay.title_label.text() == (
+        'Browse View Shortcuts'
+    )
+
+    window.exit_compare_shortcut.activated.emit()
+    app.processEvents()
+    assert window.shortcut_help_overlay.isHidden() is True
+    assert window._browse_mode is True
+
+    window.space_shortcut.activated.emit()
+    app.processEvents()
+    _select_photo_ids(
+        window.thumbnail_list,
+        ['IMG_1000', 'IMG_1001'],
+        set_current=True,
+    )
+    window.compare_mode_shortcut.activated.emit()
+    app.processEvents()
+    assert window._compare_mode is True
+    assert window._shortcut_help_context() == ShortcutHelpContext.COMPARE_GRID
+
+    window.shortcut_help_shortcut.activated.emit()
+    app.processEvents()
+    assert window.shortcut_help_overlay.title_label.text() == (
+        'Compare Grid Shortcuts'
+    )
+
+    window.exit_compare_shortcut.activated.emit()
+    app.processEvents()
+    assert window.shortcut_help_overlay.isHidden() is True
+    assert window._compare_mode is True
+
+    window.space_shortcut.activated.emit()
+    app.processEvents()
+    assert window.compare_viewer.is_selected_photo_view() is True
+    assert (
+        window._shortcut_help_context()
+        == ShortcutHelpContext.COMPARE_SELECTED_PHOTO
+    )
+
+    window.shortcut_help_shortcut.activated.emit()
+    app.processEvents()
+    assert window.shortcut_help_overlay.title_label.text() == (
+        'Selected Compare Photo Shortcuts'
+    )
+
+    window.exit_compare_shortcut.activated.emit()
+    app.processEvents()
+    assert window.shortcut_help_overlay.isHidden() is True
+    assert window.compare_viewer.is_selected_photo_view() is True
+    window.close()
+    app.processEvents()
 
 
 def test_info_overlay_shortcut_toggles_normal_view_only_overlay(
