@@ -63,6 +63,7 @@ class MainWindowNavigationMixin:
             (not self.isActiveWindow() and active_window is not None)
             or self._busy
             or self._background_task_active()
+            or self._shortcut_help_modal_active()
             or not self.library.photos
         ):
             return

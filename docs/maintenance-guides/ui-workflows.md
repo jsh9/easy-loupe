@@ -398,10 +398,12 @@ photo viewer, and is discoverable from `Help > Keyboard Shortcuts` as well as
 empty culling window, normal culling view, browse view, compare grid, or
 selected-photo compare view. While the overlay is visible, normal workspace
 keyboard shortcuts and focused navigation-list key events do not mutate the
-view behind it. File actions, compare-limit choices, and the scene-merge action
-are disabled while the overlay is open so menu state cannot drift from the
-guarded workspace state. Pressing `Esc` closes the shortcut help overlay before
-transient-message dismissal or compare-mode Esc behavior.
+view behind it. Delayed active-navigation focus restores must also wait while
+the overlay is visible, because they can otherwise return keyboard focus to a
+list after help has opened. File actions, compare-limit choices, and the
+scene-merge action are disabled while the overlay is open so menu state cannot
+drift from the guarded workspace state. Pressing `Esc` closes the shortcut help
+overlay before transient-message dismissal or compare-mode Esc behavior.
 
 Keyboard shortcuts are part of the product behavior, not incidental
 implementation.
