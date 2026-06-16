@@ -393,10 +393,13 @@ Current shortcut coverage in code includes:
 - up/down arrows: active-pane navigation in compare mode
 
 The shortcut help overlay is shared by the culling workspace and standalone
-photo viewer. It chooses content from the current view state: standalone photo
-viewer, empty culling window, normal culling view, browse view, compare grid,
-or selected-photo compare view. Pressing `Esc` closes the shortcut help overlay
-before transient-message dismissal or compare-mode Esc behavior.
+photo viewer, and is discoverable from `Help > Keyboard Shortcuts` as well as
+`?`. It chooses content from the current view state: standalone photo viewer,
+empty culling window, normal culling view, browse view, compare grid, or
+selected-photo compare view. While the overlay is visible, normal workspace
+keyboard shortcuts do not mutate the view behind it. Pressing `Esc` closes the
+shortcut help overlay before transient-message dismissal or compare-mode Esc
+behavior.
 
 Keyboard shortcuts are part of the product behavior, not incidental
 implementation.
@@ -439,8 +442,10 @@ while their worker code is still running.
 - Verify the `Show AF point` top-bar checkbox default, shortcut, and
   propagation to the single and split viewer panes when viewer behavior
   changes.
-- Verify `?` opens the context-aware shortcut help overlay for the active view,
-  and verify `Esc` closes that overlay before any other Esc behavior.
+- Verify `?` and `Help > Keyboard Shortcuts` open the context-aware shortcut
+  help overlay for the active view, verify normal shortcuts are blocked while
+  it is open, and verify `Esc` closes that overlay before any other Esc
+  behavior.
 - Verify AF point marker visibility in fit view, manual/focus zoom, and both
   split-view panes when marker behavior changes.
 - Verify the `I` info overlay toggles only in eligible normal view state,

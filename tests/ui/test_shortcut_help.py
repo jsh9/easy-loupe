@@ -59,6 +59,31 @@ def test_shortcut_help_catalog_covers_each_context() -> None:
         for row in group.rows
     ]
     assert any(row.shortcut == 'Arrow keys' for row in compare_rows)
+    compare_esc_rows = [
+        row.description for row in compare_rows if row.shortcut == 'Esc'
+    ]
+    assert compare_esc_rows == [
+        'Close this shortcut reference; press Esc again to exit compare view'
+    ]
+
+    selected_compare_rows = [
+        row
+        for group in shortcut_help_groups(
+            ShortcutHelpContext.COMPARE_SELECTED_PHOTO
+        )
+        for row in group.rows
+    ]
+    selected_compare_esc_rows = [
+        row.description
+        for row in selected_compare_rows
+        if row.shortcut == 'Esc'
+    ]
+    assert selected_compare_esc_rows == [
+        (
+            'Close this shortcut reference; press Esc again to return to '
+            'the comparison grid'
+        )
+    ]
 
 
 def test_shortcut_help_formats_modifier_labels_for_platform(
@@ -86,10 +111,55 @@ def test_shortcut_help_formats_modifier_labels_for_platform(
     assert shortcut_help_module.format_shortcut_label('Shift+F') == 'Shift+F'
 
 
+def test_shortcut_help_formats_arrow_labels_and_spacing(
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify arrow-key labels use glyphs and only arrow combos get spaced pluses.
+
+    This protects the visual shortcut copy without changing canonical catalog
+    values or the actual Qt shortcut registrations.
+    """
+    monkeypatch.setattr(shortcut_help_module.sys, 'platform', 'win32')
+
+    assert shortcut_help_module.format_shortcut_label('Left / Up') == '← / ↑'
+    assert (
+        shortcut_help_module.format_shortcut_label('Right / Down') == '→ / ↓'
+    )
+    assert (
+        shortcut_help_module.format_shortcut_label('Shift+Left / Shift+Right')
+        == 'Shift + ← / Shift + →'
+    )
+    assert (
+        shortcut_help_module.format_shortcut_label('Shift+Up / Shift+Down')
+        == 'Shift + ↑ / Shift + ↓'
+    )
+    assert (
+        shortcut_help_module.format_shortcut_label('Arrow keys')
+        == '← / ↑ / ↓ / →'
+    )
+    assert (
+        shortcut_help_module.format_shortcut_label('Ctrl+Shift+M')
+        == 'Ctrl+Shift+M'
+    )
+
+    monkeypatch.setattr(shortcut_help_module.sys, 'platform', 'darwin')
+
+    assert (
+        shortcut_help_module.format_shortcut_label('Ctrl+Shift+M')
+        == 'Cmd+Shift+M'
+    )
+
+
 def test_shortcut_help_overlay_renders_mac_modifier_labels(
         monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify rendered table labels use macOS shortcut modifier text."""
+    """
+    Verify rendered labels combine macOS modifiers and arrow glyphs.
+
+    This catches integration regressions where catalog rows stay canonical but
+    the overlay forgets to apply display-only formatting before rendering.
+    """
     monkeypatch.setattr(shortcut_help_module.sys, 'platform', 'darwin')
     app = QApplication.instance() or QApplication([])
     parent = QWidget()
@@ -106,20 +176,26 @@ def test_shortcut_help_overlay_renders_mac_modifier_labels(
     }
     assert 'Cmd+O' in shortcut_texts
     assert 'Cmd+Shift+F' in shortcut_texts
+    assert 'Cmd+Shift+M' in shortcut_texts
     assert 'Cmd+Z / Cmd+Y' in shortcut_texts
     assert 'Shift+F' in shortcut_texts
+    assert '← / →' in shortcut_texts
+    assert 'Shift + ← / Shift + →' in shortcut_texts
+    assert 'Shift + ↑ / Shift + ↓' in shortcut_texts
     assert 'Ctrl+O' not in shortcut_texts
+    assert 'Left / Right' not in shortcut_texts
+    assert 'Shift+Left / Shift+Right' not in shortcut_texts
 
     parent.close()
     app.processEvents()
 
 
-def test_shortcut_help_overlay_renders_tables_and_tracks_geometry() -> None:
+def test_shortcut_help_overlay_renders_context_and_tracks_geometry() -> None:
     """
-    Verify the shared overlay builds grouped tables with stable geometry.
+    Verify the shared overlay shows context rows and tracks parent geometry.
 
-    The overlay must cover the whole content area while its centered panel
-    stays at 90 percent of the parent in both dimensions.
+    This protects user-visible help content without locking the test to private
+    grid coordinates, exact font sizes, or stylesheet fragments.
     """
     app = QApplication.instance() or QApplication([])
     parent = QWidget()
@@ -135,34 +211,23 @@ def test_shortcut_help_overlay_renders_tables_and_tracks_geometry() -> None:
     assert overlay.scroll_area.objectName() == 'shortcutHelpScrollArea'
     assert overlay.content_widget.objectName() == 'shortcutHelpContent'
     assert overlay.geometry() == parent.rect()
-    assert overlay.panel.width() == 900
-    assert overlay.panel.height() == 720
+    assert 0 < overlay.panel.width() <= parent.width()
+    assert 0 < overlay.panel.height() <= parent.height()
     assert overlay.title_label.text() == 'Culling View Shortcuts'
-    assert overlay._content_grid.itemAtPosition(0, 1) is not None
-    assert (
-        overlay._content_grid.itemAtPosition(0, 0).alignment() == Qt.AlignTop
-    )
-    assert overlay._content_grid.rowStretch(3) == 1
-
-    groups = overlay.findChildren(QFrame, 'shortcutHelpGroup')
-    assert groups
-    assert groups[0].sizePolicy().verticalPolicy() == QSizePolicy.Maximum
-    shortcut_labels = overlay.findChildren(QLabel, 'shortcutHelpShortcutLabel')
-    assert shortcut_labels
-    fixed_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
-    assert shortcut_labels[0].font().family() == fixed_font.family()
-    assert overlay._title_font_size() == 44
-    assert overlay._group_title_font_size() == 30
-    assert overlay._table_text_font_size() == 26
-
-    tables = overlay.findChildren(QFrame, 'shortcutHelpTable')
-    assert tables
-    assert tables[0].layout().horizontalSpacing() == 0
-    assert tables[0].layout().verticalSpacing() == 0
-    assert overlay.findChildren(QFrame, 'shortcutHelpShortcutCell')
-    assert overlay.findChildren(QFrame, 'shortcutHelpDescriptionCell')
-    assert 'QFrame#shortcutHelpShortcutCell' in overlay.styleSheet()
-    assert 'border-right: 1px solid' in overlay.styleSheet()
+    shortcut_texts = {
+        label.text()
+        for label in overlay.findChildren(QLabel, 'shortcutHelpShortcutLabel')
+    }
+    description_texts = {
+        label.text()
+        for label in overlay.findChildren(
+            QLabel, 'shortcutHelpDescriptionLabel'
+        )
+    }
+    modifier = shortcut_help_module.shortcut_modifier_label()
+    assert {f'{modifier}+O', f'{modifier}+D', '?', 'Esc'} <= shortcut_texts
+    assert 'Open a photo folder' in description_texts
+    assert 'Close this shortcut reference' in description_texts
 
     overlay.toggle_context(ShortcutHelpContext.CULLING_VIEW)
     assert overlay.isHidden() is True
@@ -176,9 +241,62 @@ def test_shortcut_help_overlay_renders_tables_and_tracks_geometry() -> None:
     overlay.update_geometry()
     app.processEvents()
 
-    assert overlay.panel.width() == 540
-    assert overlay.panel.height() == 450
-    assert overlay._content_grid.itemAtPosition(0, 1) is None
-    assert overlay._table_text_font_size() < 26
+    assert overlay.geometry() == parent.rect()
+    assert 0 < overlay.panel.width() <= parent.width()
+    assert 0 < overlay.panel.height() <= parent.height()
+    parent.close()
+    app.processEvents()
+
+
+def test_shortcut_help_overlay_top_aligns_and_scales_fonts() -> None:
+    """
+    Verify multi-column help tables shrink text when columns are narrow.
+
+    The overlay uses intentionally large text, so this guards against future
+    scaling changes that keep full-size text in cramped table columns.
+    """
+    app = QApplication.instance() or QApplication([])
+    parent = QWidget()
+    parent.resize(1000, 800)
+    parent.show()
+    overlay = ShortcutHelpOverlay(parent)
+
+    overlay.show_context(ShortcutHelpContext.CULLING_VIEW)
+    app.processEvents()
+
+    first_grid_item = overlay._content_grid.itemAtPosition(0, 0)
+    assert first_grid_item is not None
+    assert first_grid_item.alignment() == Qt.AlignTop
+    assert overlay._column_count == 2
+    assert (
+        overlay._table_text_font_size()
+        < shortcut_help_module.TABLE_TEXT_FONT_SIZE_PX
+    )
+
+    groups = overlay.findChildren(QFrame, 'shortcutHelpGroup')
+    assert groups
+    assert groups[0].sizePolicy().verticalPolicy() == QSizePolicy.Maximum
+
+    shortcut_labels = overlay.findChildren(
+        QLabel,
+        'shortcutHelpShortcutLabel',
+    )
+    assert shortcut_labels
+    fixed_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+    assert shortcut_labels[0].font().family() == fixed_font.family()
+
+    assert (
+        ShortcutHelpOverlay._font_scale_for_size(1800, 1080, 3)
+        == shortcut_help_module.MAX_FONT_SCALE
+    )
+    assert (
+        ShortcutHelpOverlay._font_scale_for_size(900, 720, 2)
+        < shortcut_help_module.MAX_FONT_SCALE
+    )
+    assert (
+        ShortcutHelpOverlay._font_scale_for_size(100, 100, 1)
+        == shortcut_help_module.MIN_FONT_SCALE
+    )
+
     parent.close()
     app.processEvents()

@@ -381,15 +381,20 @@ def test_photo_viewer_shortcut_help_toggles_and_esc_closes_first(
     the new shortcut-help overlay from being skipped by that older behavior.
     """
     create_jpeg(tmp_path / 'A.JPG', 'green')
+    create_jpeg(tmp_path / 'B.JPG', 'blue')
     app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
 
+    assert window.help_menu.title() == '&Help'
+    assert window.shortcut_help_action.text() == 'Keyboard Shortcuts'
     assert (
-        window.shortcut_help_shortcut.key().toString(QKeySequence.PortableText)
+        window.shortcut_help_action.shortcut().toString(
+            QKeySequence.PortableText
+        )
         == '?'
     )
 
     window._show_transient_message('Ready')
-    window.shortcut_help_shortcut.activated.emit()
+    window.shortcut_help_action.trigger()
     app.processEvents()
 
     assert window.transient_message_overlay.isVisible() is True
@@ -397,6 +402,19 @@ def test_photo_viewer_shortcut_help_toggles_and_esc_closes_first(
     assert window.shortcut_help_overlay.title_label.text() == (
         'Photo Viewer Shortcuts'
     )
+
+    assert window.current_photo_id == 'A'
+    # Arrow shortcuts normally navigate adjacent photos. Help is modal, so the
+    # shortcut must wait instead of changing the photo behind the overlay.
+    for shortcut in window.findChildren(type(window.dismiss_message_shortcut)):
+        if shortcut.key().toString(QKeySequence.PortableText) == 'Right':
+            shortcut.activated.emit()
+            break
+    else:
+        raise AssertionError('Missing standalone viewer Right shortcut')
+
+    app.processEvents()
+    assert window.current_photo_id == 'A'
 
     window.dismiss_message_shortcut.activated.emit()
     app.processEvents()

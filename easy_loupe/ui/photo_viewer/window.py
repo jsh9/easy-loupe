@@ -17,7 +17,13 @@ from PySide6.QtCore import (
     Signal,
     Slot,
 )
-from PySide6.QtGui import QCloseEvent, QPixmap, QShortcut
+from PySide6.QtGui import (
+    QAction,
+    QCloseEvent,
+    QKeySequence,
+    QPixmap,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
@@ -245,6 +251,7 @@ class PhotoViewerWindow(QMainWindow):
         self.setWindowIcon(easy_loupe_icon())
         self.resize(1400, 900)
         self._build_ui()
+        self._build_menu()
         self._build_shortcuts()
         QTimer.singleShot(0, lambda: self.open_file(self._startup_file))
 
@@ -310,6 +317,19 @@ class PhotoViewerWindow(QMainWindow):
 
     def _build_shortcut_help_overlay(self) -> None:
         self.shortcut_help_overlay = ShortcutHelpOverlay(self.central_widget)
+
+    def _build_menu(self) -> None:
+        self.help_menu = self.menuBar().addMenu('&Help')
+        self.shortcut_help_action = QAction('Keyboard Shortcuts', self)
+        self.shortcut_help_action.setShortcut(QKeySequence('?'))
+        self.shortcut_help_action.setShortcutContext(Qt.WindowShortcut)
+        # The QAction owns ``?`` so menu and keyboard activation share one
+        # path; a parallel QShortcut would make Qt treat the key as ambiguous.
+        self.shortcut_help_action.triggered.connect(
+            lambda *_: self._toggle_shortcut_help()
+        )
+        self.addAction(self.shortcut_help_action)
+        self.help_menu.addAction(self.shortcut_help_action)
 
     def _apply_overlay_style(self) -> None:
         """Apply readable fixed styling to photo-viewer overlays."""
@@ -400,10 +420,9 @@ class PhotoViewerWindow(QMainWindow):
             'I', self._toggle_info_overlay
         )
         self.dismiss_message_shortcut = self._make_shortcut(
-            Qt.Key_Escape, self._handle_escape_shortcut
-        )
-        self.shortcut_help_shortcut = self._make_shortcut(
-            '?', self._toggle_shortcut_help
+            Qt.Key_Escape,
+            self._handle_escape_shortcut,
+            block_by_shortcut_help=False,
         )
         self._viewer_shortcuts = build_viewer_shortcuts(
             self._make_shortcut,
@@ -430,15 +449,38 @@ class PhotoViewerWindow(QMainWindow):
             )
 
     def _make_shortcut(
-            self, key: str | int, callback: Callable[[], None]
+            self,
+            key: str | int,
+            callback: Callable[[], None],
+            *,
+            block_by_shortcut_help: bool = True,
     ) -> QShortcut:
-        # Treat the progress overlay as modal: background hydration/close
-        # states should not accept navigation or viewer mutations.
+        """Create a shortcut guarded by viewer modal overlay state."""
+        # Progress and shortcut-help overlays are visually modal but are not Qt
+        # dialogs, so navigation and inspection shortcuts must opt out here.
         return make_window_shortcut(
             self,
             key,
             callback,
-            blocked=self.progress_overlay.isVisible,
+            blocked=lambda: self._shortcut_blocked(
+                block_by_shortcut_help=block_by_shortcut_help
+            ),
+        )
+
+    def _shortcut_help_modal_active(self) -> bool:
+        return (
+            hasattr(self, 'shortcut_help_overlay')
+            and self.shortcut_help_overlay.isVisible()
+        )
+
+    def _shortcut_blocked(
+            self,
+            *,
+            block_by_shortcut_help: bool = True,
+    ) -> bool:
+        """Return whether a standalone-viewer shortcut should wait."""
+        return self.progress_overlay.isVisible() or (
+            block_by_shortcut_help and self._shortcut_help_modal_active()
         )
 
     def _keyboard_pan_by(self, x_direction: int, y_direction: int) -> None:
@@ -461,6 +503,14 @@ class PhotoViewerWindow(QMainWindow):
         self.viewer.reset_manual_view_centers()
 
     def _toggle_shortcut_help(self) -> None:
+        # Progress work remains modal. Allow closing already-visible help, but
+        # do not open a new help pane over hydration/close progress UI.
+        if (
+            self.progress_overlay.isVisible()
+            and not self._shortcut_help_modal_active()
+        ):
+            return
+
         self.shortcut_help_overlay.toggle_context(
             ShortcutHelpContext.PHOTO_VIEWER
         )

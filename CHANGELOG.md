@@ -4,8 +4,10 @@
 
 - Added
 
-  - Pressing `?` now shows a context-aware keyboard shortcut overlay in the
-    standalone photo viewer, culling view, browse view, and compare modes.
+  - Pressing `?`, or choosing `Help > Keyboard Shortcuts`, now shows a
+    context-aware keyboard shortcut overlay in the standalone photo viewer,
+    culling view, browse view, and compare modes. While the overlay is open,
+    other keyboard shortcuts wait until the overlay is closed.
 
 - Fixed
 

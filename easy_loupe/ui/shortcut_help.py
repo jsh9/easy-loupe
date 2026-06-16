@@ -23,6 +23,7 @@ THREE_COLUMN_PANEL_WIDTH = 1180
 TWO_COLUMN_PANEL_WIDTH = 760
 REFERENCE_PANEL_WIDTH = 900
 REFERENCE_PANEL_HEIGHT = 720
+REFERENCE_GROUP_COLUMN_WIDTH = 520
 MAX_FONT_SCALE = 1.0
 MIN_FONT_SCALE = 0.6
 TITLE_FONT_SIZE_PX = 44
@@ -32,6 +33,13 @@ SHORTCUT_COLUMN_WIDTH_PX = 170
 CELL_HORIZONTAL_PADDING_PX = 12
 CELL_VERTICAL_PADDING_PX = 8
 MIN_SCALED_SIZE_PX = 1
+ARROW_KEY_LABELS = {
+    'Left': '←',
+    'Up': '↑',
+    'Down': '↓',
+    'Right': '→',
+}
+ARROW_KEYS_LABEL = '← / ↑ / ↓ / →'
 
 
 class ShortcutHelpContext(StrEnum):
@@ -68,6 +76,13 @@ HELP_DISMISSAL_GROUP = ShortcutHelpGroup(
         ShortcutHelpRow('Esc', 'Close this shortcut reference'),
     ),
 )
+
+HELP_TOGGLE_GROUP = ShortcutHelpGroup(
+    'Help',
+    (ShortcutHelpRow('?', 'Show or hide this shortcut reference'),),
+)
+# Compare contexts define their own Esc rows because Esc has a second press
+# behavior there; this group avoids showing two competing Esc descriptions.
 
 
 def shortcut_help_title(context: ShortcutHelpContext) -> str:
@@ -111,8 +126,43 @@ def shortcut_modifier_label() -> str:
 
 
 def format_shortcut_label(shortcut: str) -> str:
-    """Return ``shortcut`` with platform-specific modifier names."""
-    return shortcut.replace('Ctrl', shortcut_modifier_label())
+    """
+    Return ``shortcut`` with platform-specific display labels.
+
+    Catalog rows stay in canonical Qt-style terms so shortcut data remains
+    stable. The overlay formats only the visible label because macOS modifier
+    names and arrow-key glyph spacing are presentation details.
+    """
+    if shortcut == 'Arrow keys':
+        return ARROW_KEYS_LABEL
+
+    return ' / '.join(
+        _format_shortcut_part(part.strip()) for part in shortcut.split(' / ')
+    )
+
+
+def _format_shortcut_part(shortcut_part: str) -> str:
+    """
+    Format one slash-separated shortcut chord for display.
+
+    Arrow-key chords use spaced plus signs to keep glyphs legible, while
+    non-arrow chords stay compact to match the rest of the shortcut catalog.
+    """
+    shortcut_keys = shortcut_part.split('+')
+    formatted_keys = [
+        _format_shortcut_key(shortcut_key) for shortcut_key in shortcut_keys
+    ]
+    if shortcut_keys[-1] in ARROW_KEY_LABELS:
+        return ' + '.join(formatted_keys)
+
+    return '+'.join(formatted_keys)
+
+
+def _format_shortcut_key(shortcut_key: str) -> str:
+    if shortcut_key == 'Ctrl':
+        return shortcut_modifier_label()
+
+    return ARROW_KEY_LABELS.get(shortcut_key, shortcut_key)
 
 
 class ShortcutHelpOverlay(QWidget):
@@ -203,7 +253,11 @@ class ShortcutHelpOverlay(QWidget):
         height = max(int(parent_rect.height() * 0.9), 1)
         self.panel.setFixedSize(width, height)
         column_count = self._column_count_for_width(width)
-        font_scale = self._font_scale_for_size(width, height)
+        font_scale = self._font_scale_for_size(
+            width,
+            height,
+            column_count,
+        )
         scale_changed = font_scale != self._font_scale
         if scale_changed:
             self._font_scale = font_scale
@@ -348,7 +402,15 @@ class ShortcutHelpOverlay(QWidget):
         return 1
 
     @staticmethod
-    def _font_scale_for_size(width: int, height: int) -> float:
+    def _font_scale_for_size(
+            width: int,
+            height: int,
+            column_count: int,
+    ) -> float:
+        # Scale against each grid column as well as the whole panel. Without
+        # this, two- and three-column layouts can keep max-size text even when
+        # each individual shortcut table is too narrow for it.
+        group_column_width = width / max(column_count, 1)
         return min(
             MAX_FONT_SCALE,
             max(
@@ -356,6 +418,7 @@ class ShortcutHelpOverlay(QWidget):
                 min(
                     width / REFERENCE_PANEL_WIDTH,
                     height / REFERENCE_PANEL_HEIGHT,
+                    group_column_width / REFERENCE_GROUP_COLUMN_WIDTH,
                 ),
             ),
         )
@@ -571,7 +634,13 @@ def _compare_grid_groups() -> tuple[ShortcutHelpGroup, ...]:
                 ShortcutHelpRow('Space', 'Open the active photo alone'),
                 ShortcutHelpRow('Z', 'Toggle focus zoom for compared panes'),
                 ShortcutHelpRow('G', 'Return to browse with the selection'),
-                ShortcutHelpRow('Esc', 'Exit compare view'),
+                ShortcutHelpRow(
+                    'Esc',
+                    (
+                        'Close this shortcut reference; press Esc again '
+                        'to exit compare view'
+                    ),
+                ),
             ),
         ),
         ShortcutHelpGroup(
@@ -583,7 +652,7 @@ def _compare_grid_groups() -> tuple[ShortcutHelpGroup, ...]:
             ),
         ),
         _metadata_group(compare=True),
-        HELP_DISMISSAL_GROUP,
+        HELP_TOGGLE_GROUP,
     )
 
 
@@ -596,7 +665,13 @@ def _compare_selected_photo_groups() -> tuple[ShortcutHelpGroup, ...]:
                     'Space / Z',
                     'Toggle fit and 100 percent view',
                 ),
-                ShortcutHelpRow('Esc', 'Return to the comparison grid'),
+                ShortcutHelpRow(
+                    'Esc',
+                    (
+                        'Close this shortcut reference; press Esc again '
+                        'to return to the comparison grid'
+                    ),
+                ),
             ),
         ),
         ShortcutHelpGroup(
@@ -608,7 +683,7 @@ def _compare_selected_photo_groups() -> tuple[ShortcutHelpGroup, ...]:
             ),
         ),
         _metadata_group(compare=True),
-        HELP_DISMISSAL_GROUP,
+        HELP_TOGGLE_GROUP,
     )
 
 

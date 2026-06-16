@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QListView,
     QListWidget,
     QMenu,
+    QMenuBar,
     QMessageBox,
     QProgressBar,
     QPushButton,
@@ -366,7 +367,9 @@ class MainWindowBuildMixin:
         self.open_action = QAction('Open Folder', self)
         self.open_action.setShortcut(QKeySequence('Ctrl+O'))
         self.open_action.setShortcutContext(Qt.WindowShortcut)
-        self.open_action.triggered.connect(self.choose_folder)
+        self.open_action.triggered.connect(
+            lambda *_: self._run_workspace_action(self.choose_folder)
+        )
         self.addAction(self.open_action)
         file_menu.addAction(self.open_action)
 
@@ -374,7 +377,9 @@ class MainWindowBuildMixin:
         self.detect_action.setShortcut(QKeySequence('Ctrl+D'))
         self.detect_action.setShortcutContext(Qt.WindowShortcut)
         self.detect_action.setEnabled(False)
-        self.detect_action.triggered.connect(self.detect_scenes)
+        self.detect_action.triggered.connect(
+            lambda *_: self._run_workspace_action(self.detect_scenes)
+        )
         self.addAction(self.detect_action)
         file_menu.addAction(self.detect_action)
 
@@ -382,7 +387,9 @@ class MainWindowBuildMixin:
         self.organize_action.setShortcut(QKeySequence('Ctrl+Shift+E'))
         self.organize_action.setShortcutContext(Qt.WindowShortcut)
         self.organize_action.setEnabled(False)
-        self.organize_action.triggered.connect(self.open_organizer_dialog)
+        self.organize_action.triggered.connect(
+            lambda *_: self._run_workspace_action(self.open_organizer_dialog)
+        )
         self.addAction(self.organize_action)
         file_menu.addAction(self.organize_action)
 
@@ -392,7 +399,7 @@ class MainWindowBuildMixin:
         self.undo_metadata_action.setShortcutContext(Qt.WindowShortcut)
         self.undo_metadata_action.setEnabled(False)
         self.undo_metadata_action.triggered.connect(
-            lambda *_: None if self._busy else self._undo_metadata_edit()
+            lambda *_: self._run_workspace_action(self._undo_metadata_edit)
         )
         self.addAction(self.undo_metadata_action)
         self.history_menu.addAction(self.undo_metadata_action)
@@ -402,7 +409,7 @@ class MainWindowBuildMixin:
         self.redo_metadata_action.setShortcutContext(Qt.WindowShortcut)
         self.redo_metadata_action.setEnabled(False)
         self.redo_metadata_action.triggered.connect(
-            lambda *_: None if self._busy else self._redo_metadata_edit()
+            lambda *_: self._run_workspace_action(self._redo_metadata_edit)
         )
         self.addAction(self.redo_metadata_action)
         self.history_menu.addAction(self.redo_metadata_action)
@@ -418,10 +425,8 @@ class MainWindowBuildMixin:
         self.merge_scene_action.setShortcutContext(Qt.WindowShortcut)
         self.merge_scene_action.setEnabled(False)
         self.merge_scene_action.triggered.connect(
-            lambda *_: (
-                None
-                if self._busy
-                else self._merge_selected_photos_into_scene()
+            lambda *_: self._run_workspace_action(
+                self._merge_selected_photos_into_scene
             )
         )
         self.addAction(self.merge_scene_action)
@@ -511,7 +516,22 @@ class MainWindowBuildMixin:
             ),
         }
 
+        self._build_help_menu(menu_bar)
+
+    def _build_help_menu(self: MainWindow, menu_bar: QMenuBar) -> None:
         self.help_menu = menu_bar.addMenu('&Help')
+        self.shortcut_help_action = QAction('Keyboard Shortcuts', self)
+        self.shortcut_help_action.setShortcut(QKeySequence('?'))
+        self.shortcut_help_action.setShortcutContext(Qt.WindowShortcut)
+        # The QAction owns ``?`` so menu and keyboard activation share one
+        # path; a parallel QShortcut would make Qt treat the key as ambiguous.
+        self.shortcut_help_action.triggered.connect(
+            lambda *_: self._toggle_shortcut_help()
+        )
+        self.addAction(self.shortcut_help_action)
+        self.help_menu.addAction(self.shortcut_help_action)
+        self.help_menu.addSeparator()
+
         self.about_action = QAction(f'About {APP_NAME}', self)
         self.about_action.setMenuRole(QAction.AboutRole)
         self.about_action.triggered.connect(self._show_about_dialog)
@@ -887,14 +907,13 @@ class MainWindowBuildMixin:
         self.info_overlay_shortcut = self._make_shortcut(
             'I', self._toggle_info_overlay
         )
-        self.shortcut_help_shortcut = self._make_shortcut(
-            '?', self._toggle_shortcut_help
-        )
         self.compare_mode_shortcut = self._make_shortcut(
             'C', self._enter_compare_mode
         )
         self.exit_compare_shortcut = self._make_shortcut(
-            Qt.Key_Escape, self._handle_escape_shortcut
+            Qt.Key_Escape,
+            self._handle_escape_shortcut,
+            block_by_shortcut_help=False,
         )
         self._assignment_shortcuts = [
             self._make_shortcut(
@@ -936,26 +955,78 @@ class MainWindowBuildMixin:
             self: MainWindow,
             key: str | int,
             callback: Callable[[], None],
+            *,
+            block_by_shortcut_help: bool = True,
     ) -> QShortcut:
+        """Create a shortcut guarded by busy and shortcut-help modal state."""
         return make_window_shortcut(
             self,
             key,
             callback,
-            blocked=lambda: self._busy,
+            blocked=lambda: self._shortcut_blocked(
+                block_by_shortcut_help=block_by_shortcut_help
+            ),
         )
 
+    def _shortcut_help_modal_active(self: MainWindow) -> bool:
+        return (
+            hasattr(self, 'shortcut_help_overlay')
+            and self.shortcut_help_overlay.isVisible()
+        )
+
+    def _shortcut_blocked(
+            self: MainWindow,
+            *,
+            block_by_shortcut_help: bool = True,
+    ) -> bool:
+        """
+        Return whether a workspace shortcut should ignore activation.
+
+        The help overlay is visually modal but is not a Qt dialog, so normal
+        shortcuts must explicitly wait while it is visible.
+        """
+        return self._busy or (
+            block_by_shortcut_help and self._shortcut_help_modal_active()
+        )
+
+    def _run_workspace_action(
+            self: MainWindow,
+            callback: Callable[[], None],
+    ) -> None:
+        """
+        Run a menu action only when the shortcut gates allow it.
+
+        QAction shortcuts bypass ``make_window_shortcut``, so menu-triggered
+        operations need the same modal guard as QShortcut-backed operations.
+        """
+        if self._shortcut_blocked():
+            return
+
+        callback()
+
     def _update_mode_shortcuts(self: MainWindow) -> None:
+        shortcut_help_visible = self._shortcut_help_modal_active()
+        workspace_shortcuts_enabled = not shortcut_help_visible
         normal_view_shortcuts_enabled = (
-            not self._browse_mode and not self._compare_mode
+            workspace_shortcuts_enabled
+            and not self._browse_mode
+            and not self._compare_mode
         )
-        viewer_shortcuts_enabled = not self._browse_mode or self._compare_mode
+        viewer_shortcuts_enabled = workspace_shortcuts_enabled and (
+            not self._browse_mode or self._compare_mode
+        )
         self.split_mode_shortcut.setEnabled(
-            normal_view_shortcuts_enabled or self._compare_mode
+            normal_view_shortcuts_enabled
+            or (workspace_shortcuts_enabled and self._compare_mode)
         )
-        can_enter_browse = bool(self.library.photos)
+        can_enter_browse = workspace_shortcuts_enabled and bool(
+            self.library.photos
+        )
         self.browse_mode_shortcut.setEnabled(can_enter_browse)
         self.compare_mode_shortcut.setEnabled(
-            not self._compare_mode and bool(self.library.photos)
+            workspace_shortcuts_enabled
+            and not self._compare_mode
+            and bool(self.library.photos)
         )
         self.recenter_zoom_shortcut.setEnabled(
             normal_view_shortcuts_enabled and bool(self.library.photos)
@@ -963,11 +1034,13 @@ class MainWindowBuildMixin:
         self.reset_zoom_centers_shortcut.setEnabled(
             normal_view_shortcuts_enabled and bool(self.library.photos)
         )
-        self.info_overlay_shortcut.setEnabled(bool(self.library.photos))
+        self.info_overlay_shortcut.setEnabled(
+            workspace_shortcuts_enabled and bool(self.library.photos)
+        )
         self.exit_compare_shortcut.setEnabled(
             self._compare_mode
             or self.transient_message_overlay.isVisible()
-            or self.shortcut_help_overlay.isVisible()
+            or shortcut_help_visible
         )
         for shortcut in self._viewer_shortcuts:
             shortcut.setEnabled(viewer_shortcuts_enabled)
@@ -976,7 +1049,9 @@ class MainWindowBuildMixin:
             shortcut.setEnabled(normal_view_shortcuts_enabled)
 
         for shortcut in self._compare_nav_shortcuts:
-            shortcut.setEnabled(self._compare_mode)
+            shortcut.setEnabled(
+                workspace_shortcuts_enabled and self._compare_mode
+            )
 
         self._refresh_assignment_controls()
 
@@ -1104,6 +1179,11 @@ class MainWindowBuildMixin:
         return ShortcutHelpContext.CULLING_VIEW
 
     def _toggle_shortcut_help(self: MainWindow) -> None:
+        # Busy workflows remain modal. Allow closing already-visible help, but
+        # do not open a new help pane over worker/progress-driven UI state.
+        if self._busy and not self._shortcut_help_modal_active():
+            return
+
         self.shortcut_help_overlay.toggle_context(
             self._shortcut_help_context()
         )
@@ -1197,7 +1277,9 @@ class MainWindowBuildMixin:
         elif display_shortcut is not None:
             action.setText(f'{label}\t{display_shortcut}')
 
-        action.triggered.connect(lambda *_: None if self._busy else callback())
+        action.triggered.connect(
+            lambda *_: self._run_workspace_action(callback)
+        )
         self.addAction(action)
         menu.addAction(action)
         self._assignment_actions.append(action)
@@ -1205,7 +1287,7 @@ class MainWindowBuildMixin:
 
     def _refresh_assignment_controls(self: MainWindow) -> None:
         """Enable assignment controls only in culling-capable modes."""
-        enabled = not self._busy
+        enabled = not self._busy and not self._shortcut_help_modal_active()
         for action in self._assignment_actions:
             action.setEnabled(enabled)
 

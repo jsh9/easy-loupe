@@ -224,6 +224,13 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:  # no
     assert window.merge_scene_action.isEnabled() is False
     assert window.assign_photo_menu.title() == 'Assign to &Photo'
     assert window.help_menu.title() == '&Help'
+    assert window.shortcut_help_action.text() == 'Keyboard Shortcuts'
+    assert (
+        window.shortcut_help_action.shortcut().toString(
+            QKeySequence.PortableText
+        )
+        == '?'
+    )
     assert window.about_action.text() == 'About EasyLoupe'
     assert window.about_action.menuRole() == QAction.AboutRole
     assert (
@@ -293,10 +300,6 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:  # no
     assert (
         window.info_overlay_shortcut.key().toString(QKeySequence.PortableText)
         == 'I'
-    )
-    assert (
-        window.shortcut_help_shortcut.key().toString(QKeySequence.PortableText)
-        == '?'
     )
     assert (
         window.open_button.toolTip()
@@ -374,7 +377,7 @@ def test_main_window_shortcut_help_tracks_current_view(
     )
 
     assert window._shortcut_help_context() == ShortcutHelpContext.CULLING_VIEW
-    window.shortcut_help_shortcut.activated.emit()
+    window.shortcut_help_action.trigger()
     app.processEvents()
 
     assert window.shortcut_help_overlay.isVisible() is True
@@ -382,7 +385,14 @@ def test_main_window_shortcut_help_tracks_current_view(
         'Culling View Shortcuts'
     )
 
-    window.shortcut_help_shortcut.activated.emit()
+    # Help is modal for keyboard shortcuts, so browse entry must not happen
+    # behind the overlay and leave the visible help text out of date.
+    window.browse_mode_shortcut.activated.emit()
+    app.processEvents()
+    assert window.shortcut_help_overlay.isVisible() is True
+    assert window._browse_mode is False
+
+    window.shortcut_help_action.trigger()
     app.processEvents()
     assert window.shortcut_help_overlay.isHidden() is True
 
@@ -390,7 +400,7 @@ def test_main_window_shortcut_help_tracks_current_view(
     app.processEvents()
     assert window._shortcut_help_context() == ShortcutHelpContext.BROWSE
 
-    window.shortcut_help_shortcut.activated.emit()
+    window.shortcut_help_action.trigger()
     app.processEvents()
     assert window.shortcut_help_overlay.title_label.text() == (
         'Browse View Shortcuts'
@@ -413,11 +423,18 @@ def test_main_window_shortcut_help_tracks_current_view(
     assert window._compare_mode is True
     assert window._shortcut_help_context() == ShortcutHelpContext.COMPARE_GRID
 
-    window.shortcut_help_shortcut.activated.emit()
+    window.shortcut_help_action.trigger()
     app.processEvents()
     assert window.shortcut_help_overlay.title_label.text() == (
         'Compare Grid Shortcuts'
     )
+
+    # Space normally opens the active compare photo. While help is visible it
+    # must wait, otherwise the next Esc would target different compare state.
+    window.space_shortcut.activated.emit()
+    app.processEvents()
+    assert window.shortcut_help_overlay.isVisible() is True
+    assert window.compare_viewer.is_selected_photo_view() is False
 
     window.exit_compare_shortcut.activated.emit()
     app.processEvents()
@@ -432,7 +449,7 @@ def test_main_window_shortcut_help_tracks_current_view(
         == ShortcutHelpContext.COMPARE_SELECTED_PHOTO
     )
 
-    window.shortcut_help_shortcut.activated.emit()
+    window.shortcut_help_action.trigger()
     app.processEvents()
     assert window.shortcut_help_overlay.title_label.text() == (
         'Selected Compare Photo Shortcuts'
