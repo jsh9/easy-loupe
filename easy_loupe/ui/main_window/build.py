@@ -547,7 +547,7 @@ class MainWindowBuildMixin:
             action.setCheckable(True)
             action.triggered.connect(
                 lambda *_args, selected_limit=limit: (
-                    self._set_compare_photo_limit(selected_limit, persist=True)
+                    self._run_compare_limit_action(selected_limit)
                 )
             )
             self.compare_limit_action_group.addAction(action)
@@ -847,6 +847,50 @@ class MainWindowBuildMixin:
             self.photo_load_recursively_checkbox.setChecked(normalized)
             self.photo_load_recursively_checkbox.blockSignals(False)
 
+    def _run_compare_limit_action(self: MainWindow, limit: object) -> None:
+        """
+        Run a compare-limit QAction through the shared modal gate.
+
+        The actions are normally disabled while shortcut help is visible, but
+        the guard keeps programmatic activation from bypassing the modal state.
+        """
+        if not self._run_workspace_action(
+            lambda: self._set_compare_photo_limit(limit, persist=True)
+        ):
+            self._check_compare_photo_limit_control(
+                self.compare_viewer.photo_limit
+            )
+
+    def _check_compare_photo_limit_control(
+            self: MainWindow, limit: object
+    ) -> None:
+        """
+        Sync the checked QAction for ``limit`` without re-triggering it.
+
+        Signal blocking keeps programmatic corrections from recursively
+        changing the compare grid while restoring one exclusive checked item.
+        """
+        normalized_limit = self.compare_viewer.normalized_photo_limit(limit)
+        action = self.compare_limit_actions.get(normalized_limit)
+        if action is None:
+            return
+
+        compare_limit_items = self.compare_limit_actions.items()
+        limit_checked = {
+            compare_limit: compare_action.isChecked()
+            for compare_limit, compare_action in compare_limit_items
+        }
+        if limit_checked == {
+            compare_limit: compare_limit == normalized_limit
+            for compare_limit in self.compare_limit_actions
+        }:
+            return
+
+        for compare_limit, compare_action in compare_limit_items:
+            compare_action.blockSignals(True)
+            compare_action.setChecked(compare_limit == normalized_limit)
+            compare_action.blockSignals(False)
+
     def _set_compare_photo_limit(
             self: MainWindow,
             limit: object,
@@ -854,9 +898,7 @@ class MainWindowBuildMixin:
             persist: bool,
     ) -> None:
         normalized_limit = self.compare_viewer.set_photo_limit(limit)
-        action = self.compare_limit_actions.get(normalized_limit)
-        if action is not None and not action.isChecked():
-            action.setChecked(True)
+        self._check_compare_photo_limit_control(normalized_limit)
 
         if persist:
             self._settings().setValue(
@@ -992,17 +1034,20 @@ class MainWindowBuildMixin:
     def _run_workspace_action(
             self: MainWindow,
             callback: Callable[[], None],
-    ) -> None:
+    ) -> bool:
         """
         Run a menu action only when the shortcut gates allow it.
 
         QAction shortcuts bypass ``make_window_shortcut``, so menu-triggered
         operations need the same modal guard as QShortcut-backed operations.
+        The return value lets checkable actions restore UI state when the modal
+        gate blocked their triggered slot.
         """
         if self._shortcut_blocked():
-            return
+            return False
 
         callback()
+        return True
 
     def _update_mode_shortcuts(self: MainWindow) -> None:
         shortcut_help_visible = self._shortcut_help_modal_active()
@@ -1053,6 +1098,9 @@ class MainWindowBuildMixin:
                 workspace_shortcuts_enabled and self._compare_mode
             )
 
+        self._refresh_file_actions()
+        self._refresh_merge_scene_action()
+        self._refresh_compare_limit_controls()
         self._refresh_assignment_controls()
 
     def _handle_space_shortcut(self: MainWindow) -> None:
@@ -1293,6 +1341,92 @@ class MainWindowBuildMixin:
 
         for shortcut in self._assignment_shortcuts:
             shortcut.setEnabled(enabled)
+
+    def _refresh_compare_limit_controls(self: MainWindow) -> None:
+        """
+        Disable compare-limit choices while modal UI owns the workspace.
+
+        Checkable QAction menu items can show a clicked limit before the grid
+        changes, so disabling them keeps the visible menu state aligned with
+        the modal shortcut-help guard.
+        """
+        enabled = not self._busy and not self._shortcut_help_modal_active()
+        for action in self.compare_limit_actions.values():
+            action.setEnabled(enabled)
+
+    def _refresh_file_actions(
+            self: MainWindow,
+            *,
+            open_enabled: bool | None = None,
+            photo_actions_enabled: bool | None = None,
+    ) -> None:
+        """
+        Refresh File menu actions from their action-specific eligibility.
+
+        The top-bar buttons keep their existing interaction rules; these
+        QAction entries also layer in menu, busy, and shortcut-help modal state
+        so the menu does not advertise commands the shared guard will block.
+        Open Folder is not photo-dependent, so it has a separate
+        caller-supplied gate from Detect Scenes and Organize Photos.
+        """
+        if open_enabled is None:
+            open_enabled = True
+
+        if photo_actions_enabled is None:
+            photo_actions_enabled = (
+                bool(self.library.photos)
+                and not self._background_task_active()
+            )
+
+        menu_actions_enabled = (
+            self.menuBar().isEnabled()
+            and not self._busy
+            and not self._shortcut_help_modal_active()
+        )
+        if hasattr(self, 'open_action'):
+            self.open_action.setEnabled(open_enabled and menu_actions_enabled)
+
+        if hasattr(self, 'detect_action'):
+            self.detect_action.setEnabled(
+                photo_actions_enabled and menu_actions_enabled
+            )
+
+        if hasattr(self, 'organize_action'):
+            self.organize_action.setEnabled(
+                photo_actions_enabled and menu_actions_enabled
+            )
+
+    def _refresh_merge_scene_action(
+            self: MainWindow,
+            *,
+            photo_actions_enabled: bool | None = None,
+    ) -> None:
+        """
+        Refresh the scene-merge menu action from workspace modal state.
+
+        The action already has a defensive slot guard, but disabling it keeps
+        the menu from advertising a command that shortcut help will block.
+        Callers pass their local photo/background-work eligibility; this helper
+        layers global menu, busy, compare, and shortcut-help gates so separate
+        refresh paths do not disagree about the visible QAction state.
+        """
+        if not hasattr(self, 'merge_scene_action'):
+            return
+
+        if photo_actions_enabled is None:
+            photo_actions_enabled = (
+                bool(self.library.photos)
+                and not self._background_task_active()
+            )
+
+        enabled = (
+            photo_actions_enabled
+            and self.menuBar().isEnabled()
+            and not self._busy
+            and not self._compare_mode
+            and not self._shortcut_help_modal_active()
+        )
+        self.merge_scene_action.setEnabled(enabled)
 
     def _update_progress_overlay_geometry(self: MainWindow) -> None:
         """Match the progress overlay to the current central widget bounds."""

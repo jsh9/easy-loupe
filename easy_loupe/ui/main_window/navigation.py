@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QItemSelectionModel, Qt, QTimer
+from PySide6.QtWidgets import QApplication
 
 from easy_loupe.ui.theme import PHOTO_ID_ROLE
 
@@ -54,8 +55,12 @@ class MainWindowNavigationMixin:
             QTimer.singleShot(0, self._restore_active_navigation_focus)
             return
 
+        active_window = QApplication.activeWindow()
+        # Native/headless Qt can briefly report no active window while focus is
+        # settling. Treat only a non-None active window as unsafe to steal
+        # from, so local restores still work when this window is unreported.
         if (
-            not self.isActiveWindow()
+            (not self.isActiveWindow() and active_window is not None)
             or self._busy
             or self._background_task_active()
             or not self.library.photos

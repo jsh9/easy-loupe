@@ -53,6 +53,15 @@ def test_shortcut_help_catalog_covers_each_context() -> None:
     ]
     assert any(row.shortcut == 'Ctrl+O' for row in empty_rows)
 
+    browse_rows = [
+        row
+        for group in shortcut_help_groups(ShortcutHelpContext.BROWSE)
+        for row in group.rows
+    ]
+    assert any(row.shortcut == 'Ctrl+O' for row in browse_rows)
+    assert any(row.shortcut == 'Ctrl+D' for row in browse_rows)
+    assert any(row.shortcut == 'Ctrl+Shift+E' for row in browse_rows)
+
     compare_rows = [
         row
         for group in shortcut_help_groups(ShortcutHelpContext.COMPARE_GRID)
@@ -73,6 +82,7 @@ def test_shortcut_help_catalog_covers_each_context() -> None:
         )
         for row in group.rows
     ]
+    assert any(row.shortcut == 'G' for row in selected_compare_rows)
     selected_compare_esc_rows = [
         row.description
         for row in selected_compare_rows

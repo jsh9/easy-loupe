@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFontDatabase
+from PySide6.QtGui import QFontDatabase, QHideEvent, QKeyEvent
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -171,12 +171,16 @@ class ShortcutHelpOverlay(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName('shortcutHelpOverlay')
-        self.hide()
+        # The overlay takes focus while visible so keyPressEvent can absorb
+        # list-navigation keys before the workspace widget sees them.
+        self.setFocusPolicy(Qt.StrongFocus)
+        self._previous_focus_widget: QWidget | None = None
         self._context: ShortcutHelpContext | None = None
         self._groups: tuple[ShortcutHelpGroup, ...] = ()
         self._column_count = 0
         self._rendered_row_count = 0
         self._font_scale = MAX_FONT_SCALE
+        self.hide()
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -230,8 +234,20 @@ class ShortcutHelpOverlay(QWidget):
         self.title_label.setText(shortcut_help_title(context))
         self._render_groups(force=True)
         self.update_geometry()
+        # Remember only workspace focus owners. Re-rendering while already
+        # visible can focus overlay children; keeping those out preserves the
+        # widget that should regain keyboard navigation after help closes.
+        focus_widget = self.window().focusWidget()
+        if (
+            focus_widget is not None
+            and focus_widget is not self
+            and not self.isAncestorOf(focus_widget)
+        ):
+            self._previous_focus_widget = focus_widget
+
         self.show()
         self.raise_()
+        self.setFocus(Qt.ShortcutFocusReason)
 
     def toggle_context(self, context: ShortcutHelpContext) -> None:
         """Toggle the overlay, refreshing content when context changes."""
@@ -240,6 +256,47 @@ class ShortcutHelpOverlay(QWidget):
             return
 
         self.show_context(context)
+
+    def hideEvent(self, event: QHideEvent) -> None:  # noqa: N802 - Qt API
+        """
+        Restore focus to the widget that owned keyboard navigation.
+
+        Focus is restored only when the old widget still belongs to this
+        window, because the overlay should not steal focus across windows.
+        """
+        previous_focus_widget = self._previous_focus_widget
+        self._previous_focus_widget = None
+        super().hideEvent(event)
+        if previous_focus_widget is None:
+            return
+
+        try:
+            if previous_focus_widget.window() is self.window():
+                previous_focus_widget.setFocus(Qt.OtherFocusReason)
+        except RuntimeError:
+            # PySide wrappers can outlive deleted Qt widgets during shutdown;
+            # in that case there is no live focus target to restore.
+            return
+
+    def keyPressEvent(  # noqa: N802, PLR6301 - Qt API
+            self, event: QKeyEvent
+    ) -> None:
+        """
+        Consume normal keys while help is visible.
+
+        Esc and ?/Shift+/ stay ignored so the window-level handlers can close
+        the overlay; accepting everything else blocks focused navigation
+        widgets from mutating state behind it.
+        """
+        if event.key() in {
+            Qt.Key_Escape,
+            Qt.Key_Question,
+            Qt.Key_Slash,
+        }:
+            event.ignore()
+            return
+
+        event.accept()
 
     def update_geometry(self) -> None:
         """Fill the parent and size the centered panel to 90 percent."""
@@ -605,6 +662,17 @@ def _culling_view_groups() -> tuple[ShortcutHelpGroup, ...]:
 def _browse_groups() -> tuple[ShortcutHelpGroup, ...]:
     return (
         ShortcutHelpGroup(
+            'Library',
+            (
+                ShortcutHelpRow('Ctrl+O', 'Open a photo folder'),
+                ShortcutHelpRow('Ctrl+D', 'Detect scenes'),
+                ShortcutHelpRow(
+                    'Ctrl+Shift+E',
+                    'Open the organizer and XMP export dialog',
+                ),
+            ),
+        ),
+        ShortcutHelpGroup(
             'Browse',
             (
                 ShortcutHelpRow('Space', 'Return to fit view'),
@@ -665,6 +733,7 @@ def _compare_selected_photo_groups() -> tuple[ShortcutHelpGroup, ...]:
                     'Space / Z',
                     'Toggle fit and 100 percent view',
                 ),
+                ShortcutHelpRow('G', 'Return to browse with the selection'),
                 ShortcutHelpRow(
                     'Esc',
                     (
