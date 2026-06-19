@@ -7,7 +7,12 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFontDatabase, QHideEvent, QKeyEvent
+from PySide6.QtGui import (
+    QFontDatabase,
+    QHideEvent,
+    QKeyEvent,
+    QKeySequence,
+)
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -40,6 +45,17 @@ ARROW_KEY_LABELS = {
     'Right': '→',
 }
 ARROW_KEYS_LABEL = '← / ↑ / ↓ / →'
+
+
+def shortcut_help_key_sequences() -> tuple[QKeySequence, ...]:
+    """
+    Return primary and alternate key sequences for shortcut help.
+
+    The UI documents ``?``, but Qt can deliver the same physical key chord as
+    ``Shift+/`` on some platforms or layouts. Register both on one QAction so
+    menu and keyboard activation still share a single toggle path.
+    """
+    return (QKeySequence('?'), QKeySequence('Shift+/'))
 
 
 class ShortcutHelpContext(StrEnum):
@@ -283,7 +299,7 @@ class ShortcutHelpOverlay(QWidget):
             # in that case there is no live focus target to restore.
             return
 
-    def keyPressEvent(  # noqa: N802, PLR6301 - Qt API
+    def keyPressEvent(  # noqa: N802 - Qt API
             self, event: QKeyEvent
     ) -> None:
         """
@@ -293,15 +309,74 @@ class ShortcutHelpOverlay(QWidget):
         the overlay; accepting everything else blocks focused navigation
         widgets from mutating state behind it.
         """
-        if event.key() in {
-            Qt.Key_Escape,
-            Qt.Key_Question,
-            Qt.Key_Slash,
-        }:
+        if event.key() in {Qt.Key_Escape, Qt.Key_Question} or (
+            event.key() == Qt.Key_Slash
+            and event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+        ):
             event.ignore()
             return
 
+        if self._scroll_for_key(event.key()):
+            event.accept()
+            return
+
         event.accept()
+
+    def _scroll_for_key(self, key: int) -> bool:
+        """
+        Scroll help content for keyboard-only readers.
+
+        The overlay owns focus while visible; handling scroll keys here keeps
+        long help tables readable without letting those keys reach navigation
+        widgets behind the visually modal overlay.
+        """
+        vertical_bar = self.scroll_area.verticalScrollBar()
+        horizontal_bar = self.scroll_area.horizontalScrollBar()
+        if key == Qt.Key_PageDown:
+            vertical_bar.setValue(
+                vertical_bar.value() + vertical_bar.pageStep()
+            )
+            return True
+
+        if key == Qt.Key_PageUp:
+            vertical_bar.setValue(
+                vertical_bar.value() - vertical_bar.pageStep()
+            )
+            return True
+
+        if key == Qt.Key_End:
+            vertical_bar.setValue(vertical_bar.maximum())
+            return True
+
+        if key == Qt.Key_Home:
+            vertical_bar.setValue(vertical_bar.minimum())
+            return True
+
+        if key == Qt.Key_Down:
+            vertical_bar.setValue(
+                vertical_bar.value() + vertical_bar.singleStep()
+            )
+            return True
+
+        if key == Qt.Key_Up:
+            vertical_bar.setValue(
+                vertical_bar.value() - vertical_bar.singleStep()
+            )
+            return True
+
+        if key == Qt.Key_Right:
+            horizontal_bar.setValue(
+                horizontal_bar.value() + horizontal_bar.singleStep()
+            )
+            return True
+
+        if key == Qt.Key_Left:
+            horizontal_bar.setValue(
+                horizontal_bar.value() - horizontal_bar.singleStep()
+            )
+            return True
+
+        return False
 
     def update_geometry(self) -> None:
         """Fill the parent and size the centered panel to 90 percent."""

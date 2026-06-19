@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QSettings, Qt
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtCore import QEvent, QSettings, Qt
+from PySide6.QtGui import QAction, QKeyEvent, QKeySequence
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QMessageBox
 
@@ -106,6 +106,58 @@ def _shortcut_help_description_texts(window: Any) -> set[str]:
             QLabel, 'shortcutHelpDescriptionLabel'
         )
     }
+
+
+def _action_shortcut_texts(action: QAction) -> list[str]:
+    return [
+        shortcut.toString(QKeySequence.PortableText)
+        for shortcut in action.shortcuts()
+    ]
+
+
+def _open_shortcut_help_with_shift_slash(
+        window: Any, app: QApplication
+) -> None:
+    """
+    Open shortcut help through the physical question-mark key chord.
+
+    The test sends explicit key events instead of ``QTest.keyClick`` because Qt
+    can leave the global Shift modifier active after synthetic shortcut
+    delivery. Releasing both slash and Shift keeps later focus/navigation tests
+    from seeing a stale extended-selection modifier.
+    """
+    for target in (window.central_widget, window):
+        for _attempt in range(3):
+            window.raise_()
+            window.activateWindow()
+            app.processEvents()
+            QTest.qWait(10)
+            press_event = QKeyEvent(
+                QEvent.KeyPress,
+                Qt.Key_Slash,
+                Qt.KeyboardModifier.ShiftModifier,
+                '?',
+            )
+            release_event = QKeyEvent(
+                QEvent.KeyRelease,
+                Qt.Key_Slash,
+                Qt.KeyboardModifier.NoModifier,
+                '',
+            )
+            shift_release_event = QKeyEvent(
+                QEvent.KeyRelease,
+                Qt.Key_Shift,
+                Qt.KeyboardModifier.NoModifier,
+                '',
+            )
+            QApplication.sendEvent(target, press_event)
+            QApplication.sendEvent(target, release_event)
+            QApplication.sendEvent(target, shift_release_event)
+            app.processEvents()
+            if window.shortcut_help_overlay.isVisible():
+                return
+
+    raise AssertionError('Shift+/ did not open shortcut help')
 
 
 def _select_photo_ids(
@@ -241,6 +293,10 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:  # no
         )
         == '?'
     )
+    assert _action_shortcut_texts(window.shortcut_help_action) == [
+        '?',
+        'Shift+/',
+    ]
     assert window.about_action.text() == 'About EasyLoupe'
     assert window.about_action.menuRole() == QAction.AboutRole
     assert (
@@ -392,8 +448,7 @@ def test_main_window_shortcut_help_tracks_current_view(
         window._shortcut_help_context()
         == ShortcutHelpContext.CULLING_VIEW_NO_SCENES
     )
-    window.shortcut_help_action.trigger()
-    app.processEvents()
+    _open_shortcut_help_with_shift_slash(window, app)
 
     assert window.shortcut_help_overlay.isVisible() is True
     assert window.shortcut_help_overlay.title_label.text() == (

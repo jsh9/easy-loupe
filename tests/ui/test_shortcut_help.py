@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFontDatabase
+from PySide6.QtGui import QFontDatabase, QKeySequence
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -17,6 +18,7 @@ from easy_loupe.ui.shortcut_help import (
     ShortcutHelpContext,
     ShortcutHelpOverlay,
     shortcut_help_groups,
+    shortcut_help_key_sequences,
     shortcut_help_title,
 )
 
@@ -121,6 +123,21 @@ def test_shortcut_help_catalog_covers_each_context() -> None:
             'the comparison grid'
         )
     ]
+
+
+def test_shortcut_help_key_sequences_include_physical_question_mark() -> None:
+    """
+    Verify shortcut help supports both ``?`` and the physical Shift+/ chord.
+
+    Qt can report a keyboard's question-mark gesture as either sequence, so the
+    action must own both without changing the visible catalog label.
+    """
+    sequence_texts = [
+        sequence.toString(QKeySequence.PortableText)
+        for sequence in shortcut_help_key_sequences()
+    ]
+
+    assert sequence_texts == ['?', 'Shift+/']
 
 
 def test_shortcut_help_formats_modifier_labels_for_platform(
@@ -281,6 +298,44 @@ def test_shortcut_help_overlay_renders_context_and_tracks_geometry() -> None:
     assert overlay.geometry() == parent.rect()
     assert 0 < overlay.panel.width() <= parent.width()
     assert 0 < overlay.panel.height() <= parent.height()
+    parent.close()
+    app.processEvents()
+
+
+def test_shortcut_help_overlay_scrolls_from_keyboard() -> None:
+    """
+    Verify overflowed shortcut help can be read without a mouse.
+
+    The overlay accepts handled scroll keys so they do not fall through to the
+    photo workspace behind the modal help surface.
+    """
+    app = QApplication.instance() or QApplication([])
+    parent = QWidget()
+    parent.resize(500, 320)
+    parent.show()
+    overlay = ShortcutHelpOverlay(parent)
+
+    overlay.show_context(ShortcutHelpContext.CULLING_VIEW)
+    app.processEvents()
+
+    scroll_bar = overlay.scroll_area.verticalScrollBar()
+    assert scroll_bar.maximum() > 0
+    assert scroll_bar.value() == scroll_bar.minimum()
+
+    QTest.keyClick(overlay, Qt.Key_PageDown)
+    app.processEvents()
+
+    assert scroll_bar.value() > scroll_bar.minimum()
+
+    QTest.keyClick(overlay, Qt.Key_End)
+    app.processEvents()
+
+    assert scroll_bar.value() == scroll_bar.maximum()
+
+    QTest.keyClick(overlay, Qt.Key_Home)
+    app.processEvents()
+
+    assert scroll_bar.value() == scroll_bar.minimum()
     parent.close()
     app.processEvents()
 
