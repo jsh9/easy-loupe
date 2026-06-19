@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from PySide6.QtCore import QEvent, QPoint, QSettings, Qt
-from PySide6.QtGui import QKeyEvent, QKeySequence
+from PySide6.QtCore import QPoint, QSettings, Qt
+from PySide6.QtGui import QKeySequence
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QMessageBox
 
@@ -66,59 +66,6 @@ def _trigger_viewer_shortcut(window: PhotoViewerWindow, key_text: str) -> None:
             return
 
     raise AssertionError(f'Missing viewer shortcut for {key_text!r}')
-
-
-def _action_shortcut_texts(action: Any) -> list[str]:
-    return [
-        shortcut.toString(QKeySequence.PortableText)
-        for shortcut in action.shortcuts()
-    ]
-
-
-def _open_shortcut_help_with_shift_slash(
-        window: PhotoViewerWindow,
-        app: QApplication,
-) -> None:
-    """
-    Open shortcut help through the physical question-mark key chord.
-
-    The test sends explicit key events instead of ``QTest.keyClick`` because Qt
-    can leave the global Shift modifier active after synthetic shortcut
-    delivery. Releasing both slash and Shift keeps later focus/navigation tests
-    from seeing a stale extended-selection modifier.
-    """
-    for target in (window.central_widget, window):
-        for _attempt in range(3):
-            window.raise_()
-            window.activateWindow()
-            app.processEvents()
-            QTest.qWait(10)
-            press_event = QKeyEvent(
-                QEvent.KeyPress,
-                Qt.Key_Slash,
-                Qt.KeyboardModifier.ShiftModifier,
-                '?',
-            )
-            release_event = QKeyEvent(
-                QEvent.KeyRelease,
-                Qt.Key_Slash,
-                Qt.KeyboardModifier.NoModifier,
-                '',
-            )
-            shift_release_event = QKeyEvent(
-                QEvent.KeyRelease,
-                Qt.Key_Shift,
-                Qt.KeyboardModifier.NoModifier,
-                '',
-            )
-            QApplication.sendEvent(target, press_event)
-            QApplication.sendEvent(target, release_event)
-            QApplication.sendEvent(target, shift_release_event)
-            app.processEvents()
-            if window.shortcut_help_overlay.isVisible():
-                return
-
-    raise AssertionError('Shift+/ did not open shortcut help')
 
 
 def _assert_close_tuple(
@@ -445,13 +392,10 @@ def test_photo_viewer_shortcut_help_toggles_and_esc_closes_first(
         )
         == '?'
     )
-    assert _action_shortcut_texts(window.shortcut_help_action) == [
-        '?',
-        'Shift+/',
-    ]
 
     window._show_transient_message('Ready')
-    _open_shortcut_help_with_shift_slash(window, app)
+    window.shortcut_help_action.trigger()
+    app.processEvents()
 
     assert window.transient_message_overlay.isVisible() is True
     assert window.shortcut_help_overlay.isVisible() is True
@@ -482,40 +426,6 @@ def test_photo_viewer_shortcut_help_toggles_and_esc_closes_first(
     app.processEvents()
 
     assert window.transient_message_overlay.isHidden() is True
-    window.close()
-    app.processEvents()
-
-
-def test_photo_viewer_shortcut_help_action_waits_during_progress(
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """
-    Verify viewer help menu state matches progress-overlay modality.
-
-    Progress waits already block shortcut help, so the QAction must not stay
-    visibly enabled while a trigger would be ignored.
-    """
-    create_jpeg(tmp_path / 'A.JPG', 'green')
-    app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
-
-    assert window.shortcut_help_action.isEnabled() is True
-
-    window._show_progress('Loading folder...', 42)
-    app.processEvents()
-
-    assert window.progress_overlay.isVisible() is True
-    assert window.shortcut_help_action.isEnabled() is False
-    window.shortcut_help_action.trigger()
-    app.processEvents()
-
-    assert window.shortcut_help_overlay.isHidden() is True
-
-    window._hide_progress()
-    app.processEvents()
-
-    assert window.progress_overlay.isHidden() is True
-    assert window.shortcut_help_action.isEnabled() is True
     window.close()
     app.processEvents()
 

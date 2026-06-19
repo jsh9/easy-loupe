@@ -51,7 +51,6 @@ from easy_loupe.ui.progress_overlay import (
 from easy_loupe.ui.shortcut_help import (
     ShortcutHelpContext,
     ShortcutHelpOverlay,
-    shortcut_help_key_sequences,
 )
 from easy_loupe.ui.theme import NO_METADATA_TEXT
 from easy_loupe.ui.viewers.compare_photo_viewer import (
@@ -522,10 +521,10 @@ class MainWindowBuildMixin:
     def _build_help_menu(self: MainWindow, menu_bar: QMenuBar) -> None:
         self.help_menu = menu_bar.addMenu('&Help')
         self.shortcut_help_action = QAction('Keyboard Shortcuts', self)
-        self.shortcut_help_action.setShortcuts(shortcut_help_key_sequences())
+        self.shortcut_help_action.setShortcut(QKeySequence('?'))
         self.shortcut_help_action.setShortcutContext(Qt.WindowShortcut)
-        # The QAction owns help shortcuts so menu and keyboard activation share
-        # one path; a parallel QShortcut would make Qt treat keys as ambiguous.
+        # The QAction owns ``?`` so menu and keyboard activation share one
+        # path; a parallel QShortcut would make Qt treat the key as ambiguous.
         self.shortcut_help_action.triggered.connect(
             lambda *_: self._toggle_shortcut_help()
         )

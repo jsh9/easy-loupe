@@ -14,7 +14,7 @@
   - The shortcut help overlay now keeps focused navigation-list key presses,
     delayed navigation-focus restores, and guarded menu actions from changing
     the workspace behind the overlay, and disables File, compare-limit, and
-    History undo/redo, and scene-merge choices while the overlay is open.
+    scene-merge choices while the overlay is open.
   - Closing the last culling or standalone photo-viewer window while hidden
     worker cleanup is still draining no longer lets Qt app shutdown delete
     active `QThread` objects.

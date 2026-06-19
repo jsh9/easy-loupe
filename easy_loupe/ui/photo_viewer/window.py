@@ -20,6 +20,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
+    QKeySequence,
     QPixmap,
     QShortcut,
 )
@@ -62,7 +63,6 @@ from easy_loupe.ui.progress_overlay import (
 from easy_loupe.ui.shortcut_help import (
     ShortcutHelpContext,
     ShortcutHelpOverlay,
-    shortcut_help_key_sequences,
 )
 from easy_loupe.ui.threading import (
     ThreadSlot,
@@ -321,16 +321,15 @@ class PhotoViewerWindow(QMainWindow):
     def _build_menu(self) -> None:
         self.help_menu = self.menuBar().addMenu('&Help')
         self.shortcut_help_action = QAction('Keyboard Shortcuts', self)
-        self.shortcut_help_action.setShortcuts(shortcut_help_key_sequences())
+        self.shortcut_help_action.setShortcut(QKeySequence('?'))
         self.shortcut_help_action.setShortcutContext(Qt.WindowShortcut)
-        # The QAction owns help shortcuts so menu and keyboard activation share
-        # one path; a parallel QShortcut would make Qt treat keys as ambiguous.
+        # The QAction owns ``?`` so menu and keyboard activation share one
+        # path; a parallel QShortcut would make Qt treat the key as ambiguous.
         self.shortcut_help_action.triggered.connect(
             lambda *_: self._toggle_shortcut_help()
         )
         self.addAction(self.shortcut_help_action)
         self.help_menu.addAction(self.shortcut_help_action)
-        self._refresh_shortcut_help_action()
 
     def _apply_overlay_style(self) -> None:
         """Apply readable fixed styling to photo-viewer overlays."""
@@ -515,30 +514,13 @@ class PhotoViewerWindow(QMainWindow):
         self.shortcut_help_overlay.toggle_context(
             ShortcutHelpContext.PHOTO_VIEWER
         )
-        self._refresh_shortcut_help_action()
 
     def _handle_escape_shortcut(self) -> None:
         if self.shortcut_help_overlay.isVisible():
             self.shortcut_help_overlay.hide()
-            self._refresh_shortcut_help_action()
             return
 
         self._hide_transient_message()
-
-    def _refresh_shortcut_help_action(self) -> None:
-        """
-        Keep help action availability aligned with progress modality.
-
-        Progress overlays are modal for viewer actions, so the menu item should
-        not advertise opening help while progress is visible. If help is
-        already open, keep the QAction enabled so the same menu/shortcut path
-        can close it.
-        """
-        enabled = (
-            not self.progress_overlay.isVisible()
-            or self._shortcut_help_modal_active()
-        )
-        self.shortcut_help_action.setEnabled(enabled)
 
     def open_file(self, file_path: object) -> None:
         """Open a photo file into the lightweight viewer state."""
@@ -1405,17 +1387,14 @@ class PhotoViewerWindow(QMainWindow):
             progress,
             max_value=max_value,
         )
-        self._refresh_shortcut_help_action()
 
     def _show_progress_snapshot(self, snapshot: ProgressSnapshot) -> None:
         self.exif_overlay.hide()
         self.progress_overlay_controller.show_snapshot(snapshot)
-        self._refresh_shortcut_help_action()
 
     def _hide_progress(self) -> None:
         self.progress_overlay_controller.hide()
         self._refresh_info_overlay()
-        self._refresh_shortcut_help_action()
 
     def _show_transient_message(
             self,
