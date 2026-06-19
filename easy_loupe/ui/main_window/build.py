@@ -1102,6 +1102,7 @@ class MainWindowBuildMixin:
         self._refresh_merge_scene_action()
         self._refresh_compare_limit_controls()
         self._refresh_assignment_controls()
+        self._refresh_metadata_history_actions()
 
     def _handle_space_shortcut(self: MainWindow) -> None:
         if self._compare_mode:
@@ -1223,6 +1224,9 @@ class MainWindowBuildMixin:
 
         if self._browse_mode:
             return ShortcutHelpContext.BROWSE
+
+        if not self.library.scene_detection_done:
+            return ShortcutHelpContext.CULLING_VIEW_NO_SCENES
 
         return ShortcutHelpContext.CULLING_VIEW
 

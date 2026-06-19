@@ -53,6 +53,33 @@ def test_shortcut_help_catalog_covers_each_context() -> None:
     ]
     assert any(row.shortcut == 'Ctrl+O' for row in empty_rows)
 
+    no_scene_rows = [
+        row
+        for group in shortcut_help_groups(
+            ShortcutHelpContext.CULLING_VIEW_NO_SCENES
+        )
+        for row in group.rows
+    ]
+    assert any(row.shortcut == 'Ctrl+Shift+M' for row in no_scene_rows)
+    assert not any(row.shortcut == 'Left / Right' for row in no_scene_rows)
+    assert not any(
+        row.shortcut == 'Shift+Left / Shift+Right' for row in no_scene_rows
+    )
+    assert not any(
+        row.shortcut == 'Shift+Up / Shift+Down' for row in no_scene_rows
+    )
+
+    culling_rows = [
+        row
+        for group in shortcut_help_groups(ShortcutHelpContext.CULLING_VIEW)
+        for row in group.rows
+    ]
+    assert any(row.shortcut == 'Left / Right' for row in culling_rows)
+    assert any(
+        row.shortcut == 'Shift+Left / Shift+Right' for row in culling_rows
+    )
+    assert any(row.shortcut == 'Shift+Up / Shift+Down' for row in culling_rows)
+
     browse_rows = [
         row
         for group in shortcut_help_groups(ShortcutHelpContext.BROWSE)

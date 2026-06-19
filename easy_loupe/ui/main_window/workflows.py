@@ -1283,7 +1283,11 @@ class MainWindowWorkflowMixin:
         )
 
     def _refresh_metadata_history_actions(self: MainWindow) -> None:
-        enabled = not self._busy and self.menuBar().isEnabled()
+        enabled = (
+            not self._busy
+            and self.menuBar().isEnabled()
+            and not self._shortcut_help_modal_active()
+        )
         if hasattr(self, 'undo_metadata_action'):
             self.undo_metadata_action.setEnabled(
                 enabled and bool(self._metadata_undo_stack)

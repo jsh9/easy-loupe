@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox
 
 import easy_loupe.ui.identity as identity_module
 import easy_loupe.ui.main_window.build as build_module
@@ -97,6 +97,15 @@ def _collect_selected_photo_ids(list_widget: Any) -> list[str]:
         str(item.data(Qt.UserRole))
         for item in sorted(list_widget.selectedItems(), key=list_widget.row)
     ]
+
+
+def _shortcut_help_description_texts(window: Any) -> set[str]:
+    return {
+        label.text()
+        for label in window.shortcut_help_overlay.findChildren(
+            QLabel, 'shortcutHelpDescriptionLabel'
+        )
+    }
 
 
 def _select_photo_ids(
@@ -367,8 +376,10 @@ def test_main_window_shortcut_help_tracks_current_view(
     Compare mode already uses Esc for navigation, so the help overlay must win
     the first Esc press without exiting compare or selected-photo compare.
     """
+    no_scenes_path = tmp_path / 'no-scenes'
+    no_scenes_path.mkdir()
     _theme, app, window = create_main_window_with_library(
-        tmp_path,
+        no_scenes_path,
         monkeypatch,
         photo_specs=[
             ('IMG_1000', 'red'),
@@ -377,7 +388,10 @@ def test_main_window_shortcut_help_tracks_current_view(
         ],
     )
 
-    assert window._shortcut_help_context() == ShortcutHelpContext.CULLING_VIEW
+    assert (
+        window._shortcut_help_context()
+        == ShortcutHelpContext.CULLING_VIEW_NO_SCENES
+    )
     window.shortcut_help_action.trigger()
     app.processEvents()
 
@@ -460,6 +474,75 @@ def test_main_window_shortcut_help_tracks_current_view(
     app.processEvents()
     assert window.shortcut_help_overlay.isHidden() is True
     assert window.compare_viewer.is_selected_photo_view() is True
+    window.close()
+    app.processEvents()
+
+
+def test_main_window_shortcut_help_tracks_scene_state(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify culling help includes scene-strip rows only after scenes exist.
+
+    Scene-strip navigation is unavailable before scene detection, so the
+    context-aware help must not advertise those rows until the strip is
+    visible.
+    """
+    no_scenes_path = tmp_path / 'no-scenes'
+    no_scenes_path.mkdir()
+    _theme, app, window = create_main_window_with_library(
+        no_scenes_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_1000', 'red'),
+            ('IMG_1001', 'green'),
+            ('IMG_1002', 'blue'),
+        ],
+    )
+
+    assert (
+        window._shortcut_help_context()
+        == ShortcutHelpContext.CULLING_VIEW_NO_SCENES
+    )
+    window.shortcut_help_action.trigger()
+    app.processEvents()
+
+    description_texts = _shortcut_help_description_texts(window)
+    assert 'Merge selected photos into a scene' in description_texts
+    assert 'Move within the scene strip' not in description_texts
+    assert 'Extend the in-scene selection' not in description_texts
+    assert 'Extend selection across scene-stack rows' not in description_texts
+
+    window.shortcut_help_action.trigger()
+    app.processEvents()
+    window.close()
+    app.processEvents()
+
+    with_scenes_path = tmp_path / 'with-scenes'
+    with_scenes_path.mkdir()
+    _theme, app, window = create_main_window_with_library(
+        with_scenes_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_2000', 'cyan'),
+            ('IMG_2001', 'magenta'),
+            ('IMG_2002', 'yellow'),
+        ],
+        scene_groups=[
+            ['IMG_2000', 'IMG_2001'],
+            ['IMG_2002'],
+        ],
+    )
+
+    assert window._shortcut_help_context() == ShortcutHelpContext.CULLING_VIEW
+    window.shortcut_help_action.trigger()
+    app.processEvents()
+
+    description_texts = _shortcut_help_description_texts(window)
+    assert 'Move within the scene strip' in description_texts
+    assert 'Extend the in-scene selection' in description_texts
+    assert 'Extend selection across scene-stack rows' in description_texts
     window.close()
     app.processEvents()
 
@@ -650,6 +733,61 @@ def test_main_window_shortcut_help_disables_loaded_file_actions(
     app.processEvents()
 
 
+def test_main_window_shortcut_help_disables_history_actions(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify undo/redo menu state matches the shortcut-help modal guard.
+
+    The QAction slots are guarded defensively, but enabled menu state should
+    also tell users that metadata history waits while help is open.
+    """
+    _theme, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_1000', 'red')],
+    )
+    photo = window.library.get_photo('IMG_1000')
+
+    window._set_rating(3)
+    app.processEvents()
+
+    assert photo.rating == 3
+    assert window.undo_metadata_action.isEnabled() is True
+    assert window.redo_metadata_action.isEnabled() is False
+
+    window.shortcut_help_action.trigger()
+    app.processEvents()
+
+    assert window.undo_metadata_action.isEnabled() is False
+    assert window.redo_metadata_action.isEnabled() is False
+
+    window.shortcut_help_action.trigger()
+    app.processEvents()
+
+    assert window.undo_metadata_action.isEnabled() is True
+    window.undo_metadata_action.trigger()
+    app.processEvents()
+
+    assert photo.rating is None
+    assert window.undo_metadata_action.isEnabled() is False
+    assert window.redo_metadata_action.isEnabled() is True
+
+    window.shortcut_help_action.trigger()
+    app.processEvents()
+
+    assert window.undo_metadata_action.isEnabled() is False
+    assert window.redo_metadata_action.isEnabled() is False
+
+    window.shortcut_help_action.trigger()
+    app.processEvents()
+
+    assert window.redo_metadata_action.isEnabled() is True
+    window.close()
+    app.processEvents()
+
+
 def test_main_window_shortcut_help_restores_empty_file_actions() -> None:
     """
     Verify File menu action state restores correctly without loaded photos.
@@ -684,6 +822,42 @@ def test_main_window_shortcut_help_restores_empty_file_actions() -> None:
     window.close()
     app.processEvents()
     del app
+
+
+def test_main_window_shortcut_help_blocks_deferred_thumbnail_focus(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify delayed thumbnail focus restores wait while help is visible.
+
+    Scene-detection cleanup queues this helper after rebuilding lists, so it
+    must respect the same modal guard as active-navigation focus restores.
+    """
+    _theme, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_1000', 'red'), ('IMG_1001', 'green')],
+    )
+    monkeypatch.setattr(window, 'isActiveWindow', lambda: True)
+
+    assert window._thumbnail_strip_focus_available() is True
+
+    window.shortcut_help_action.trigger()
+    app.processEvents()
+
+    assert window.shortcut_help_overlay.isVisible() is True
+    assert window._thumbnail_strip_focus_available() is False
+
+    window._restore_thumbnail_strip_focus()
+    app.processEvents()
+    focus_widget = app.focusWidget()
+    if focus_widget is not None:
+        assert focus_widget is not window.thumbnail_list
+        assert focus_widget is not window.thumbnail_list.viewport()
+
+    window.close()
+    app.processEvents()
 
 
 def test_main_window_shortcut_help_blocks_focused_list_key_events(

@@ -47,6 +47,7 @@ class ShortcutHelpContext(StrEnum):
 
     PHOTO_VIEWER = 'photo_viewer'
     CULLING_EMPTY = 'culling_empty'
+    CULLING_VIEW_NO_SCENES = 'culling_view_no_scenes'
     CULLING_VIEW = 'culling_view'
     BROWSE = 'browse'
     COMPARE_GRID = 'compare_grid'
@@ -90,6 +91,7 @@ def shortcut_help_title(context: ShortcutHelpContext) -> str:
     titles = {
         ShortcutHelpContext.PHOTO_VIEWER: 'Photo Viewer Shortcuts',
         ShortcutHelpContext.CULLING_EMPTY: 'EasyLoupe Shortcuts',
+        ShortcutHelpContext.CULLING_VIEW_NO_SCENES: ('Culling View Shortcuts'),
         ShortcutHelpContext.CULLING_VIEW: 'Culling View Shortcuts',
         ShortcutHelpContext.BROWSE: 'Browse View Shortcuts',
         ShortcutHelpContext.COMPARE_GRID: 'Compare Grid Shortcuts',
@@ -107,6 +109,9 @@ def shortcut_help_groups(
     groups = {
         ShortcutHelpContext.PHOTO_VIEWER: _photo_viewer_groups,
         ShortcutHelpContext.CULLING_EMPTY: _culling_empty_groups,
+        ShortcutHelpContext.CULLING_VIEW_NO_SCENES: (
+            _culling_view_no_scenes_groups
+        ),
         ShortcutHelpContext.CULLING_VIEW: _culling_view_groups,
         ShortcutHelpContext.BROWSE: _browse_groups,
         ShortcutHelpContext.COMPARE_GRID: _compare_grid_groups,
@@ -615,6 +620,49 @@ def _culling_empty_groups() -> tuple[ShortcutHelpGroup, ...]:
 
 def _culling_view_groups() -> tuple[ShortcutHelpGroup, ...]:
     return (
+        *_culling_view_base_groups(),
+        ShortcutHelpGroup(
+            'Scenes',
+            (
+                ShortcutHelpRow('Left / Right', 'Move within the scene strip'),
+                ShortcutHelpRow(
+                    'Shift+Left / Shift+Right',
+                    'Extend the in-scene selection',
+                ),
+                ShortcutHelpRow(
+                    'Shift+Up / Shift+Down',
+                    'Extend selection across scene-stack rows',
+                ),
+                ShortcutHelpRow(
+                    'Ctrl+Shift+M',
+                    'Merge selected photos into a scene',
+                ),
+            ),
+        ),
+        _inspection_group(),
+        HELP_DISMISSAL_GROUP,
+    )
+
+
+def _culling_view_no_scenes_groups() -> tuple[ShortcutHelpGroup, ...]:
+    return (
+        *_culling_view_base_groups(),
+        ShortcutHelpGroup(
+            'Scenes',
+            (
+                ShortcutHelpRow(
+                    'Ctrl+Shift+M',
+                    'Merge selected photos into a scene',
+                ),
+            ),
+        ),
+        _inspection_group(),
+        HELP_DISMISSAL_GROUP,
+    )
+
+
+def _culling_view_base_groups() -> tuple[ShortcutHelpGroup, ...]:
+    return (
         ShortcutHelpGroup(
             'Library',
             (
@@ -636,26 +684,6 @@ def _culling_view_groups() -> tuple[ShortcutHelpGroup, ...]:
             ),
         ),
         _metadata_group(),
-        ShortcutHelpGroup(
-            'Scenes',
-            (
-                ShortcutHelpRow('Left / Right', 'Move within the scene strip'),
-                ShortcutHelpRow(
-                    'Shift+Left / Shift+Right',
-                    'Extend the in-scene selection',
-                ),
-                ShortcutHelpRow(
-                    'Shift+Up / Shift+Down',
-                    'Extend selection across scene-stack rows',
-                ),
-                ShortcutHelpRow(
-                    'Ctrl+Shift+M',
-                    'Merge selected photos into a scene',
-                ),
-            ),
-        ),
-        _inspection_group(),
-        HELP_DISMISSAL_GROUP,
     )
 
 
