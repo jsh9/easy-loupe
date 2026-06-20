@@ -185,6 +185,7 @@ class ShortcutHelpOverlay(QWidget):
         self._column_count = 0
         self._rendered_row_count = 0
         self._font_scale = MAX_FONT_SCALE
+        self._applied_scale_metrics = self._scale_metrics(MAX_FONT_SCALE)
         self.hide()
 
         root_layout = QVBoxLayout(self)
@@ -320,9 +321,14 @@ class ShortcutHelpOverlay(QWidget):
             height,
             column_count,
         )
-        scale_changed = font_scale != self._font_scale
+        # Qt styles and layout constraints use integer pixel values. Compare
+        # those rendered metrics so sub-pixel scale drift during live resize
+        # does not rebuild the entire shortcut grid for no visible change.
+        scale_metrics = self._scale_metrics(font_scale)
+        scale_changed = scale_metrics != self._applied_scale_metrics
         if scale_changed:
             self._font_scale = font_scale
+            self._applied_scale_metrics = scale_metrics
             self._apply_style()
 
         if column_count != self._column_count or scale_changed:
@@ -488,6 +494,27 @@ class ShortcutHelpOverlay(QWidget):
     def _scaled_size(self, size: int) -> int:
         return max(MIN_SCALED_SIZE_PX, int(size * self._font_scale))
 
+    @staticmethod
+    def _scaled_size_for_scale(size: int, scale: float) -> int:
+        return max(MIN_SCALED_SIZE_PX, int(size * scale))
+
+    @classmethod
+    def _scale_metrics(cls, scale: float) -> tuple[int, ...]:
+        """
+        Return rendered integer sizes affected by ``scale``.
+
+        These metrics are the values that can actually change label styling or
+        table geometry, so they are the stable comparison key for resize work.
+        """
+        return (
+            cls._scaled_size_for_scale(TITLE_FONT_SIZE_PX, scale),
+            cls._scaled_size_for_scale(GROUP_TITLE_FONT_SIZE_PX, scale),
+            cls._scaled_size_for_scale(TABLE_TEXT_FONT_SIZE_PX, scale),
+            cls._scaled_size_for_scale(SHORTCUT_COLUMN_WIDTH_PX, scale),
+            cls._scaled_size_for_scale(CELL_HORIZONTAL_PADDING_PX, scale),
+            cls._scaled_size_for_scale(CELL_VERTICAL_PADDING_PX, scale),
+        )
+
     def _title_font_size(self) -> int:
         return self._scaled_size(TITLE_FONT_SIZE_PX)
 
@@ -650,6 +677,10 @@ def _culling_view_no_scenes_groups() -> tuple[ShortcutHelpGroup, ...]:
         ShortcutHelpGroup(
             'Scenes',
             (
+                ShortcutHelpRow(
+                    'Shift+Up / Shift+Down',
+                    'Extend the thumbnail selection',
+                ),
                 ShortcutHelpRow(
                     'Ctrl+Shift+M',
                     'Merge selected photos into a scene',

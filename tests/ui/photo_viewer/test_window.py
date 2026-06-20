@@ -310,24 +310,30 @@ def test_photo_viewer_message_overlays_are_framed_and_readable(
         monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
-    Verify viewer messages use visible framed overlays.
+    Verify viewer messages use framed overlays and modal Help state.
 
     The standalone viewer owns these overlays now; without local styling,
     hydration and access messages regress to barely visible bare labels over
-    the photo.
+    the photo. Progress is modal, so Help must also be disabled instead of
+    advertising a command that the guarded toggle path will ignore.
     """
     create_jpeg(tmp_path / 'A.JPG', 'green')
-    _app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+    app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
 
     window._show_progress('Loading folder...', 42)
 
     assert window.progress_overlay.isVisible() is True
+    assert window.shortcut_help_action.isEnabled() is False
+    window.shortcut_help_action.trigger()
+    app.processEvents()
+    assert window.shortcut_help_overlay.isHidden() is True
     assert 'rgba(20, 24, 29, 140)' in window.progress_overlay.styleSheet()
     assert 'QFrame#progressPanel' in window.progress_panel.styleSheet()
     assert 'border-radius: 12px' in window.progress_panel.styleSheet()
     assert 'font-size: 16px' in window.overlay_message_label.styleSheet()
 
     window._hide_progress()
+    assert window.shortcut_help_action.isEnabled() is True
     window._show_transient_message('Grant folder access')
 
     assert window.transient_message_overlay.isVisible() is True

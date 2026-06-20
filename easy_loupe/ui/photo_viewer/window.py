@@ -331,6 +331,22 @@ class PhotoViewerWindow(QMainWindow):
         self.addAction(self.shortcut_help_action)
         self.help_menu.addAction(self.shortcut_help_action)
 
+    def _refresh_shortcut_help_action(self) -> None:
+        """
+        Keep Help menu state aligned with modal progress UI.
+
+        Progress owns the viewer while hydration handoff is waiting, so the
+        Help action is disabled rather than advertising a command that the
+        guarded toggle path must ignore.
+        """
+        if not hasattr(self, 'shortcut_help_action'):
+            return
+
+        help_already_visible = self._shortcut_help_modal_active()
+        self.shortcut_help_action.setEnabled(
+            help_already_visible or not self.progress_overlay.isVisible()
+        )
+
     def _apply_overlay_style(self) -> None:
         """Apply readable fixed styling to photo-viewer overlays."""
         self.overlay_message_label.setStyleSheet(
@@ -514,6 +530,7 @@ class PhotoViewerWindow(QMainWindow):
         self.shortcut_help_overlay.toggle_context(
             ShortcutHelpContext.PHOTO_VIEWER
         )
+        self._refresh_shortcut_help_action()
 
     def _handle_escape_shortcut(self) -> None:
         if self.shortcut_help_overlay.isVisible():
@@ -1387,13 +1404,16 @@ class PhotoViewerWindow(QMainWindow):
             progress,
             max_value=max_value,
         )
+        self._refresh_shortcut_help_action()
 
     def _show_progress_snapshot(self, snapshot: ProgressSnapshot) -> None:
         self.exif_overlay.hide()
         self.progress_overlay_controller.show_snapshot(snapshot)
+        self._refresh_shortcut_help_action()
 
     def _hide_progress(self) -> None:
         self.progress_overlay_controller.hide()
+        self._refresh_shortcut_help_action()
         self._refresh_info_overlay()
 
     def _show_transient_message(

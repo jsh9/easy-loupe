@@ -65,9 +65,15 @@ def test_shortcut_help_catalog_covers_each_context() -> None:
     assert not any(
         row.shortcut == 'Shift+Left / Shift+Right' for row in no_scene_rows
     )
-    assert not any(
-        row.shortcut == 'Shift+Up / Shift+Down' for row in no_scene_rows
-    )
+    # Shift+Up/Down exists before and after scene detection, but it targets
+    # different navigation lists. Lock both descriptions so the context-aware
+    # help copy follows the active selection model.
+    no_scene_shift_rows = [
+        row.description
+        for row in no_scene_rows
+        if row.shortcut == 'Shift+Up / Shift+Down'
+    ]
+    assert no_scene_shift_rows == ['Extend the thumbnail selection']
 
     culling_rows = [
         row
@@ -78,7 +84,12 @@ def test_shortcut_help_catalog_covers_each_context() -> None:
     assert any(
         row.shortcut == 'Shift+Left / Shift+Right' for row in culling_rows
     )
-    assert any(row.shortcut == 'Shift+Up / Shift+Down' for row in culling_rows)
+    culling_shift_rows = [
+        row.description
+        for row in culling_rows
+        if row.shortcut == 'Shift+Up / Shift+Down'
+    ]
+    assert culling_shift_rows == ['Extend selection across scene-stack rows']
 
     browse_rows = [
         row
@@ -285,12 +296,16 @@ def test_shortcut_help_overlay_renders_context_and_tracks_geometry() -> None:
     app.processEvents()
 
 
-def test_shortcut_help_overlay_top_aligns_and_scales_fonts() -> None:
+def test_shortcut_help_overlay_top_aligns_and_scales_fonts(
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """
-    Verify multi-column help tables shrink text when columns are narrow.
+    Verify multi-column help tables shrink and resize without churn.
 
     The overlay uses intentionally large text, so this guards against future
-    scaling changes that keep full-size text in cramped table columns.
+    scaling changes that keep full-size text in cramped table columns. Resize
+    events can also carry sub-pixel scale changes, so the test guards against
+    rebuilding the grid when rendered integer metrics have not changed.
     """
     app = QApplication.instance() or QApplication([])
     parent = QWidget()
@@ -334,6 +349,27 @@ def test_shortcut_help_overlay_top_aligns_and_scales_fonts() -> None:
         ShortcutHelpOverlay._font_scale_for_size(100, 100, 1)
         == shortcut_help_module.MIN_FONT_SCALE
     )
+
+    # Count renders after the initial layout. A resize that keeps the same
+    # integer font and cell metrics should update geometry only; a column-count
+    # change still needs a full grid rebuild.
+    render_call_count = 0
+    original_render_groups = overlay._render_groups
+
+    def count_render_groups(*args: object, **kwargs: object) -> None:
+        nonlocal render_call_count
+        render_call_count += 1
+        original_render_groups(*args, **kwargs)
+
+    monkeypatch.setattr(overlay, '_render_groups', count_render_groups)
+    parent.resize(1002, 800)
+    overlay.update_geometry()
+    assert render_call_count == 0
+
+    parent.resize(1400, 800)
+    overlay.update_geometry()
+    assert render_call_count == 1
+    assert overlay._column_count == 3
 
     parent.close()
     app.processEvents()
