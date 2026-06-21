@@ -120,16 +120,11 @@ class MainWindowPresentationMixin:
     ) -> None:
         self.detect_button.setEnabled(photo_actions_enabled)
         self.organize_button.setEnabled(photo_actions_enabled)
-        if hasattr(self, 'detect_action'):
-            self.detect_action.setEnabled(photo_actions_enabled)
+        self._refresh_file_actions(photo_actions_enabled=photo_actions_enabled)
 
-        if hasattr(self, 'organize_action'):
-            self.organize_action.setEnabled(photo_actions_enabled)
-
-        if hasattr(self, 'merge_scene_action'):
-            self.merge_scene_action.setEnabled(
-                photo_actions_enabled and not self._compare_mode
-            )
+        self._refresh_merge_scene_action(
+            photo_actions_enabled=photo_actions_enabled
+        )
 
         if hasattr(self, 'undo_metadata_action'):
             self._refresh_metadata_history_actions()

@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [1.2.4] - 2026-06-21
+
+- Added
+
+  - Pressing `?`, or choosing `Help > Keyboard Shortcuts`, now shows a
+    context-aware keyboard shortcut overlay in the standalone photo viewer,
+    culling view, browse view, and compare modes. While the overlay is open,
+    keyboard shortcuts, focused navigation-list keys, delayed focus restores,
+    and guarded menu actions wait until the overlay is closed.
+
 - Fixed
 
   - Closing the last culling or standalone photo-viewer window while hidden

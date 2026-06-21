@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QListView,
     QListWidget,
     QMenu,
+    QMenuBar,
     QMessageBox,
     QProgressBar,
     QPushButton,
@@ -46,6 +47,10 @@ from easy_loupe.ui.identity import APP_NAME, APP_VERSION
 from easy_loupe.ui.progress_overlay import (
     ProgressOverlayController,
     build_progress_overlay,
+)
+from easy_loupe.ui.shortcut_help import (
+    ShortcutHelpContext,
+    ShortcutHelpOverlay,
 )
 from easy_loupe.ui.theme import NO_METADATA_TEXT
 from easy_loupe.ui.viewers.compare_photo_viewer import (
@@ -108,8 +113,10 @@ class MainWindowBuildMixin:
         self._build_view_mode_ui(root)
         self._build_progress_overlay()
         self._build_transient_message_overlay()
+        self._build_shortcut_help_overlay()
         self._update_progress_overlay_geometry()
         self._update_transient_message_overlay_geometry()
+        self._update_shortcut_help_overlay_geometry()
         self._apply_theme()
 
     def _build_top_bar(self: MainWindow, top_bar: QHBoxLayout) -> None:
@@ -350,6 +357,9 @@ class MainWindowBuildMixin:
             self._hide_transient_message
         )
 
+    def _build_shortcut_help_overlay(self: MainWindow) -> None:
+        self.shortcut_help_overlay = ShortcutHelpOverlay(self.central_widget)
+
     def _build_menu(self: MainWindow) -> None:
         menu_bar = self.menuBar()
 
@@ -357,7 +367,9 @@ class MainWindowBuildMixin:
         self.open_action = QAction('Open Folder', self)
         self.open_action.setShortcut(QKeySequence('Ctrl+O'))
         self.open_action.setShortcutContext(Qt.WindowShortcut)
-        self.open_action.triggered.connect(self.choose_folder)
+        self.open_action.triggered.connect(
+            lambda *_: self._run_workspace_action(self.choose_folder)
+        )
         self.addAction(self.open_action)
         file_menu.addAction(self.open_action)
 
@@ -365,7 +377,9 @@ class MainWindowBuildMixin:
         self.detect_action.setShortcut(QKeySequence('Ctrl+D'))
         self.detect_action.setShortcutContext(Qt.WindowShortcut)
         self.detect_action.setEnabled(False)
-        self.detect_action.triggered.connect(self.detect_scenes)
+        self.detect_action.triggered.connect(
+            lambda *_: self._run_workspace_action(self.detect_scenes)
+        )
         self.addAction(self.detect_action)
         file_menu.addAction(self.detect_action)
 
@@ -373,7 +387,9 @@ class MainWindowBuildMixin:
         self.organize_action.setShortcut(QKeySequence('Ctrl+Shift+E'))
         self.organize_action.setShortcutContext(Qt.WindowShortcut)
         self.organize_action.setEnabled(False)
-        self.organize_action.triggered.connect(self.open_organizer_dialog)
+        self.organize_action.triggered.connect(
+            lambda *_: self._run_workspace_action(self.open_organizer_dialog)
+        )
         self.addAction(self.organize_action)
         file_menu.addAction(self.organize_action)
 
@@ -383,7 +399,7 @@ class MainWindowBuildMixin:
         self.undo_metadata_action.setShortcutContext(Qt.WindowShortcut)
         self.undo_metadata_action.setEnabled(False)
         self.undo_metadata_action.triggered.connect(
-            lambda *_: None if self._busy else self._undo_metadata_edit()
+            lambda *_: self._run_workspace_action(self._undo_metadata_edit)
         )
         self.addAction(self.undo_metadata_action)
         self.history_menu.addAction(self.undo_metadata_action)
@@ -393,7 +409,7 @@ class MainWindowBuildMixin:
         self.redo_metadata_action.setShortcutContext(Qt.WindowShortcut)
         self.redo_metadata_action.setEnabled(False)
         self.redo_metadata_action.triggered.connect(
-            lambda *_: None if self._busy else self._redo_metadata_edit()
+            lambda *_: self._run_workspace_action(self._redo_metadata_edit)
         )
         self.addAction(self.redo_metadata_action)
         self.history_menu.addAction(self.redo_metadata_action)
@@ -409,10 +425,8 @@ class MainWindowBuildMixin:
         self.merge_scene_action.setShortcutContext(Qt.WindowShortcut)
         self.merge_scene_action.setEnabled(False)
         self.merge_scene_action.triggered.connect(
-            lambda *_: (
-                None
-                if self._busy
-                else self._merge_selected_photos_into_scene()
+            lambda *_: self._run_workspace_action(
+                self._merge_selected_photos_into_scene
             )
         )
         self.addAction(self.merge_scene_action)
@@ -502,7 +516,22 @@ class MainWindowBuildMixin:
             ),
         }
 
+        self._build_help_menu(menu_bar)
+
+    def _build_help_menu(self: MainWindow, menu_bar: QMenuBar) -> None:
         self.help_menu = menu_bar.addMenu('&Help')
+        self.shortcut_help_action = QAction('Keyboard Shortcuts', self)
+        self.shortcut_help_action.setShortcut(QKeySequence('?'))
+        self.shortcut_help_action.setShortcutContext(Qt.WindowShortcut)
+        # The QAction owns ``?`` so menu and keyboard activation share one
+        # path; a parallel QShortcut would make Qt treat the key as ambiguous.
+        self.shortcut_help_action.triggered.connect(
+            lambda *_: self._toggle_shortcut_help()
+        )
+        self.addAction(self.shortcut_help_action)
+        self.help_menu.addAction(self.shortcut_help_action)
+        self.help_menu.addSeparator()
+
         self.about_action = QAction(f'About {APP_NAME}', self)
         self.about_action.setMenuRole(QAction.AboutRole)
         self.about_action.triggered.connect(self._show_about_dialog)
@@ -518,7 +547,7 @@ class MainWindowBuildMixin:
             action.setCheckable(True)
             action.triggered.connect(
                 lambda *_args, selected_limit=limit: (
-                    self._set_compare_photo_limit(selected_limit, persist=True)
+                    self._run_compare_limit_action(selected_limit)
                 )
             )
             self.compare_limit_action_group.addAction(action)
@@ -818,6 +847,50 @@ class MainWindowBuildMixin:
             self.photo_load_recursively_checkbox.setChecked(normalized)
             self.photo_load_recursively_checkbox.blockSignals(False)
 
+    def _run_compare_limit_action(self: MainWindow, limit: object) -> None:
+        """
+        Run a compare-limit QAction through the shared modal gate.
+
+        The actions are normally disabled while shortcut help is visible, but
+        the guard keeps programmatic activation from bypassing the modal state.
+        """
+        if not self._run_workspace_action(
+            lambda: self._set_compare_photo_limit(limit, persist=True)
+        ):
+            self._check_compare_photo_limit_control(
+                self.compare_viewer.photo_limit
+            )
+
+    def _check_compare_photo_limit_control(
+            self: MainWindow, limit: object
+    ) -> None:
+        """
+        Sync the checked QAction for ``limit`` without re-triggering it.
+
+        Signal blocking keeps programmatic corrections from recursively
+        changing the compare grid while restoring one exclusive checked item.
+        """
+        normalized_limit = self.compare_viewer.normalized_photo_limit(limit)
+        action = self.compare_limit_actions.get(normalized_limit)
+        if action is None:
+            return
+
+        compare_limit_items = self.compare_limit_actions.items()
+        limit_checked = {
+            compare_limit: compare_action.isChecked()
+            for compare_limit, compare_action in compare_limit_items
+        }
+        if limit_checked == {
+            compare_limit: compare_limit == normalized_limit
+            for compare_limit in self.compare_limit_actions
+        }:
+            return
+
+        for compare_limit, compare_action in compare_limit_items:
+            compare_action.blockSignals(True)
+            compare_action.setChecked(compare_limit == normalized_limit)
+            compare_action.blockSignals(False)
+
     def _set_compare_photo_limit(
             self: MainWindow,
             limit: object,
@@ -825,9 +898,7 @@ class MainWindowBuildMixin:
             persist: bool,
     ) -> None:
         normalized_limit = self.compare_viewer.set_photo_limit(limit)
-        action = self.compare_limit_actions.get(normalized_limit)
-        if action is not None and not action.isChecked():
-            action.setChecked(True)
+        self._check_compare_photo_limit_control(normalized_limit)
 
         if persist:
             self._settings().setValue(
@@ -882,7 +953,9 @@ class MainWindowBuildMixin:
             'C', self._enter_compare_mode
         )
         self.exit_compare_shortcut = self._make_shortcut(
-            Qt.Key_Escape, self._handle_escape_shortcut
+            Qt.Key_Escape,
+            self._handle_escape_shortcut,
+            block_by_shortcut_help=False,
         )
         self._assignment_shortcuts = [
             self._make_shortcut(
@@ -924,26 +997,81 @@ class MainWindowBuildMixin:
             self: MainWindow,
             key: str | int,
             callback: Callable[[], None],
+            *,
+            block_by_shortcut_help: bool = True,
     ) -> QShortcut:
+        """Create a shortcut guarded by busy and shortcut-help modal state."""
         return make_window_shortcut(
             self,
             key,
             callback,
-            blocked=lambda: self._busy,
+            blocked=lambda: self._shortcut_blocked(
+                block_by_shortcut_help=block_by_shortcut_help
+            ),
         )
 
+    def _shortcut_help_modal_active(self: MainWindow) -> bool:
+        return (
+            hasattr(self, 'shortcut_help_overlay')
+            and self.shortcut_help_overlay.isVisible()
+        )
+
+    def _shortcut_blocked(
+            self: MainWindow,
+            *,
+            block_by_shortcut_help: bool = True,
+    ) -> bool:
+        """
+        Return whether a workspace shortcut should ignore activation.
+
+        The help overlay is visually modal but is not a Qt dialog, so normal
+        shortcuts must explicitly wait while it is visible.
+        """
+        return self._busy or (
+            block_by_shortcut_help and self._shortcut_help_modal_active()
+        )
+
+    def _run_workspace_action(
+            self: MainWindow,
+            callback: Callable[[], None],
+    ) -> bool:
+        """
+        Run a menu action only when the shortcut gates allow it.
+
+        QAction shortcuts bypass ``make_window_shortcut``, so menu-triggered
+        operations need the same modal guard as QShortcut-backed operations.
+        The return value lets checkable actions restore UI state when the modal
+        gate blocked their triggered slot.
+        """
+        if self._shortcut_blocked():
+            return False
+
+        callback()
+        return True
+
     def _update_mode_shortcuts(self: MainWindow) -> None:
+        shortcut_help_visible = self._shortcut_help_modal_active()
+        workspace_shortcuts_enabled = not shortcut_help_visible
         normal_view_shortcuts_enabled = (
-            not self._browse_mode and not self._compare_mode
+            workspace_shortcuts_enabled
+            and not self._browse_mode
+            and not self._compare_mode
         )
-        viewer_shortcuts_enabled = not self._browse_mode or self._compare_mode
+        viewer_shortcuts_enabled = workspace_shortcuts_enabled and (
+            not self._browse_mode or self._compare_mode
+        )
         self.split_mode_shortcut.setEnabled(
-            normal_view_shortcuts_enabled or self._compare_mode
+            normal_view_shortcuts_enabled
+            or (workspace_shortcuts_enabled and self._compare_mode)
         )
-        can_enter_browse = bool(self.library.photos)
+        can_enter_browse = workspace_shortcuts_enabled and bool(
+            self.library.photos
+        )
         self.browse_mode_shortcut.setEnabled(can_enter_browse)
         self.compare_mode_shortcut.setEnabled(
-            not self._compare_mode and bool(self.library.photos)
+            workspace_shortcuts_enabled
+            and not self._compare_mode
+            and bool(self.library.photos)
         )
         self.recenter_zoom_shortcut.setEnabled(
             normal_view_shortcuts_enabled and bool(self.library.photos)
@@ -951,9 +1079,13 @@ class MainWindowBuildMixin:
         self.reset_zoom_centers_shortcut.setEnabled(
             normal_view_shortcuts_enabled and bool(self.library.photos)
         )
-        self.info_overlay_shortcut.setEnabled(bool(self.library.photos))
+        self.info_overlay_shortcut.setEnabled(
+            workspace_shortcuts_enabled and bool(self.library.photos)
+        )
         self.exit_compare_shortcut.setEnabled(
-            self._compare_mode or self.transient_message_overlay.isVisible()
+            self._compare_mode
+            or self.transient_message_overlay.isVisible()
+            or shortcut_help_visible
         )
         for shortcut in self._viewer_shortcuts:
             shortcut.setEnabled(viewer_shortcuts_enabled)
@@ -962,9 +1094,15 @@ class MainWindowBuildMixin:
             shortcut.setEnabled(normal_view_shortcuts_enabled)
 
         for shortcut in self._compare_nav_shortcuts:
-            shortcut.setEnabled(self._compare_mode)
+            shortcut.setEnabled(
+                workspace_shortcuts_enabled and self._compare_mode
+            )
 
+        self._refresh_file_actions()
+        self._refresh_merge_scene_action()
+        self._refresh_compare_limit_controls()
         self._refresh_assignment_controls()
+        self._refresh_metadata_history_actions()
 
     def _handle_space_shortcut(self: MainWindow) -> None:
         if self._compare_mode:
@@ -1015,6 +1153,10 @@ class MainWindowBuildMixin:
         self.viewer.reset_manual_view_centers()
 
     def _handle_escape_shortcut(self: MainWindow) -> None:
+        if self.shortcut_help_overlay.isVisible():
+            self._hide_shortcut_help()
+            return
+
         if self.transient_message_overlay.isVisible():
             self._hide_transient_message()
             return
@@ -1068,6 +1210,40 @@ class MainWindowBuildMixin:
         """Toggle the EXIF and histogram overlay preference."""
         self._info_overlay_enabled = not self._info_overlay_enabled
         self._refresh_info_overlay()
+
+    def _shortcut_help_context(self: MainWindow) -> ShortcutHelpContext:
+        """Return the shortcut-help context for the current culling state."""
+        if not self.library.photos:
+            return ShortcutHelpContext.CULLING_EMPTY
+
+        if self._compare_mode:
+            if self.compare_viewer.is_selected_photo_view():
+                return ShortcutHelpContext.COMPARE_SELECTED_PHOTO
+
+            return ShortcutHelpContext.COMPARE_GRID
+
+        if self._browse_mode:
+            return ShortcutHelpContext.BROWSE
+
+        if not self.library.scene_detection_done:
+            return ShortcutHelpContext.CULLING_VIEW_NO_SCENES
+
+        return ShortcutHelpContext.CULLING_VIEW
+
+    def _toggle_shortcut_help(self: MainWindow) -> None:
+        # Busy workflows remain modal. Allow closing already-visible help, but
+        # do not open a new help pane over worker/progress-driven UI state.
+        if self._busy and not self._shortcut_help_modal_active():
+            return
+
+        self.shortcut_help_overlay.toggle_context(
+            self._shortcut_help_context()
+        )
+        self._update_mode_shortcuts()
+
+    def _hide_shortcut_help(self: MainWindow) -> None:
+        self.shortcut_help_overlay.hide()
+        self._update_mode_shortcuts()
 
     def _refresh_info_overlay(
             self: MainWindow, *, allow_defer: bool = True
@@ -1153,7 +1329,9 @@ class MainWindowBuildMixin:
         elif display_shortcut is not None:
             action.setText(f'{label}\t{display_shortcut}')
 
-        action.triggered.connect(lambda *_: None if self._busy else callback())
+        action.triggered.connect(
+            lambda *_: self._run_workspace_action(callback)
+        )
         self.addAction(action)
         menu.addAction(action)
         self._assignment_actions.append(action)
@@ -1161,12 +1339,98 @@ class MainWindowBuildMixin:
 
     def _refresh_assignment_controls(self: MainWindow) -> None:
         """Enable assignment controls only in culling-capable modes."""
-        enabled = not self._busy
+        enabled = not self._busy and not self._shortcut_help_modal_active()
         for action in self._assignment_actions:
             action.setEnabled(enabled)
 
         for shortcut in self._assignment_shortcuts:
             shortcut.setEnabled(enabled)
+
+    def _refresh_compare_limit_controls(self: MainWindow) -> None:
+        """
+        Disable compare-limit choices while modal UI owns the workspace.
+
+        Checkable QAction menu items can show a clicked limit before the grid
+        changes, so disabling them keeps the visible menu state aligned with
+        the modal shortcut-help guard.
+        """
+        enabled = not self._busy and not self._shortcut_help_modal_active()
+        for action in self.compare_limit_actions.values():
+            action.setEnabled(enabled)
+
+    def _refresh_file_actions(
+            self: MainWindow,
+            *,
+            open_enabled: bool | None = None,
+            photo_actions_enabled: bool | None = None,
+    ) -> None:
+        """
+        Refresh File menu actions from their action-specific eligibility.
+
+        The top-bar buttons keep their existing interaction rules; these
+        QAction entries also layer in menu, busy, and shortcut-help modal state
+        so the menu does not advertise commands the shared guard will block.
+        Open Folder is not photo-dependent, so it has a separate
+        caller-supplied gate from Detect Scenes and Organize Photos.
+        """
+        if open_enabled is None:
+            open_enabled = True
+
+        if photo_actions_enabled is None:
+            photo_actions_enabled = (
+                bool(self.library.photos)
+                and not self._background_task_active()
+            )
+
+        menu_actions_enabled = (
+            self.menuBar().isEnabled()
+            and not self._busy
+            and not self._shortcut_help_modal_active()
+        )
+        if hasattr(self, 'open_action'):
+            self.open_action.setEnabled(open_enabled and menu_actions_enabled)
+
+        if hasattr(self, 'detect_action'):
+            self.detect_action.setEnabled(
+                photo_actions_enabled and menu_actions_enabled
+            )
+
+        if hasattr(self, 'organize_action'):
+            self.organize_action.setEnabled(
+                photo_actions_enabled and menu_actions_enabled
+            )
+
+    def _refresh_merge_scene_action(
+            self: MainWindow,
+            *,
+            photo_actions_enabled: bool | None = None,
+    ) -> None:
+        """
+        Refresh the scene-merge menu action from workspace modal state.
+
+        The action already has a defensive slot guard, but disabling it keeps
+        the menu from advertising a command that shortcut help will block.
+        Callers pass their local photo/background-work eligibility; this helper
+        layers global menu, busy, compare, and shortcut-help gates so separate
+        refresh paths do not disagree about the visible QAction state.
+        """
+        if not hasattr(self, 'merge_scene_action'):
+            return
+
+        if photo_actions_enabled is None:
+            photo_actions_enabled = (
+                bool(self.library.photos)
+                and not self._background_task_active()
+            )
+
+        enabled = (
+            photo_actions_enabled
+            and self.menuBar().isEnabled()
+            and not self._busy
+            and not self._compare_mode
+            and not self._shortcut_help_modal_active()
+        )
+        self.merge_scene_action.setEnabled(enabled)
 
     def _update_progress_overlay_geometry(self: MainWindow) -> None:
         """Match the progress overlay to the current central widget bounds."""
@@ -1175,6 +1439,10 @@ class MainWindowBuildMixin:
     def _update_transient_message_overlay_geometry(self: MainWindow) -> None:
         """Match the transient message overlay to the central widget bounds."""
         self.transient_message_overlay.setGeometry(self.central_widget.rect())
+
+    def _update_shortcut_help_overlay_geometry(self: MainWindow) -> None:
+        """Match the shortcut-help overlay to the central widget bounds."""
+        self.shortcut_help_overlay.update_geometry()
 
     def _show_transient_message(
             self: MainWindow,
@@ -1204,6 +1472,9 @@ class MainWindowBuildMixin:
 
         if hasattr(self, 'transient_message_overlay'):
             self._update_transient_message_overlay_geometry()
+
+        if hasattr(self, 'shortcut_help_overlay'):
+            self._update_shortcut_help_overlay_geometry()
 
         if hasattr(self, 'exif_overlay'):
             self._update_info_overlay_geometry()

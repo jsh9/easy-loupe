@@ -1283,7 +1283,11 @@ class MainWindowWorkflowMixin:
         )
 
     def _refresh_metadata_history_actions(self: MainWindow) -> None:
-        enabled = not self._busy and self.menuBar().isEnabled()
+        enabled = (
+            not self._busy
+            and self.menuBar().isEnabled()
+            and not self._shortcut_help_modal_active()
+        )
         if hasattr(self, 'undo_metadata_action'):
             self.undo_metadata_action.setEnabled(
                 enabled and bool(self._metadata_undo_stack)
@@ -1294,12 +1298,9 @@ class MainWindowWorkflowMixin:
                 enabled and bool(self._metadata_redo_stack)
             )
 
-        if hasattr(self, 'merge_scene_action'):
-            self.merge_scene_action.setEnabled(
-                enabled
-                and bool(self.library.photos)
-                and not self._compare_mode
-            )
+        self._refresh_merge_scene_action(
+            photo_actions_enabled=enabled and bool(self.library.photos)
+        )
 
     def _after_metadata_change(self: MainWindow) -> None:
         scroll_states = {
@@ -1381,19 +1382,14 @@ class MainWindowWorkflowMixin:
         self.scene_list.setEnabled(enabled)
         self.compare_viewer.setEnabled(enabled)
         self.menuBar().setEnabled(enabled)
-        if hasattr(self, 'open_action'):
-            self.open_action.setEnabled(enabled)
+        self._refresh_file_actions(
+            open_enabled=enabled,
+            photo_actions_enabled=photo_actions_enabled,
+        )
 
-        if hasattr(self, 'detect_action'):
-            self.detect_action.setEnabled(photo_actions_enabled)
-
-        if hasattr(self, 'organize_action'):
-            self.organize_action.setEnabled(photo_actions_enabled)
-
-        if hasattr(self, 'merge_scene_action'):
-            self.merge_scene_action.setEnabled(
-                photo_actions_enabled and not self._compare_mode
-            )
+        self._refresh_merge_scene_action(
+            photo_actions_enabled=photo_actions_enabled
+        )
 
         for action in self._assignment_actions:
             action.setEnabled(enabled)

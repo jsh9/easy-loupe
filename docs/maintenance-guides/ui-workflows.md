@@ -363,6 +363,7 @@ Current shortcut coverage in code includes:
 - `Ctrl+D`: detect scenes
 - `Ctrl+Shift+E`: open the organizer/XMP dialog
 - `Ctrl+Shift+M`: merge selected photos into a scene
+- `?`: show or hide the context-aware shortcut help overlay
 - `1`-`5`, `0`: rating changes
 - `6`-`9`: red/yellow/green/blue color labels
 - `` ` ``: clear color label
@@ -390,6 +391,21 @@ Current shortcut coverage in code includes:
 - left/right arrows: scene navigation in view mode; active-pane navigation in
   compare mode
 - up/down arrows: active-pane navigation in compare mode
+
+The shortcut help overlay is shared by the culling workspace and standalone
+photo viewer, and is discoverable from `Help > Keyboard Shortcuts` as well as
+`?`. It chooses content from the current view state: standalone photo viewer,
+empty culling window, normal culling view before scenes exist, normal culling
+view with scene-strip shortcuts, browse view, compare grid, or selected-photo
+compare view. While the overlay is visible, normal workspace keyboard shortcuts
+and focused navigation-list key events do not mutate the view behind it.
+Delayed active-navigation and thumbnail-strip focus restores must also wait
+while the overlay is visible, because they can otherwise return keyboard focus
+to a list after help has opened. File actions, compare-limit choices, History
+undo/redo actions, and the scene-merge action are disabled while the overlay is
+open so menu state cannot drift from the guarded workspace state. Pressing
+`Esc` closes the shortcut help overlay before transient-message dismissal or
+compare-mode Esc behavior.
 
 Keyboard shortcuts are part of the product behavior, not incidental
 implementation.
@@ -432,6 +448,11 @@ while their worker code is still running.
 - Verify the `Show AF point` top-bar checkbox default, shortcut, and
   propagation to the single and split viewer panes when viewer behavior
   changes.
+- Verify `?` and `Help > Keyboard Shortcuts` open the context-aware shortcut
+  help overlay for the active view, verify normal shortcuts are blocked while
+  it is open, verify real key presses on focused thumbnail, browse, and scene
+  lists are blocked, and verify `Esc` closes that overlay before any other Esc
+  behavior.
 - Verify AF point marker visibility in fit view, manual/focus zoom, and both
   split-view panes when marker behavior changes.
 - Verify the `I` info overlay toggles only in eligible normal view state,

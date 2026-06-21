@@ -17,7 +17,13 @@ from PySide6.QtCore import (
     Signal,
     Slot,
 )
-from PySide6.QtGui import QCloseEvent, QPixmap, QShortcut
+from PySide6.QtGui import (
+    QAction,
+    QCloseEvent,
+    QKeySequence,
+    QPixmap,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
@@ -53,6 +59,10 @@ from easy_loupe.ui.photo_viewer.workers import (
 from easy_loupe.ui.progress_overlay import (
     ProgressOverlayController,
     build_progress_overlay,
+)
+from easy_loupe.ui.shortcut_help import (
+    ShortcutHelpContext,
+    ShortcutHelpOverlay,
 )
 from easy_loupe.ui.threading import (
     ThreadSlot,
@@ -241,6 +251,7 @@ class PhotoViewerWindow(QMainWindow):
         self.setWindowIcon(easy_loupe_icon())
         self.resize(1400, 900)
         self._build_ui()
+        self._build_menu()
         self._build_shortcuts()
         QTimer.singleShot(0, lambda: self.open_file(self._startup_file))
 
@@ -275,6 +286,7 @@ class PhotoViewerWindow(QMainWindow):
         self.exif_overlay.hide()
         self._build_progress_overlay()
         self._build_transient_message_overlay()
+        self._build_shortcut_help_overlay()
         self._apply_overlay_style()
         self.viewer_stack_widget.installEventFilter(self)
 
@@ -301,6 +313,38 @@ class PhotoViewerWindow(QMainWindow):
         self.transient_message_timer = overlay.timer
         self.transient_message_timer.timeout.connect(
             self._hide_transient_message
+        )
+
+    def _build_shortcut_help_overlay(self) -> None:
+        self.shortcut_help_overlay = ShortcutHelpOverlay(self.central_widget)
+
+    def _build_menu(self) -> None:
+        self.help_menu = self.menuBar().addMenu('&Help')
+        self.shortcut_help_action = QAction('Keyboard Shortcuts', self)
+        self.shortcut_help_action.setShortcut(QKeySequence('?'))
+        self.shortcut_help_action.setShortcutContext(Qt.WindowShortcut)
+        # The QAction owns ``?`` so menu and keyboard activation share one
+        # path; a parallel QShortcut would make Qt treat the key as ambiguous.
+        self.shortcut_help_action.triggered.connect(
+            lambda *_: self._toggle_shortcut_help()
+        )
+        self.addAction(self.shortcut_help_action)
+        self.help_menu.addAction(self.shortcut_help_action)
+
+    def _refresh_shortcut_help_action(self) -> None:
+        """
+        Keep Help menu state aligned with modal progress UI.
+
+        Progress owns the viewer while hydration handoff is waiting, so the
+        Help action is disabled rather than advertising a command that the
+        guarded toggle path must ignore.
+        """
+        if not hasattr(self, 'shortcut_help_action'):
+            return
+
+        help_already_visible = self._shortcut_help_modal_active()
+        self.shortcut_help_action.setEnabled(
+            help_already_visible or not self.progress_overlay.isVisible()
         )
 
     def _apply_overlay_style(self) -> None:
@@ -392,7 +436,9 @@ class PhotoViewerWindow(QMainWindow):
             'I', self._toggle_info_overlay
         )
         self.dismiss_message_shortcut = self._make_shortcut(
-            Qt.Key_Escape, self._hide_transient_message
+            Qt.Key_Escape,
+            self._handle_escape_shortcut,
+            block_by_shortcut_help=False,
         )
         self._viewer_shortcuts = build_viewer_shortcuts(
             self._make_shortcut,
@@ -419,15 +465,38 @@ class PhotoViewerWindow(QMainWindow):
             )
 
     def _make_shortcut(
-            self, key: str | int, callback: Callable[[], None]
+            self,
+            key: str | int,
+            callback: Callable[[], None],
+            *,
+            block_by_shortcut_help: bool = True,
     ) -> QShortcut:
-        # Treat the progress overlay as modal: background hydration/close
-        # states should not accept navigation or viewer mutations.
+        """Create a shortcut guarded by viewer modal overlay state."""
+        # Progress and shortcut-help overlays are visually modal but are not Qt
+        # dialogs, so navigation and inspection shortcuts must opt out here.
         return make_window_shortcut(
             self,
             key,
             callback,
-            blocked=self.progress_overlay.isVisible,
+            blocked=lambda: self._shortcut_blocked(
+                block_by_shortcut_help=block_by_shortcut_help
+            ),
+        )
+
+    def _shortcut_help_modal_active(self) -> bool:
+        return (
+            hasattr(self, 'shortcut_help_overlay')
+            and self.shortcut_help_overlay.isVisible()
+        )
+
+    def _shortcut_blocked(
+            self,
+            *,
+            block_by_shortcut_help: bool = True,
+    ) -> bool:
+        """Return whether a standalone-viewer shortcut should wait."""
+        return self.progress_overlay.isVisible() or (
+            block_by_shortcut_help and self._shortcut_help_modal_active()
         )
 
     def _keyboard_pan_by(self, x_direction: int, y_direction: int) -> None:
@@ -448,6 +517,27 @@ class PhotoViewerWindow(QMainWindow):
             return
 
         self.viewer.reset_manual_view_centers()
+
+    def _toggle_shortcut_help(self) -> None:
+        # Progress work remains modal. Allow closing already-visible help, but
+        # do not open a new help pane over hydration/close progress UI.
+        if (
+            self.progress_overlay.isVisible()
+            and not self._shortcut_help_modal_active()
+        ):
+            return
+
+        self.shortcut_help_overlay.toggle_context(
+            ShortcutHelpContext.PHOTO_VIEWER
+        )
+        self._refresh_shortcut_help_action()
+
+    def _handle_escape_shortcut(self) -> None:
+        if self.shortcut_help_overlay.isVisible():
+            self.shortcut_help_overlay.hide()
+            return
+
+        self._hide_transient_message()
 
     def open_file(self, file_path: object) -> None:
         """Open a photo file into the lightweight viewer state."""
@@ -1314,13 +1404,16 @@ class PhotoViewerWindow(QMainWindow):
             progress,
             max_value=max_value,
         )
+        self._refresh_shortcut_help_action()
 
     def _show_progress_snapshot(self, snapshot: ProgressSnapshot) -> None:
         self.exif_overlay.hide()
         self.progress_overlay_controller.show_snapshot(snapshot)
+        self._refresh_shortcut_help_action()
 
     def _hide_progress(self) -> None:
         self.progress_overlay_controller.hide()
+        self._refresh_shortcut_help_action()
         self._refresh_info_overlay()
 
     def _show_transient_message(
@@ -1346,11 +1439,15 @@ class PhotoViewerWindow(QMainWindow):
     def _update_transient_message_overlay_geometry(self) -> None:
         self.transient_message_overlay.setGeometry(self.central_widget.rect())
 
+    def _update_shortcut_help_overlay_geometry(self) -> None:
+        self.shortcut_help_overlay.update_geometry()
+
     def resizeEvent(self, event: object) -> None:  # noqa: N802 - Qt API
         """Keep overlays anchored when the viewer window resizes."""
         super().resizeEvent(event)
         self._update_progress_overlay_geometry()
         self._update_transient_message_overlay_geometry()
+        self._update_shortcut_help_overlay_geometry()
         self._update_minimap_geometry()
         self._update_info_overlay_geometry()
 
