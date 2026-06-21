@@ -14,6 +14,8 @@ from easy_loupe.core.records import (
 )
 from easy_loupe.ui.main_window.filters import (
     PhotoFilterSelection,
+    _metadata_object_suffix,
+    _metadata_value_label,
     create_photo_filter_menu,
 )
 from tests.ui._helpers import (
@@ -119,6 +121,19 @@ def test_photo_filter_default_covers_core_metadata_domains() -> None:
     })
     assert selection.allowed_color_labels == frozenset({None, *COLOR_LABELS})
     assert selection.allowed_flags == frozenset({None, *FLAGS})
+
+
+def test_photo_filter_value_labels_and_object_suffixes_are_distinct() -> None:
+    """
+    Verify future multi-word metadata values keep stable object names.
+
+    Display labels should be readable, while Qt object suffixes must avoid
+    spaces so tests and object-name lookups remain predictable.
+    """
+    assert _metadata_value_label('dark_orange') == 'Dark Orange'
+    assert _metadata_object_suffix('dark_orange') == 'DarkOrange'
+    assert _metadata_value_label('green') == 'Green'
+    assert _metadata_object_suffix('green') == 'Green'
 
 
 def test_photo_filter_menu_defaults_to_all_options_checked() -> None:

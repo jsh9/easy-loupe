@@ -45,7 +45,13 @@ class PhotoFilterOption:
 
 
 def _metadata_value_label(value: str) -> str:
+    """Return readable UI text for a slug-style metadata value."""
     return value.replace('_', ' ').title()
+
+
+def _metadata_object_suffix(value: str) -> str:
+    """Return a space-free Qt object suffix for stable widget lookup."""
+    return ''.join(part.title() for part in value.split('_'))
 
 
 RATING_FILTER_OPTIONS: tuple[PhotoFilterOption, ...] = (
@@ -65,7 +71,7 @@ COLOR_LABEL_FILTER_OPTIONS: tuple[PhotoFilterOption, ...] = (
         PhotoFilterOption(
             _metadata_value_label(color_label),
             color_label,
-            _metadata_value_label(color_label),
+            _metadata_object_suffix(color_label),
         )
         for color_label in COLOR_LABEL_ORDER
     ),
@@ -74,7 +80,7 @@ FLAG_FILTER_OPTIONS: tuple[PhotoFilterOption, ...] = (
     PhotoFilterOption('Not flagged', None, 'None'),
     *(
         PhotoFilterOption(
-            _metadata_value_label(flag), flag, _metadata_value_label(flag)
+            _metadata_value_label(flag), flag, _metadata_object_suffix(flag)
         )
         for flag in FLAG_ORDER
     ),
