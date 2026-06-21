@@ -136,6 +136,14 @@ class MainWindowBuildMixin:
         )
         top_bar.addWidget(self.organize_button)
 
+        self.filter_button = QPushButton('Filter')
+        self.filter_button.setObjectName('photoFilterButton')
+        self.filter_button.setToolTip(
+            'Filter photos by rating, color label, and flag'
+        )
+        self.filter_button.clicked.connect(self._show_photo_filter_menu)
+        top_bar.addWidget(self.filter_button)
+
         self.theme_toggle = QCheckBox('Dark theme')
         self.theme_toggle.setChecked(False)
         self.theme_toggle.toggled.connect(self._toggle_theme_checked)
@@ -1065,13 +1073,13 @@ class MainWindowBuildMixin:
             or (workspace_shortcuts_enabled and self._compare_mode)
         )
         can_enter_browse = workspace_shortcuts_enabled and bool(
-            self.library.photos
+            self._visible_photos()
         )
         self.browse_mode_shortcut.setEnabled(can_enter_browse)
         self.compare_mode_shortcut.setEnabled(
             workspace_shortcuts_enabled
             and not self._compare_mode
-            and bool(self.library.photos)
+            and bool(self._visible_photos())
         )
         self.recenter_zoom_shortcut.setEnabled(
             normal_view_shortcuts_enabled and bool(self.library.photos)
@@ -1100,6 +1108,7 @@ class MainWindowBuildMixin:
 
         self._refresh_file_actions()
         self._refresh_merge_scene_action()
+        self._refresh_photo_filter_button()
         self._refresh_compare_limit_controls()
         self._refresh_assignment_controls()
         self._refresh_metadata_history_actions()
@@ -1428,6 +1437,7 @@ class MainWindowBuildMixin:
             and self.menuBar().isEnabled()
             and not self._busy
             and not self._compare_mode
+            and not self._photo_filter_active()
             and not self._shortcut_help_modal_active()
         )
         self.merge_scene_action.setEnabled(enabled)

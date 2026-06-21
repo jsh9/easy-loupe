@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- Added
+
+  - Culling mode now has a session-only metadata filter for ratings, color
+    labels, and flags. The filter hides non-matching photos from the thumbnail,
+    browse, and scene views without changing loaded metadata or file
+    operations. Each filter group includes `Select all` and `Select none`
+    controls plus an empty-state shortcut, and pressing `Enter` confirms the
+    pending popup choices.
+
 ## [1.2.4] - 2026-06-21
 
 - Added

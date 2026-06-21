@@ -12,6 +12,7 @@ from easy_loupe.core.photo_library import PhotoLibrary
 from easy_loupe.ui.identity import APP_NAME, easy_loupe_icon
 from easy_loupe.ui.main_window.build import MainWindowBuildMixin
 from easy_loupe.ui.main_window.compare import MainWindowCompareMixin
+from easy_loupe.ui.main_window.filters import PhotoFilterSelection
 from easy_loupe.ui.main_window.navigation import (
     MainWindowNavigationMixin,
 )
@@ -51,6 +52,7 @@ class MainWindow(
     ) -> None:
         super().__init__()
         self.library = PhotoLibrary()
+        self._photo_filter_selection = PhotoFilterSelection.default()
         self.current_photo_id: str | None = None
         self.current_theme = THEMES['light']
         self._busy = False
