@@ -2,22 +2,18 @@
 
 ## [Unreleased]
 
+## [1.2.4] - 2026-06-21
+
 - Added
 
   - Pressing `?`, or choosing `Help > Keyboard Shortcuts`, now shows a
     context-aware keyboard shortcut overlay in the standalone photo viewer,
     culling view, browse view, and compare modes. While the overlay is open,
-    other keyboard shortcuts wait until the overlay is closed.
+    keyboard shortcuts, focused navigation-list keys, delayed focus restores,
+    and guarded menu actions wait until the overlay is closed.
 
 - Fixed
 
-  - The shortcut help overlay now keeps focused navigation-list key presses,
-    delayed navigation-focus restores, and guarded menu actions from changing
-    the workspace behind the overlay, and disables File, compare-limit, and
-    scene-merge choices while the overlay is open.
-  - Standalone photo-viewer shortcut help now disables its Help menu action
-    while modal progress is visible, and no-scene culling help includes the
-    thumbnail `Shift+Up` / `Shift+Down` selection shortcut.
   - Closing the last culling or standalone photo-viewer window while hidden
     worker cleanup is still draining no longer lets Qt app shutdown delete
     active `QThread` objects.
