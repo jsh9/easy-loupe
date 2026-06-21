@@ -10,6 +10,10 @@
     operations. Each filter group includes `Select all` and `Select none`
     controls plus an empty-state shortcut, and pressing `Enter` confirms the
     pending popup choices.
+  - `Organize Photos` now has criterion-specific untagged controls. The
+    picked/rejected criterion adds explicit `Picked`, `Rejected`, `Untagged`,
+    and `Others` folder modes, while color-label and rating criteria each have
+    their own optional `Untagged` checkbox.
 
 - Fixed
 

@@ -34,6 +34,14 @@ if TYPE_CHECKING:
 
 ProgressCallback = Callable[[str, int], None]
 OrganizeCriterion = Literal['flag', 'color_label', 'rating']
+FlagFolderMode = Literal[
+    'picked_rejected_untagged',
+    'picked_rejected',
+    'picked_others',
+    'rejected_others',
+    'picked_only',
+    'rejected_only',
+]
 OrganizeAction = Literal['copy', 'move']
 ConflictPolicy = Literal['fail', 'skip', 'overwrite']
 
@@ -45,6 +53,7 @@ class OrganizeFilesOptions:
     criterion: OrganizeCriterion
     action: OrganizeAction
     output_parent: Path
+    flag_folder_mode: FlagFolderMode
     include_untagged: bool
     conflict_policy: ConflictPolicy
     include_sidecars: bool = True
@@ -170,6 +179,7 @@ def _build_jobs(
         folder_name = _target_folder_name(
             photo,
             options.criterion,
+            flag_folder_mode=options.flag_folder_mode,
             include_untagged=options.include_untagged,
         )
         if folder_name is None:
@@ -260,22 +270,64 @@ def _target_folder_name(
         photo: PhotoRecord,
         criterion: OrganizeCriterion,
         *,
+        flag_folder_mode: FlagFolderMode,
         include_untagged: bool,
 ) -> str | None:
     if criterion == 'flag':
-        if photo.flag == 'picked':
-            return 'Picked'
+        # Flag modes own every missing-flag routing choice, so bypass the
+        # generic untagged fallback that remains only for color/rating runs.
+        return _target_flag_folder_name(photo, flag_folder_mode)
 
-        if photo.flag == 'rejected':
-            return 'Rejected'
-    elif criterion == 'color_label':
+    if criterion == 'color_label':
         if photo.color_label is not None:
             return photo.color_label.title()
-    elif photo.rating is not None:
-        suffix = 'Star' if photo.rating == 1 else 'Stars'
-        return f'{photo.rating} {suffix}'
+
+    elif criterion == 'rating':
+        if photo.rating is not None:
+            suffix = 'Star' if photo.rating == 1 else 'Stars'
+            return f'{photo.rating} {suffix}'
+
+    else:
+        raise ValueError(f'Unknown organize criterion: {criterion}')
 
     if include_untagged:
         return 'Untagged'
 
     return None
+
+
+def _target_flag_folder_name(
+        photo: PhotoRecord,
+        flag_folder_mode: FlagFolderMode,
+) -> str | None:
+    if flag_folder_mode == 'picked_rejected_untagged':
+        if photo.flag == 'picked':
+            return 'Picked'
+
+        if photo.flag == 'rejected':
+            return 'Rejected'
+
+        return 'Untagged'
+
+    if flag_folder_mode == 'picked_rejected':
+        if photo.flag == 'picked':
+            return 'Picked'
+
+        if photo.flag == 'rejected':
+            return 'Rejected'
+
+        return None
+
+    if flag_folder_mode == 'picked_others':
+        return 'Picked' if photo.flag == 'picked' else 'Others'
+
+    if flag_folder_mode == 'rejected_others':
+        return 'Rejected' if photo.flag == 'rejected' else 'Others'
+
+    if flag_folder_mode == 'picked_only':
+        return 'Picked' if photo.flag == 'picked' else None
+
+    if flag_folder_mode == 'rejected_only':
+        return 'Rejected' if photo.flag == 'rejected' else None
+
+    raise ValueError(f'Unknown flag folder mode: {flag_folder_mode}')
