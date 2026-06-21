@@ -6,6 +6,12 @@ from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QCheckBox, QFileDialog, QPushButton
 
+from easy_loupe.core.records import (
+    COLOR_LABELS,
+    FLAGS,
+    MAX_RATING,
+    MIN_RATING,
+)
 from easy_loupe.ui.main_window.filters import (
     PhotoFilterSelection,
     create_photo_filter_menu,
@@ -95,6 +101,24 @@ def test_photo_filter_selection_matches_metadata_values() -> None:
     )
 
     assert PhotoFilterSelection.default().is_default() is True
+
+
+def test_photo_filter_default_covers_core_metadata_domains() -> None:
+    """
+    Verify default filtering remains aligned with valid metadata values.
+
+    The all-selected state is the no-filter state, so it must include every
+    core metadata value to avoid hiding future valid labels or flags by
+    default.
+    """
+    selection = PhotoFilterSelection.default()
+
+    assert selection.allowed_ratings == frozenset({
+        None,
+        *range(MIN_RATING, MAX_RATING + 1),
+    })
+    assert selection.allowed_color_labels == frozenset({None, *COLOR_LABELS})
+    assert selection.allowed_flags == frozenset({None, *FLAGS})
 
 
 def test_photo_filter_menu_defaults_to_all_options_checked() -> None:
@@ -535,5 +559,110 @@ def test_filter_metadata_change_hides_newly_non_matching_photo(
     assert _collect_photo_ids_from_list(window.browse_list) == ['IMG_2501']
     assert window.current_photo_id == 'IMG_2501'
     assert window.filter_button.text() == 'Filter (1/2)'
+
+    window.close()
+
+
+def test_filter_compare_metadata_change_prunes_hidden_active_photo(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify filtered compare mode drops photos hidden by metadata edits.
+
+    Compare mode keeps a separate active-photo grid, so metadata changes must
+    reconcile that grid with active filters before Esc can restore normal view.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_2600', 'red'),
+            ('IMG_2601', 'green'),
+            ('IMG_2602', 'blue'),
+        ],
+    )
+    for photo_id in ('IMG_2600', 'IMG_2601', 'IMG_2602'):
+        _set_metadata(
+            window, photo_id, rating=3, color_label='red', flag='picked'
+        )
+
+    window._apply_photo_filter(
+        PhotoFilterSelection(
+            allowed_ratings=frozenset({3}),
+            allowed_color_labels=frozenset({'red'}),
+            allowed_flags=frozenset({'picked'}),
+        )
+    )
+    window._restore_photo_selection(['IMG_2600', 'IMG_2601', 'IMG_2602'])
+    window._enter_compare_mode()
+    app.processEvents()
+    assert window._compare_mode is True
+    assert window.compare_viewer.active_photo_id() == 'IMG_2600'
+
+    window.flag_actions[None].trigger()
+    app.processEvents()
+
+    assert window._compare_mode is True
+    assert window.compare_viewer.photo_ids() == ['IMG_2601', 'IMG_2602']
+    assert window.compare_viewer.active_photo_id() == 'IMG_2601'
+    assert _collect_photo_ids_from_list(window.thumbnail_list) == [
+        'IMG_2601',
+        'IMG_2602',
+    ]
+
+    window._exit_compare_mode()
+    app.processEvents()
+
+    assert window.current_photo_id == 'IMG_2601'
+    assert window.thumbnail_list.currentItem().data(Qt.UserRole) == 'IMG_2601'
+    assert window.viewer._current_image_path == (
+        window.library.get_preview_path('IMG_2601', 'viewer')
+    )
+
+    window.close()
+
+
+def test_filter_compare_metadata_change_exits_when_too_few_photos_remain(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify filtered compare mode returns to normal view below compare minimum.
+
+    If a metadata edit leaves only one compared photo visible, compare cannot
+    stay open and must avoid restoring the newly hidden active photo.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_2700', 'red'), ('IMG_2701', 'green')],
+    )
+    for photo_id in ('IMG_2700', 'IMG_2701'):
+        _set_metadata(
+            window, photo_id, rating=3, color_label='red', flag='picked'
+        )
+
+    window._apply_photo_filter(
+        PhotoFilterSelection(
+            allowed_ratings=frozenset({3}),
+            allowed_color_labels=frozenset({'red'}),
+            allowed_flags=frozenset({'picked'}),
+        )
+    )
+    window._restore_photo_selection(['IMG_2700', 'IMG_2701'])
+    window._enter_compare_mode()
+    app.processEvents()
+    assert window._compare_mode is True
+
+    window.flag_actions[None].trigger()
+    app.processEvents()
+
+    assert window._compare_mode is False
+    assert window.compare_viewer.photo_ids() == []
+    assert window.current_photo_id == 'IMG_2701'
+    assert _collect_photo_ids_from_list(window.thumbnail_list) == ['IMG_2701']
+    assert window.thumbnail_list.currentItem().data(Qt.UserRole) == 'IMG_2701'
+    assert window.viewer._current_image_path == (
+        window.library.get_preview_path('IMG_2701', 'viewer')
+    )
 
     window.close()

@@ -119,6 +119,9 @@ Major logic:
   workspace moves to the next visible photo in library order, then the previous
   visible photo, then the first visible photo. If nothing matches, the viewer
   is cleared and the selection label reports that no photos match.
+- In compare mode, metadata edits under an active filter prune compared photos
+  that no longer match and exit compare mode when fewer than two compared
+  photos remain visible.
 - When scene detection is active, filtering applies to exact photos inside each
   scene: scene stacks disappear when no members match, and visible stack counts
   and scene strips contain only matching members. Scene merge and break actions

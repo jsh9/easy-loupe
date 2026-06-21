@@ -11,6 +11,12 @@
     controls plus an empty-state shortcut, and pressing `Enter` confirms the
     pending popup choices.
 
+- Fixed
+
+  - Filtered compare mode now drops compared photos that stop matching after a
+    metadata edit, and exits compare mode instead of restoring a hidden photo
+    when too few visible photos remain.
+
 ## [1.2.4] - 2026-06-21
 
 - Added

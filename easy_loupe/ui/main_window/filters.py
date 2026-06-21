@@ -18,6 +18,13 @@ from PySide6.QtWidgets import (
     QWidgetAction,
 )
 
+from easy_loupe.core.records import (
+    COLOR_LABEL_ORDER,
+    FLAG_ORDER,
+    MAX_RATING,
+    MIN_RATING,
+)
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
@@ -37,26 +44,40 @@ class PhotoFilterOption:
     object_suffix: str
 
 
+def _metadata_value_label(value: str) -> str:
+    return value.replace('_', ' ').title()
+
+
 RATING_FILTER_OPTIONS: tuple[PhotoFilterOption, ...] = (
     PhotoFilterOption('Not rated', None, 'None'),
-    PhotoFilterOption('1 Star', 1, '1'),
-    PhotoFilterOption('2 Stars', 2, '2'),
-    PhotoFilterOption('3 Stars', 3, '3'),
-    PhotoFilterOption('4 Stars', 4, '4'),
-    PhotoFilterOption('5 Stars', 5, '5'),
+    *(
+        PhotoFilterOption(
+            f'{rating} Star' if rating == 1 else f'{rating} Stars',
+            rating,
+            str(rating),
+        )
+        for rating in range(MIN_RATING, MAX_RATING + 1)
+    ),
 )
 COLOR_LABEL_FILTER_OPTIONS: tuple[PhotoFilterOption, ...] = (
     PhotoFilterOption('No color label', None, 'None'),
-    PhotoFilterOption('Red', 'red', 'Red'),
-    PhotoFilterOption('Yellow', 'yellow', 'Yellow'),
-    PhotoFilterOption('Green', 'green', 'Green'),
-    PhotoFilterOption('Blue', 'blue', 'Blue'),
-    PhotoFilterOption('Purple', 'purple', 'Purple'),
+    *(
+        PhotoFilterOption(
+            _metadata_value_label(color_label),
+            color_label,
+            _metadata_value_label(color_label),
+        )
+        for color_label in COLOR_LABEL_ORDER
+    ),
 )
 FLAG_FILTER_OPTIONS: tuple[PhotoFilterOption, ...] = (
     PhotoFilterOption('Not flagged', None, 'None'),
-    PhotoFilterOption('Picked', 'picked', 'Picked'),
-    PhotoFilterOption('Rejected', 'rejected', 'Rejected'),
+    *(
+        PhotoFilterOption(
+            _metadata_value_label(flag), flag, _metadata_value_label(flag)
+        )
+        for flag in FLAG_ORDER
+    ),
 )
 
 ALL_RATING_FILTER_VALUES = frozenset(
@@ -233,7 +254,9 @@ class _ConfirmFilterKeyFilter(QObject):
         super().__init__(parent)
         self._on_confirm = on_confirm
 
-    def eventFilter(self, _watched: QObject, event: QEvent) -> bool:  # noqa: N802
+    def eventFilter(  # noqa: N802
+            self, _watched: QObject, event: QEvent
+    ) -> bool:
         if (
             isinstance(event, QKeyEvent)
             and event.type() == QEvent.KeyPress

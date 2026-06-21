@@ -147,6 +147,66 @@ class MainWindowCompareMixin:
         self._refresh_visible_region_overlay(force_full=True)
         self.compare_viewer.setFocus(Qt.OtherFocusReason)
 
+    def _reconcile_compare_photos_after_filter_change(
+            self: MainWindow,
+    ) -> None:
+        """
+        Keep compare mode aligned with an active metadata filter.
+
+        Metadata shortcuts can hide the active compare photo while the normal
+        lists are already rebuilt from filtered rows. Prune the separate
+        compare grid before the user exits it so stale hidden IDs cannot be
+        restored into the main viewer or selection state.
+        """
+        if not self._compare_mode or not self._photo_filter_active():
+            return
+
+        visible_photo_ids = {
+            photo.photo_id for photo in self._visible_photos()
+        }
+        compared_photo_ids = self.compare_viewer.photo_ids()
+        visible_compared_photo_ids = [
+            photo_id
+            for photo_id in compared_photo_ids
+            if photo_id in visible_photo_ids
+        ]
+        self._compare_restore_selection_photo_ids = [
+            photo_id
+            for photo_id in self._compare_restore_selection_photo_ids
+            if photo_id in visible_photo_ids
+        ]
+        active_photo_id = self.compare_viewer.active_photo_id()
+        # Use the active photo's old grid position when picking a replacement
+        # so keyboard users continue from the same visual compare location.
+        active_index = (
+            compared_photo_ids.index(active_photo_id)
+            if active_photo_id in compared_photo_ids
+            else 0
+        )
+        if len(visible_compared_photo_ids) < MIN_COMPARE_PHOTO_COUNT:
+            self._exit_compare_mode()
+            return
+
+        next_active_photo_id = (
+            active_photo_id
+            if active_photo_id in visible_compared_photo_ids
+            else visible_compared_photo_ids[
+                min(active_index, len(visible_compared_photo_ids) - 1)
+            ]
+        )
+        self.compare_viewer.set_photos(
+            self._compare_photos_for_photo_ids(visible_compared_photo_ids),
+            active_photo_id=next_active_photo_id,
+            preserve_selected_view_state=True,
+        )
+        refreshed_active_photo_id = self.compare_viewer.active_photo_id()
+        if refreshed_active_photo_id is not None:
+            self.current_photo_id = refreshed_active_photo_id
+
+        self._refresh_selection_labels()
+        self._refresh_visible_region_overlay(force_full=True)
+        self.compare_viewer.setFocus(Qt.OtherFocusReason)
+
     def _compare_limit_refresh_needed(self: MainWindow) -> bool:
         return self._compare_limit_refresh_plan() is not None
 
@@ -194,10 +254,30 @@ class MainWindowCompareMixin:
         compared_photo_ids = self.compare_viewer.photo_ids()
         active_photo_id = self.compare_viewer.active_photo_id()
         selection_photo_ids = restore_photo_ids or compared_photo_ids
+        if self._photo_filter_active():
+            # Compare exit normally restores the pre-compare selection. Under a
+            # filter, hidden IDs must be removed first or Esc can redisplay the
+            # photo that a just-applied metadata edit intentionally hid.
+            visible_photo_ids = {
+                photo.photo_id for photo in self._visible_photos()
+            }
+            selection_photo_ids = [
+                photo_id
+                for photo_id in selection_photo_ids
+                if photo_id in visible_photo_ids
+            ]
+            if active_photo_id not in visible_photo_ids:
+                active_photo_id = None
+
         if active_photo_id in selection_photo_ids:
             self.current_photo_id = active_photo_id
         elif selection_photo_ids:
-            self.current_photo_id = selection_photo_ids[0]
+            if self.current_photo_id not in selection_photo_ids:
+                self.current_photo_id = selection_photo_ids[0]
+        elif self._photo_filter_active():
+            self.current_photo_id = self._visible_photo_id_after_filter(
+                self.current_photo_id
+            )
 
         self._compare_mode = False
         self._compare_restore_browse_mode = False

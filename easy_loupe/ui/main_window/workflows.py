@@ -1340,7 +1340,19 @@ class MainWindowWorkflowMixin:
         for list_widget, scroll_state in scroll_states.items():
             self._restore_scroll_state(list_widget, scroll_state)
 
-        if self.current_photo_id != previous_photo_id:
+        was_compare_mode = self._compare_mode
+        if self._compare_mode and self._photo_filter_active():
+            # The normal lists now reflect the metadata edit. Compare mode owns
+            # a separate grid, so reconcile it before any hidden active photo
+            # can drive labels, overlays, or later compare exit state.
+            self._reconcile_compare_photos_after_filter_change()
+
+        compare_exited = was_compare_mode and not self._compare_mode
+        if (
+            self.current_photo_id != previous_photo_id
+            and not self._compare_mode
+            and not compare_exited
+        ):
             self._display_current_photo()
 
         self._refresh_compare_metadata_labels()
