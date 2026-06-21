@@ -17,6 +17,7 @@ from easy_loupe.core.grouped_exif import (
 from easy_loupe.core.photo_groups import select_photo_group_sources
 from easy_loupe.core.records import (
     COLOR_LABELS,
+    FLAGS,
     MAX_RATING,
     MIN_RATING,
     SUPPORTED_EXTENSIONS,
@@ -363,7 +364,7 @@ def _apply_normalized_metadata(
         photo.color_label = (
             color_label if color_label in COLOR_LABELS else None
         )
-        photo.flag = flag if flag in {'picked', 'rejected'} else None
+        photo.flag = flag if flag in FLAGS else None
 
 
 def build_photo_exif_display(

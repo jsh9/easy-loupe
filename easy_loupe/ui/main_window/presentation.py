@@ -7,10 +7,15 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QSize
 from PySide6.QtWidgets import QListWidget, QListWidgetItem
 
+from easy_loupe.core.records import SceneGroup
 from easy_loupe.ui.identity import APP_NAME
 from easy_loupe.ui.main_window.build import (
     TRANSIENT_MESSAGE_FONT_SIZE_PX,
     TRANSIENT_MESSAGE_FONT_WEIGHT,
+)
+from easy_loupe.ui.main_window.filters import (
+    PhotoFilterSelection,
+    create_photo_filter_menu,
 )
 from easy_loupe.ui.theme import (
     FLAG_ROLE,
@@ -23,7 +28,9 @@ from easy_loupe.ui.theme import (
 from easy_loupe.ui.widgets import ThumbnailItemWidget
 
 if TYPE_CHECKING:
-    from easy_loupe.core.photo_library import PhotoRecord, SceneGroup
+    from PySide6.QtWidgets import QMenu
+
+    from easy_loupe.core.photo_library import PhotoRecord
     from easy_loupe.progress import CountedProgressStage, ProgressReporter
     from easy_loupe.ui.main_window.window import MainWindow
 
@@ -33,13 +40,137 @@ MULTI_PHOTO_SELECTION_COUNT = 2
 class MainWindowPresentationMixin:
     """List population, presentation refresh, and theming helpers."""
 
+    def _reset_photo_filter_selection(self: MainWindow) -> None:
+        self._photo_filter_selection = PhotoFilterSelection.default()
+
+    def _photo_filter_active(self: MainWindow) -> bool:
+        return not self._photo_filter_selection.is_default()
+
+    def _visible_photos(self: MainWindow) -> list[PhotoRecord]:
+        return [
+            photo
+            for photo in self.library.get_photos()
+            if self._photo_filter_selection.matches(photo)
+        ]
+
+    def _visible_scene_groups(self: MainWindow) -> list[SceneGroup]:
+        visible_photo_ids = {
+            photo.photo_id for photo in self._visible_photos()
+        }
+        visible_scenes: list[SceneGroup] = []
+        for scene in self.library.get_scene_groups():
+            photo_ids = [
+                photo_id
+                for photo_id in scene.photo_ids
+                if photo_id in visible_photo_ids
+            ]
+            if photo_ids:
+                visible_scenes.append(
+                    SceneGroup(scene_id=scene.scene_id, photo_ids=photo_ids)
+                )
+
+        return visible_scenes
+
+    def _visible_photo_id_after_filter(
+            self: MainWindow, preferred_photo_id: str | None
+    ) -> str | None:
+        visible_photos = self._visible_photos()
+        if not visible_photos:
+            return None
+
+        visible_photo_ids = {photo.photo_id for photo in visible_photos}
+        if preferred_photo_id in visible_photo_ids:
+            return preferred_photo_id
+
+        ordered_photos = self.library.get_photos()
+        ordered_photo_ids = [photo.photo_id for photo in ordered_photos]
+        try:
+            preferred_index = ordered_photo_ids.index(preferred_photo_id or '')
+        except ValueError:
+            return visible_photos[0].photo_id
+
+        for photo in ordered_photos[preferred_index + 1 :]:
+            if photo.photo_id in visible_photo_ids:
+                return photo.photo_id
+
+        for photo in reversed(ordered_photos[:preferred_index]):
+            if photo.photo_id in visible_photo_ids:
+                return photo.photo_id
+
+        return visible_photos[0].photo_id
+
+    def _build_photo_filter_menu(self: MainWindow) -> QMenu:
+        return create_photo_filter_menu(
+            self,
+            self._photo_filter_selection,
+            self._apply_photo_filter,
+        )
+
+    def _show_photo_filter_menu(self: MainWindow) -> None:
+        if (
+            self._busy
+            or self._compare_mode
+            or self._shortcut_help_modal_active()
+            or not self.library.photos
+        ):
+            return
+
+        menu = self._build_photo_filter_menu()
+        menu_position = self.filter_button.mapToGlobal(
+            self.filter_button.rect().bottomLeft()
+        )
+        menu.exec(menu_position)
+
+    def _apply_photo_filter(
+            self: MainWindow, selection: PhotoFilterSelection
+    ) -> None:
+        if self._busy or self._compare_mode:
+            return
+
+        if selection == self._photo_filter_selection:
+            self._refresh_photo_filter_button()
+            return
+
+        self._photo_filter_selection = selection
+        self._preserved_scene_selection_photo_ids.clear()
+        self._scene_selection_anchor_row = None
+        self._thumbnail_selection_anchor_row = None
+        self._rebuild_loaded_views(preserve_current_photo=True)
+        self._restore_active_navigation_focus(defer=True)
+
+    def _refresh_photo_filter_button(self: MainWindow) -> None:
+        if not hasattr(self, 'filter_button'):
+            return
+
+        total_count = len(self.library.photos)
+        visible_count = len(self._visible_photos()) if total_count else 0
+        if self._photo_filter_active():
+            self.filter_button.setText(
+                f'Filter ({visible_count}/{total_count})'
+            )
+            self.filter_button.setToolTip(
+                f'Showing {visible_count} of {total_count} photos'
+            )
+        else:
+            self.filter_button.setText('Filter')
+            self.filter_button.setToolTip(
+                'Filter photos by rating, color label, and flag'
+            )
+
+        self.filter_button.setEnabled(
+            not self._busy
+            and not self._compare_mode
+            and not self._shortcut_help_modal_active()
+            and total_count > 0
+        )
+
     def _rebuild_scene_lookup(self: MainWindow) -> None:
         self._scene_id_by_photo_id = {}
         self._scene_by_id = {}
         if not self.library.scene_detection_done:
             return
 
-        for scene in self.library.get_scene_groups():
+        for scene in self._visible_scene_groups():
             self._scene_by_id[scene.scene_id] = scene
             for photo_id in scene.photo_ids:
                 self._scene_id_by_photo_id[photo_id] = scene.scene_id
@@ -120,6 +251,7 @@ class MainWindowPresentationMixin:
     ) -> None:
         self.detect_button.setEnabled(photo_actions_enabled)
         self.organize_button.setEnabled(photo_actions_enabled)
+        self._refresh_photo_filter_button()
         self._refresh_file_actions(photo_actions_enabled=photo_actions_enabled)
 
         self._refresh_merge_scene_action(
@@ -131,28 +263,36 @@ class MainWindowPresentationMixin:
 
     def _refresh_selection_labels(self: MainWindow) -> None:
         if self.current_photo_id is None or not self.library.photos:
-            self.selection_label.setText('Selection: Nothing selected')
+            if self.library.photos and not self._visible_photos():
+                self.selection_label.setText(
+                    'Selection: No photos match filter'
+                )
+            else:
+                self.selection_label.setText('Selection: Nothing selected')
+
             self.metadata_label.setText(f'Metadata: {NO_METADATA_TEXT}')
             return
 
         photo = self.library.get_photo(self.current_photo_id)
         index = self._photo_position_by_id.get(photo.photo_id, 1)
+        photo_count = (
+            len(self._visible_photos())
+            if self._photo_filter_active()
+            else len(self.library.photos)
+        )
         selected_count = len(self._resolved_selection_photo_ids())
         if self._compare_mode:
             self.selection_label.setText(
-                f'Selection: {photo.display_name}'
-                f' ({index}/{len(self.library.photos)})'
+                f'Selection: {photo.display_name} ({index}/{photo_count})'
             )
             self.metadata_label.setText('')
         elif selected_count >= MULTI_PHOTO_SELECTION_COUNT:
             self.selection_label.setText(
-                f'Selection: {selected_count} photos'
-                f' ({index}/{len(self.library.photos)})'
+                f'Selection: {selected_count} photos ({index}/{photo_count})'
             )
         else:
             self.selection_label.setText(
-                f'Selection: {photo.display_name}'
-                f' ({index}/{len(self.library.photos)})'
+                f'Selection: {photo.display_name} ({index}/{photo_count})'
             )
 
         symbols = metadata_markup(photo)
@@ -189,7 +329,7 @@ class MainWindowPresentationMixin:
         if not self.library.scene_detection_done:
             self._scene_id_by_photo_id = {}
             self._scene_by_id = {}
-            photos = self.library.get_photos()
+            photos = self._visible_photos()
             total = max(len(photos), 1)
             thumbnail_progress = None
             if show_progress:
@@ -217,7 +357,7 @@ class MainWindowPresentationMixin:
                 self._thumbnail_photo_rows[photo.photo_id] = index - 1
         else:
             self._rebuild_scene_lookup()
-            scenes = self.library.get_scene_groups()
+            scenes = self._visible_scene_groups()
             total = max(len(scenes), 1)
             thumbnail_progress = None
             if show_progress:
@@ -279,7 +419,7 @@ class MainWindowPresentationMixin:
         self._browse_photo_rows = {}
         self._photo_position_by_id = {}
 
-        photos = self.library.get_photos()
+        photos = self._visible_photos()
         total = max(len(photos), 1)
         browse_progress = None
         if show_progress:
@@ -582,14 +722,16 @@ class MainWindowPresentationMixin:
         self.theme_toggle.blockSignals(False)
         label_style = f'QLabel {{ color: {ttc}; background: transparent; }}'
         button_style = f"""
-        QPushButton {{
+        QPushButton,
+        QToolButton {{
             color: {self.current_theme.button_text_color};
             background-color: {self.current_theme.button_background};
             border: 1px solid {self.current_theme.button_border};
             border-radius: 6px;
             padding: 6px 12px;
         }}
-        QPushButton:disabled {{
+        QPushButton:disabled,
+        QToolButton:disabled {{
             color: #7f8791;
         }}
         """
@@ -642,6 +784,7 @@ class MainWindowPresentationMixin:
         self.open_button.setStyleSheet(button_style)
         self.detect_button.setStyleSheet(button_style)
         self.organize_button.setStyleSheet(button_style)
+        self.filter_button.setStyleSheet(button_style)
         self.photo_open_group.setStyleSheet(sort_group_style)
         self.photo_sort_group.setStyleSheet(sort_group_style)
         self.sort_label.setStyleSheet(label_style)

@@ -47,15 +47,41 @@ class MainWindowNavigationMixin:
         return None
 
     def _restore_active_navigation_focus(
-            self: MainWindow, *, defer: bool = False
+            self: MainWindow,
+            *,
+            defer: bool = False,
+            require_active_window: bool = True,
     ) -> None:
         """Restore focus to the active navigation widget when usable."""
         if defer:
-            QTimer.singleShot(0, self._restore_active_navigation_focus)
+            if require_active_window:
+                QTimer.singleShot(0, self._restore_active_navigation_focus)
+            else:
+                QTimer.singleShot(
+                    0,
+                    self._restore_active_navigation_focus_without_window,
+                )
+
             return
 
+        self._restore_active_navigation_focus_if_available(
+            require_active_window=require_active_window
+        )
+
+    def _restore_active_navigation_focus_without_window(
+            self: MainWindow,
+    ) -> None:
+        """Restore navigation focus even when Qt has no active window."""
+        self._restore_active_navigation_focus_if_available(
+            require_active_window=False
+        )
+
+    def _restore_active_navigation_focus_if_available(
+            self: MainWindow, *, require_active_window: bool
+    ) -> None:
+        """Give keyboard focus to the active navigation list when possible."""
         if (
-            not self.isActiveWindow()
+            (require_active_window and not self.isActiveWindow())
             or self._busy
             or self._background_task_active()
             or self._shortcut_help_modal_active()
@@ -480,7 +506,7 @@ class MainWindowNavigationMixin:
             self._enter_browse_mode_from_compare()
             return
 
-        if self._browse_mode or not self.library.photos:
+        if self._browse_mode or not self._visible_photos():
             return
 
         self._populate_browse_list()

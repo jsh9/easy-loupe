@@ -108,6 +108,7 @@ class MainWindowWorkflowMixin:
             self.open_button.setEnabled(False)
             self.detect_button.setEnabled(False)
             self.library.load_folder(Path(folder), progress_reporter=reporter)
+            self._reset_photo_filter_selection()
         except Exception as exc:  # noqa: BLE001 - surface unexpected load errors in the UI
             self._hide_progress()
             self.open_button.setEnabled(True)
@@ -163,6 +164,7 @@ class MainWindowWorkflowMixin:
         self._check_photo_load_recursively_control(
             self.library.load_recursively
         )
+        self._reset_photo_filter_selection()
         loaded_photo_ids = {photo.photo_id for photo in self.library.photos}
         self.current_photo_id = (
             request.selected_photo_id
@@ -641,6 +643,7 @@ class MainWindowWorkflowMixin:
 
         reporter = self._folder_load_progress_reporter()
         self.library.load_folder(current_folder, progress_reporter=reporter)
+        self._reset_photo_filter_selection()
         self._rebuild_loaded_views(
             show_progress=True, progress_reporter=reporter
         )
@@ -653,6 +656,7 @@ class MainWindowWorkflowMixin:
 
         reporter = self._folder_load_progress_reporter()
         self.library.load_folder(current_folder, progress_reporter=reporter)
+        self._reset_photo_filter_selection()
         self._rebuild_loaded_views(
             show_progress=True, progress_reporter=reporter
         )
@@ -696,6 +700,7 @@ class MainWindowWorkflowMixin:
         )
         self.library.set_load_recursively(load_recursively)
         self.library.load_folder(current_folder, progress_reporter=reporter)
+        self._reset_photo_filter_selection()
         loaded_photo_ids = {photo.photo_id for photo in self.library.photos}
         # Keep the user's photo when it still exists after the scan-mode
         # change; otherwise fall back to the first loaded photo so the rebuilt
@@ -729,19 +734,16 @@ class MainWindowWorkflowMixin:
             preserve_current_photo: bool = False,
             progress_reporter: ProgressReporter | None = None,
     ) -> None:
-        if not self.library.photos and self._browse_mode:
+        if (not self.library.photos or not self._visible_photos()) and (
+            self._browse_mode
+        ):
             self._set_browse_mode(active=False)
 
         preserved_photo_id = (
             self.current_photo_id if preserve_current_photo else None
         )
-        loaded_photo_ids = {photo.photo_id for photo in self.library.photos}
-        self.current_photo_id = (
+        self.current_photo_id = self._visible_photo_id_after_filter(
             preserved_photo_id
-            if preserved_photo_id in loaded_photo_ids
-            else self.library.photos[0].photo_id
-            if self.library.photos
-            else None
         )
         self._populate_thumbnail_list(
             show_progress=show_progress,
@@ -1010,6 +1012,7 @@ class MainWindowWorkflowMixin:
             self._busy
             or self._compare_mode
             or self._browse_mode
+            or self._photo_filter_active()
             or not self.library.scene_detection_done
         ):
             return None
@@ -1033,6 +1036,7 @@ class MainWindowWorkflowMixin:
             self._busy
             or self._compare_mode
             or self._browse_mode
+            or self._photo_filter_active()
             or not self.library.scene_detection_done
             or not self.scene_list.isVisible()
         ):
@@ -1045,7 +1049,7 @@ class MainWindowWorkflowMixin:
         return scene
 
     def _break_scene_into_singletons(self: MainWindow, scene_id: str) -> None:
-        if self._busy or self._compare_mode:
+        if self._busy or self._compare_mode or self._photo_filter_active():
             return
 
         scene = self._scene_by_id.get(scene_id)
@@ -1107,7 +1111,7 @@ class MainWindowWorkflowMixin:
         return dialog.clickedButton() is break_button
 
     def _merge_selected_photos_into_scene(self: MainWindow) -> None:
-        if self._busy or self._compare_mode:
+        if self._busy or self._compare_mode or self._photo_filter_active():
             return
 
         photo_ids = self._mergeable_scene_photo_ids()
@@ -1303,6 +1307,7 @@ class MainWindowWorkflowMixin:
         )
 
     def _after_metadata_change(self: MainWindow) -> None:
+        previous_photo_id = self.current_photo_id
         scroll_states = {
             self.thumbnail_list: self._capture_scroll_state(
                 self.thumbnail_list
@@ -1319,6 +1324,12 @@ class MainWindowWorkflowMixin:
             ),
             self.scene_list: self._capture_selected_item_ids(self.scene_list),
         }
+        if not self._visible_photos() and self._browse_mode:
+            self._set_browse_mode(active=False)
+
+        self.current_photo_id = self._visible_photo_id_after_filter(
+            self.current_photo_id
+        )
         self._populate_thumbnail_list(scroll_current_item_into_view=False)
         self._populate_browse_list(scroll_current_item_into_view=False)
         self._populate_scene_list()
@@ -1328,6 +1339,21 @@ class MainWindowWorkflowMixin:
 
         for list_widget, scroll_state in scroll_states.items():
             self._restore_scroll_state(list_widget, scroll_state)
+
+        was_compare_mode = self._compare_mode
+        if self._compare_mode and self._photo_filter_active():
+            # The normal lists now reflect the metadata edit. Compare mode owns
+            # a separate grid, so reconcile it before any hidden active photo
+            # can drive labels, overlays, or later compare exit state.
+            self._reconcile_compare_photos_after_filter_change()
+
+        compare_exited = was_compare_mode and not self._compare_mode
+        if (
+            self.current_photo_id != previous_photo_id
+            and not self._compare_mode
+            and not compare_exited
+        ):
+            self._display_current_photo()
 
         self._refresh_compare_metadata_labels()
         self._refresh_ui()
@@ -1359,7 +1385,11 @@ class MainWindowWorkflowMixin:
         )
         self._refresh_ui()
         self._restore_active_navigation_focus()
-        self._restore_active_navigation_focus(defer=True)
+        self._restore_active_navigation_focus(require_active_window=False)
+        self._restore_active_navigation_focus(
+            defer=True,
+            require_active_window=False,
+        )
 
     def _set_interaction_enabled(self: MainWindow, *, enabled: bool) -> None:
         photo_actions_enabled = (
@@ -1370,6 +1400,9 @@ class MainWindowWorkflowMixin:
         self.open_button.setEnabled(enabled)
         self.detect_button.setEnabled(photo_actions_enabled)
         self.organize_button.setEnabled(photo_actions_enabled)
+        self.filter_button.setEnabled(
+            enabled and bool(self.library.photos) and not self._compare_mode
+        )
         self.theme_toggle.setEnabled(enabled)
         self.show_af_point_toggle.setEnabled(enabled)
         self.photo_load_recursively_checkbox.setEnabled(enabled)

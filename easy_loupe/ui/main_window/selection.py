@@ -179,7 +179,7 @@ class MainWindowSelectionMixin:
     ) -> list[str]:
         seen = set(photo_ids)
         resolved: list[str] = []
-        for photo in self.library.get_photos():
+        for photo in self._visible_photos():
             if photo.photo_id not in seen:
                 continue
 

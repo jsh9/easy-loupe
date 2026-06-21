@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from easy_loupe.core.records import (
     COLOR_LABELS,
+    FLAGS,
     MAX_RATING,
     METADATA_FILENAME,
     MIN_RATING,
@@ -103,7 +104,7 @@ def normalize_metadata_entries(
         if flag == 'reject':
             flag = 'rejected'
 
-        if flag in {'picked', 'rejected'}:
+        if flag in FLAGS:
             entry['flag'] = flag
 
         if entry:
@@ -263,7 +264,7 @@ def validate_and_apply_metadata(
             photo.flag = None
         elif flag == 'reject':
             photo.flag = 'rejected'
-        elif flag in {'picked', 'rejected'}:
+        elif flag in FLAGS:
             photo.flag = flag
         else:
             raise ValueError('flag must be null, "picked", or "rejected"')

@@ -44,7 +44,10 @@ RAW_EXTENSIONS = {
 }
 SUPPORTED_EXTENSIONS = RASTER_EXTENSIONS | RAW_EXTENSIONS
 METADATA_FILENAME = 'easy-loupe.json'
-COLOR_LABELS = {'red', 'yellow', 'green', 'blue', 'purple'}
+COLOR_LABEL_ORDER = ('red', 'yellow', 'green', 'blue', 'purple')
+COLOR_LABELS = set(COLOR_LABEL_ORDER)
+FLAG_ORDER = ('picked', 'rejected')
+FLAGS = set(FLAG_ORDER)
 
 THUMB_MAX_SIZE = 256
 FIT_MAX_SIZE = 1800

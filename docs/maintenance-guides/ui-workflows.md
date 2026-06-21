@@ -104,6 +104,29 @@ Major logic:
   brand-blue active option, and the whole sort area is framed with a distinct
   border as one group rather than loose controls.
 - Sort controls are not exposed from the menu bar.
+- The top bar includes a `Filter` dropdown for rating, color-label, and flag
+  visibility. Filter choices are session-only, reset on folder loads and
+  culling handoff, and never mutate `PhotoLibrary.photos` or saved metadata.
+- Filter groups combine with AND semantics across rating/color/flag and OR
+  semantics within each group. All options, including empty states, are checked
+  by default. Each group includes `Select all`, `Select none`, and an
+  empty-state shortcut (`Select not rated`, `Select no color label`, or
+  `Select not flagged`) that update only the open popup's pending checkbox
+  state until `Confirm` is clicked. Pressing `Enter` in the open popup uses the
+  same confirmation path.
+- Active filters rebuild the thumbnail strip, browse grid, and scene strip from
+  visible matching photos only. If the current photo becomes hidden, the
+  workspace moves to the next visible photo in library order, then the previous
+  visible photo, then the first visible photo. If nothing matches, the viewer
+  is cleared and the selection label reports that no photos match.
+- In compare mode, metadata edits under an active filter prune compared photos
+  that no longer match and exit compare mode when fewer than two compared
+  photos remain visible.
+- When scene detection is active, filtering applies to exact photos inside each
+  scene: scene stacks disappear when no members match, and visible stack counts
+  and scene strips contain only matching members. Scene merge and break actions
+  are disabled while a filter is active so hidden scene members are not edited
+  accidentally.
 
 ## 2. Modes And Transitions
 

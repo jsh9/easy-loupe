@@ -77,6 +77,12 @@ Major logic:
 - Metadata changes write immediately through `library.save_metadata()`.
 - Metadata-only refreshes preserve current scroll position in the left
   thumbnail strip and browse grid.
+- Culling filters are display-only metadata filters. They may hide photos by
+  rating, color label, or flag, including empty states, but they do not alter
+  saved metadata, undo history, organizer inputs, or XMP sidecar output.
+- Under an active filter, metadata edits can make the current photo disappear
+  from the visible lists. The UI should rebuild from matching photos and move
+  to the next visible photo, or clear the viewer when no photos still match.
 - Explicit multi-selection is restored after repopulation. Single-item
   selection is left to `setCurrentRow` in populate methods so it integrates
   cleanly with Qt's selection model and does not create sticky selection state.
