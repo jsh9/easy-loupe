@@ -15,6 +15,10 @@
     and `Others` folder modes, while color-label and rating criteria each have
     their own optional `Untagged` checkbox.
 
+- Changed
+
+  - The top bar now places `Filter` before `Organize`.
+
 - Fixed
 
   - Filtered compare mode now drops compared photos that stop matching after a
