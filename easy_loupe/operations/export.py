@@ -85,17 +85,39 @@ class MetadataOrganizeFilesOptions:
     include_sidecars: bool = True
 
 
-# Keep the shared annotation name for organizer plumbing while forcing callers
-# to construct the concrete option type that matches the selected criterion.
-type OrganizeFilesOptions = (
-    FlagOrganizeFilesOptions | MetadataOrganizeFilesOptions
+@dataclass(slots=True, frozen=True)
+class OrganizeFilesOptions:
+    """
+    Legacy options for reorganizing photos into output folders.
+
+    New UI code should prefer ``FlagOrganizeFilesOptions`` or
+    ``MetadataOrganizeFilesOptions`` so invalid criterion-specific fields
+    cannot be mixed, but this dataclass remains callable for existing
+    integrations.
+
+    For legacy flag runs, ``include_untagged`` maps to the old two-choice
+    behavior: picked/rejected only, or picked/rejected plus untagged.
+    """
+
+    criterion: OrganizeCriterion
+    action: OrganizeAction
+    output_parent: Path
+    include_untagged: bool
+    conflict_policy: ConflictPolicy
+    include_sidecars: bool = True
+
+
+type OrganizeFilesRequest = (
+    FlagOrganizeFilesOptions
+    | MetadataOrganizeFilesOptions
+    | OrganizeFilesOptions
 )
 
 
 def organize_photos(
         current_folder: Path,
         photos: list[PhotoRecord],
-        options: OrganizeFilesOptions,
+        options: OrganizeFilesRequest,
         progress_callback: ProgressCallback | None = None,
         *,
         progress_snapshot_callback: StructuredProgressCallback | None = None,
@@ -205,7 +227,7 @@ class _OrganizeJob:
 def _build_jobs(
         current_folder: Path,
         photos: list[PhotoRecord],
-        options: OrganizeFilesOptions,
+        options: OrganizeFilesRequest,
 ) -> list[_OrganizeJob]:
     jobs: list[_OrganizeJob] = []
     for photo in photos:
@@ -230,7 +252,7 @@ def _build_jobs(
 def _source_paths_for_photo(
         current_folder: Path,
         photo: PhotoRecord,
-        options: OrganizeFilesOptions,
+        options: OrganizeFilesRequest,
 ) -> tuple[Path, ...]:
     sources: list[Path] = []
     for name in photo.files:
@@ -296,12 +318,27 @@ def _preflight_conflicts(jobs: list[_OrganizeJob]) -> None:
 
 def _target_folder_name(
         photo: PhotoRecord,
-        options: OrganizeFilesOptions,
+        options: OrganizeFilesRequest,
 ) -> str | None:
-    # Branch on the concrete options first so flag runs use only their explicit
-    # folder mode and never appear to honor metadata-only untagged settings.
+    # New flag requests already chose an exact folder mode in the dialog. Route
+    # them before legacy compatibility so they never appear to honor
+    # metadata-only untagged settings.
     if isinstance(options, FlagOrganizeFilesOptions):
         return _target_flag_folder_name(photo, options.flag_folder_mode)
+
+    if (
+        isinstance(options, OrganizeFilesOptions)
+        and options.criterion == 'flag'
+    ):
+        # Old callers only had ``include_untagged`` for flag organization.
+        # Translate it to matching modern modes so direct API users keep the
+        # pre-split behavior while sharing the current flag routing helper.
+        legacy_mode: FlagFolderMode = (
+            'picked_rejected_untagged'
+            if options.include_untagged
+            else 'picked_rejected'
+        )
+        return _target_flag_folder_name(photo, legacy_mode)
 
     if options.criterion == 'color_label':
         if photo.color_label is not None:

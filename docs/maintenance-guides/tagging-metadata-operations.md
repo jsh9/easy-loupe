@@ -127,6 +127,8 @@ Major logic:
   conflict policy. Picked/rejected organization exposes explicit child folder
   modes for `Picked`, `Rejected`, `Untagged`, and `Others` buckets. Color-label
   and rating organization each expose their own optional `Untagged` checkbox.
+- New organizer UI code should prefer criterion-specific option types; the
+  legacy `OrganizeFilesOptions(...)` constructor remains for direct callers.
 - Write XMP mode supports merge policies `preserve` and `replace`.
 - Long-running organizer, XMP, and undo work runs off the UI thread through
   `OperationWorker` and `QThread`, using the same busy/progress overlay model

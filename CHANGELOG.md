@@ -24,6 +24,8 @@
   - Filtered compare mode now drops compared photos that stop matching after a
     metadata edit, and exits compare mode instead of restoring a hidden photo
     when too few visible photos remain.
+  - The legacy `OrganizeFilesOptions(...)` constructor remains supported for
+    direct organizer callers.
   - Undoing a photo organization run no longer leaves stale undo progress text
     overlapping the folder-reload progress rows.
 

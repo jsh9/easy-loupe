@@ -32,7 +32,7 @@ from easy_loupe.operations.export import (
     MetadataOrganizeFilesOptions,
     OrganizeAction,
     OrganizeCriterion,
-    OrganizeFilesOptions,
+    OrganizeFilesRequest,
 )
 from easy_loupe.operations.xmp import MergePolicy, WriteXmpOptions
 
@@ -47,7 +47,7 @@ class OrganizerDialogResult:
     """Selected organizer workflow and typed options."""
 
     mode: OrganizerMode
-    organize_options: OrganizeFilesOptions | None = None
+    organize_options: OrganizeFilesRequest | None = None
     xmp_options: WriteXmpOptions | None = None
 
 

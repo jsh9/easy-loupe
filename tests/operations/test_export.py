@@ -14,6 +14,7 @@ from easy_loupe.operations.export import (
     FlagFolderMode,
     FlagOrganizeFilesOptions,
     MetadataOrganizeFilesOptions,
+    OrganizeFilesOptions,
     organize_photos,
 )
 from tests.core._helpers import create_jpeg, stub_read_exif
@@ -268,6 +269,90 @@ def test_organize_photos_flag_folder_modes_preflight_conflicts(
 
     assert conflict_path.read_bytes() == b'conflict'
     _assert_sources_present(source_folder, list(ALL_SOURCE_FILENAMES))
+
+
+@pytest.mark.parametrize(
+    ('criterion', 'include_untagged', 'expected_bucket_files'),
+    [
+        pytest.param(
+            'flag',
+            False,
+            {
+                'Picked': {'IMG_A.JPG'},
+                'Rejected': {'IMG_B.CR3', 'IMG_B.XMP'},
+            },
+            id='flag-skip-untagged',
+        ),
+        pytest.param(
+            'flag',
+            True,
+            {
+                'Picked': {'IMG_A.JPG'},
+                'Rejected': {'IMG_B.CR3', 'IMG_B.XMP'},
+                'Untagged': {'IMG_C.CR3', 'IMG_C.JPG', 'IMG_C.XMP'},
+            },
+            id='flag-include-untagged',
+        ),
+        pytest.param(
+            'color_label',
+            True,
+            {
+                'Red': {'IMG_A.JPG'},
+                'Green': {'IMG_B.CR3', 'IMG_B.XMP'},
+                'Untagged': {'IMG_C.CR3', 'IMG_C.JPG', 'IMG_C.XMP'},
+            },
+            id='color-label',
+        ),
+        pytest.param(
+            'rating',
+            False,
+            {
+                '1 Star': {'IMG_A.JPG'},
+                '3 Stars': {'IMG_B.CR3', 'IMG_B.XMP'},
+            },
+            id='rating',
+        ),
+    ],
+)
+def test_organize_files_options_legacy_constructor_remains_supported(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        criterion: str,
+        include_untagged: bool,
+        expected_bucket_files: dict[str, set[str]],
+) -> None:
+    """
+    Verify the old ``OrganizeFilesOptions(...)`` constructor still works.
+
+    Existing integrations may pass the legacy dataclass directly to
+    ``organize_photos``. This protects the compatibility mapping while the UI
+    uses the newer criterion-specific option types.
+    """
+    source_folder, library = _make_library(tmp_path, monkeypatch)
+    output_parent = tmp_path / 'organized'
+    expected_file_count = sum(
+        len(names) for names in expected_bucket_files.values()
+    )
+
+    summary = organize_photos(
+        source_folder,
+        library.get_photos(),
+        OrganizeFilesOptions(
+            criterion=criterion,  # type: ignore[arg-type]
+            action='copy',
+            output_parent=output_parent,
+            include_untagged=include_untagged,
+            conflict_policy='fail',
+        ),
+    )
+
+    assert summary.processed_photos == len(
+        _photo_ids_from_bucket_files(expected_bucket_files)
+    )
+    assert summary.copied_files == expected_file_count
+    assert summary.moved_files == 0
+    _assert_sources_present(source_folder, list(ALL_SOURCE_FILENAMES))
+    _assert_bucket_files(output_parent, expected_bucket_files)
 
 
 @pytest.mark.parametrize('action', ['copy', 'move'])
