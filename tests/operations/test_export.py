@@ -58,8 +58,8 @@ def test_organize_photos_supports_tagged_criteria_conflicts_and_untagged(
     """
     Verify color/rating criteria keep checkbox-backed untagged behavior.
 
-    Flag organization now uses explicit folder modes, so this test protects
-    the remaining criteria from accidentally inheriting that routing logic.
+    Flag organization now uses explicit folder modes, so this test protects the
+    remaining criteria from accidentally inheriting that routing logic.
     """
     source_folder, library = _make_library(tmp_path, monkeypatch)
     output_parent = source_folder
@@ -324,7 +324,7 @@ def test_organize_photos_undo_restores_original_state_and_cleans_created_folders
         use_alternate_output_parent: bool,
 ) -> None:
     """
-    Verify undo cleanup covers flag runs with and without `Untagged` buckets.
+    Verify undo cleanup covers flag runs with and without ``Untagged`` buckets.
 
     The new default creates an extra bucket for unflagged photos, so undo must
     still restore source files and remove organizer-created directories.

@@ -2450,6 +2450,84 @@ def test_main_window_post_operation_reload_progress_reports_all_load_stages(
     del app
 
 
+def test_main_window_undo_reload_replaces_structured_undo_progress(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify undo reload progress replaces stale undo stage rows immediately.
+
+    The undo workflow switches directly from structured undo progress to
+    structured folder-load progress. Stale undo rows must be hidden before the
+    Qt deferred-delete pass so their text cannot overlap load rows.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_9125', 'dimgray'),
+            ('IMG_9126', 'blue'),
+        ],
+    )
+
+    def fake_read_exif_metadata(
+            files: list[Path],
+            *,
+            batch_size: int,
+            batch_progress_callback: Any,
+    ) -> dict[str, dict[str, Any]]:
+        batch_progress_callback(1, 1, batch_size)
+        return {path.name: {} for path in files}
+
+    monkeypatch.setattr(
+        core_exif_module, 'read_exif_metadata', fake_read_exif_metadata
+    )
+    window.library.set_load_recursively(False)
+    reporter = workflows_module.ProgressReporter(
+        'Undoing photo organization',
+        (
+            workflows_module.ProgressStageDefinition(
+                'undo', 'Undoing photo organization'
+            ),
+        ),
+    )
+    undo_snapshot = reporter.update_stage(
+        'undo',
+        current=1,
+        total=2,
+        overall_progress=50,
+    )
+    window._show_progress_snapshot(undo_snapshot)
+    undo_row = window.progress_stage_list._rows['undo']
+
+    window._reload_current_folder_after_undo()
+    app.processEvents()
+
+    rows = window.progress_stage_list._rows
+    label_texts = {
+        label.text()
+        for label in window.progress_stage_list.findChildren(QLabel)
+        if label.text()
+    }
+
+    assert set(rows) == {
+        'scan',
+        'metadata',
+        'records',
+        'thumbnails',
+        'browse',
+    }
+    assert undo_row.isHidden() is True
+    assert undo_row.parentWidget() is None
+    assert 'Undoing photo organization' not in label_texts
+    assert {'Building photo list', 'Preparing browse grid', '2 of 2'} <= (
+        label_texts
+    )
+
+    window._hide_progress()
+    window.close()
+    del app
+
+
 def test_main_window_recursive_reload_progress_reports_all_load_stages(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
