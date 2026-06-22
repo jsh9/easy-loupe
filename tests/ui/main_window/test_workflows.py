@@ -16,7 +16,7 @@ import easy_loupe.ui.theme as theme_module
 from easy_loupe.core import exif as core_exif_module
 from easy_loupe.core.records import METADATA_FILENAME
 from easy_loupe.operations.common import OperationSummary, UndoPlan
-from easy_loupe.operations.export import OrganizeFilesOptions
+from easy_loupe.operations.export import FlagOrganizeFilesOptions
 from easy_loupe.operations.xmp import WriteXmpOptions
 from easy_loupe.ui.main_window.dialogs import OrganizerDialogResult
 from tests.ui._helpers import (
@@ -3174,12 +3174,11 @@ def test_main_window_open_organizer_dialog_starts_operation_worker(
         def selected_result() -> OrganizerDialogResult:
             return OrganizerDialogResult(
                 mode='reorganize',
-                organize_options=OrganizeFilesOptions(
+                organize_options=FlagOrganizeFilesOptions(
                     criterion='flag',
                     action='copy',
                     output_parent=tmp_path,
                     flag_folder_mode='picked_rejected',
-                    include_untagged=False,
                     conflict_policy='fail',
                 ),
             )
@@ -3221,12 +3220,11 @@ def test_main_window_operation_worker_legacy_progress_updates_overlay(
     monkeypatch.setattr(QThread, 'start', lambda _thread: None)
     request = OrganizerDialogResult(
         mode='reorganize',
-        organize_options=OrganizeFilesOptions(
+        organize_options=FlagOrganizeFilesOptions(
             criterion='flag',
             action='copy',
             output_parent=tmp_path,
             flag_folder_mode='picked_rejected',
-            include_untagged=False,
             conflict_policy='fail',
         ),
     )
@@ -3265,12 +3263,11 @@ def test_main_window_structured_organizer_progress_updates_overlay(
     monkeypatch.setattr(QThread, 'start', lambda _thread: None)
     request = OrganizerDialogResult(
         mode='reorganize',
-        organize_options=OrganizeFilesOptions(
+        organize_options=FlagOrganizeFilesOptions(
             criterion='flag',
             action='copy',
             output_parent=tmp_path,
             flag_folder_mode='picked_rejected',
-            include_untagged=False,
             conflict_policy='fail',
         ),
     )
@@ -3472,12 +3469,11 @@ def test_main_window_finished_dialog_uses_expected_title_and_undo_button(
         OperationSummary(processed_photos=1, moved_files=2),
         OrganizerDialogResult(
             mode='reorganize',
-            organize_options=OrganizeFilesOptions(
+            organize_options=FlagOrganizeFilesOptions(
                 criterion='flag',
                 action='move',
                 output_parent=tmp_path,
                 flag_folder_mode='picked_rejected',
-                include_untagged=False,
                 conflict_policy='fail',
             ),
         ),
@@ -3520,12 +3516,11 @@ def test_main_window_operation_finished_after_move_reloads_folder_and_shows_dial
     window._operation_kind = 'run'
     window._organizer_request = OrganizerDialogResult(
         mode='reorganize',
-        organize_options=OrganizeFilesOptions(
+        organize_options=FlagOrganizeFilesOptions(
             criterion='flag',
             action='move',
             output_parent=tmp_path,
             flag_folder_mode='picked_rejected',
-            include_untagged=False,
             conflict_policy='fail',
         ),
     )
@@ -3625,12 +3620,11 @@ def test_main_window_operation_finished_with_undo_starts_worker_immediately(
     window._operation_kind = 'run'
     window._organizer_request = OrganizerDialogResult(
         mode='reorganize',
-        organize_options=OrganizeFilesOptions(
+        organize_options=FlagOrganizeFilesOptions(
             criterion='flag',
             action='copy',
             output_parent=tmp_path,
             flag_folder_mode='picked_rejected',
-            include_untagged=False,
             conflict_policy='fail',
         ),
     )
@@ -3703,12 +3697,11 @@ def test_main_window_undo_finished_reloads_folder_and_shows_confirmation(
         pytest.param(
             OrganizerDialogResult(
                 mode='reorganize',
-                organize_options=OrganizeFilesOptions(
+                organize_options=FlagOrganizeFilesOptions(
                     criterion='flag',
                     action='copy',
                     output_parent=Path('/tmp'),
                     flag_folder_mode='picked_rejected',
-                    include_untagged=False,
                     conflict_policy='fail',
                 ),
             ),

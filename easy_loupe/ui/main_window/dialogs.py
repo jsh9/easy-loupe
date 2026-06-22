@@ -28,6 +28,8 @@ from PySide6.QtWidgets import (
 from easy_loupe.operations.export import (
     ConflictPolicy,
     FlagFolderMode,
+    FlagOrganizeFilesOptions,
+    MetadataOrganizeFilesOptions,
     OrganizeAction,
     OrganizeCriterion,
     OrganizeFilesOptions,
@@ -105,24 +107,40 @@ class OrganizerDialog(QDialog):
                 'OrganizeCriterion',
                 self._selected_value(self.criterion_group),
             )
+            action = cast(
+                'OrganizeAction',
+                self._selected_value(self.action_group),
+            )
+            conflict_policy = cast(
+                'ConflictPolicy',
+                self._selected_value(self.conflict_policy_group),
+            )
+            # Build the criterion-specific options here so disabled child
+            # controls cannot leak stale, irrelevant values into the request.
+            if criterion == 'flag':
+                return OrganizerDialogResult(
+                    mode='reorganize',
+                    organize_options=FlagOrganizeFilesOptions(
+                        criterion='flag',
+                        action=action,
+                        output_parent=output_parent,
+                        flag_folder_mode=cast(
+                            'FlagFolderMode',
+                            self._selected_value(self.flag_folder_mode_group),
+                        ),
+                        conflict_policy=conflict_policy,
+                        include_sidecars=True,
+                    ),
+                )
+
             return OrganizerDialogResult(
                 mode='reorganize',
-                organize_options=OrganizeFilesOptions(
+                organize_options=MetadataOrganizeFilesOptions(
                     criterion=criterion,
-                    action=cast(
-                        'OrganizeAction',
-                        self._selected_value(self.action_group),
-                    ),
+                    action=action,
                     output_parent=output_parent,
-                    flag_folder_mode=cast(
-                        'FlagFolderMode',
-                        self._selected_value(self.flag_folder_mode_group),
-                    ),
                     include_untagged=self._include_untagged_for(criterion),
-                    conflict_policy=cast(
-                        'ConflictPolicy',
-                        self._selected_value(self.conflict_policy_group),
-                    ),
+                    conflict_policy=conflict_policy,
                     include_sidecars=True,
                 ),
             )
@@ -470,8 +488,8 @@ class OrganizerDialog(QDialog):
         """
         Return the criterion-scoped untagged option for file organization.
 
-        Flag organizing encodes missing-flag behavior in ``flag_folder_mode``,
-        so the legacy boolean stays false for flag runs.
+        Flag organizing now builds ``FlagOrganizeFilesOptions`` instead, so
+        this helper only supplies the checkbox value for metadata criteria.
         """
         if criterion == 'color_label':
             return self.color_include_untagged_checkbox.isChecked()

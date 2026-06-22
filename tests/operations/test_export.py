@@ -12,7 +12,8 @@ from easy_loupe.operations.common import (
 )
 from easy_loupe.operations.export import (
     FlagFolderMode,
-    OrganizeFilesOptions,
+    FlagOrganizeFilesOptions,
+    MetadataOrganizeFilesOptions,
     organize_photos,
 )
 from tests.core._helpers import create_jpeg, stub_read_exif
@@ -58,8 +59,8 @@ def test_organize_photos_supports_tagged_criteria_conflicts_and_untagged(
     """
     Verify color/rating criteria keep checkbox-backed untagged behavior.
 
-    Flag organization now uses explicit folder modes, so this test protects the
-    remaining criteria from accidentally inheriting that routing logic.
+    Metadata options do not carry a flag folder mode, so this protects the
+    remaining criteria from accidentally inheriting flag-routing logic.
     """
     source_folder, library = _make_library(tmp_path, monkeypatch)
     output_parent = source_folder
@@ -69,11 +70,10 @@ def test_organize_photos_supports_tagged_criteria_conflicts_and_untagged(
     conflict_path.parent.mkdir(parents=True, exist_ok=True)
     conflict_path.write_bytes(b'conflict')
 
-    options = OrganizeFilesOptions(
+    options = MetadataOrganizeFilesOptions(
         criterion=criterion,  # type: ignore[arg-type]
         action=action,  # type: ignore[arg-type]
         output_parent=output_parent,
-        flag_folder_mode='picked_rejected',
         include_untagged=include_untagged,
         conflict_policy=conflict_policy,  # type: ignore[arg-type]
         include_sidecars=True,
@@ -189,8 +189,8 @@ def test_organize_photos_flag_folder_modes_route_files(
     """
     Verify each picked/rejected child mode controls flag bucket routing.
 
-    The old global untagged flag is intentionally true here; flag organizing
-    should use only ``flag_folder_mode`` to decide untouched photos.
+    The flag-specific options type has no ``include_untagged`` boolean; flag
+    organizing should use only ``flag_folder_mode`` to decide untouched photos.
     """
     source_folder, library = _make_library(tmp_path, monkeypatch)
     output_parent = tmp_path / 'organized'
@@ -205,12 +205,11 @@ def test_organize_photos_flag_folder_modes_route_files(
     summary = organize_photos(
         source_folder,
         library.get_photos(),
-        OrganizeFilesOptions(
+        FlagOrganizeFilesOptions(
             criterion='flag',
             action=action,  # type: ignore[arg-type]
             output_parent=output_parent,
             flag_folder_mode=flag_folder_mode,
-            include_untagged=True,
             conflict_policy='fail',
         ),
     )
@@ -258,12 +257,11 @@ def test_organize_photos_flag_folder_modes_preflight_conflicts(
         organize_photos(
             source_folder,
             library.get_photos(),
-            OrganizeFilesOptions(
+            FlagOrganizeFilesOptions(
                 criterion='flag',
                 action='copy',
                 output_parent=output_parent,
                 flag_folder_mode=flag_folder_mode,
-                include_untagged=False,
                 conflict_policy='fail',
             ),
         )
@@ -283,12 +281,11 @@ def test_organize_photos_supports_alternate_output_parent(
     summary = organize_photos(
         source_folder,
         library.get_photos(),
-        OrganizeFilesOptions(
+        FlagOrganizeFilesOptions(
             criterion='flag',
             action=action,  # type: ignore[arg-type]
             output_parent=output_parent,
             flag_folder_mode='picked_rejected',
-            include_untagged=False,
             conflict_policy='overwrite',
         ),
     )
@@ -339,12 +336,11 @@ def test_organize_photos_undo_restores_original_state_and_cleans_created_folders
     summary = organize_photos(
         source_folder,
         library.get_photos(),
-        OrganizeFilesOptions(
+        FlagOrganizeFilesOptions(
             criterion='flag',
             action=action,  # type: ignore[arg-type]
             output_parent=output_parent,
             flag_folder_mode=flag_folder_mode,
-            include_untagged=False,
             conflict_policy='fail',
         ),
     )
@@ -380,12 +376,11 @@ def test_organize_photos_undo_restores_overwritten_destination_files(
     summary = organize_photos(
         source_folder,
         library.get_photos(),
-        OrganizeFilesOptions(
+        FlagOrganizeFilesOptions(
             criterion='flag',
             action=action,  # type: ignore[arg-type]
             output_parent=output_parent,
             flag_folder_mode='picked_rejected',
-            include_untagged=False,
             conflict_policy='overwrite',
         ),
     )
@@ -443,12 +438,11 @@ def test_organize_photos_rolls_back_partial_failures(
         organize_photos(
             source_folder,
             library.get_photos(),
-            OrganizeFilesOptions(
+            FlagOrganizeFilesOptions(
                 criterion='flag',
                 action=action,  # type: ignore[arg-type]
                 output_parent=output_parent,
                 flag_folder_mode='picked_rejected',
-                include_untagged=False,
                 conflict_policy='fail',
             ),
         )
@@ -484,12 +478,11 @@ def test_organize_photos_preserves_relative_subfolder_paths(
     summary = organize_photos(
         source_folder,
         library.get_photos(),
-        OrganizeFilesOptions(
+        FlagOrganizeFilesOptions(
             criterion='flag',
             action='copy',
             output_parent=output_parent,
             flag_folder_mode='picked_rejected',
-            include_untagged=False,
             conflict_policy='fail',
             include_sidecars=True,
         ),
@@ -512,12 +505,11 @@ def test_organize_and_undo_report_structured_progress(
     """
     source_folder, library = _make_library(tmp_path, monkeypatch)
     output_parent = tmp_path / 'organized'
-    options = OrganizeFilesOptions(
+    options = FlagOrganizeFilesOptions(
         criterion='flag',
         action='copy',
         output_parent=output_parent,
         flag_folder_mode='picked_rejected',
-        include_untagged=False,
         conflict_policy='fail',
     )
     progress_updates: list[tuple[str, int]] = []
@@ -569,12 +561,11 @@ def test_organize_skip_conflict_reports_completed_progress(
     summary = organize_photos(
         source_folder,
         library.get_photos(),
-        OrganizeFilesOptions(
+        FlagOrganizeFilesOptions(
             criterion='flag',
             action='copy',
             output_parent=source_folder,
             flag_folder_mode='picked_rejected',
-            include_untagged=False,
             conflict_policy='skip',
         ),
         lambda message, progress: progress_updates.append((
@@ -614,12 +605,11 @@ def test_organize_photos_empty_jobs_report_zero_total_progress(
     summary = organize_photos(
         source_folder,
         [],
-        OrganizeFilesOptions(
+        FlagOrganizeFilesOptions(
             criterion='flag',
             action='copy',
             output_parent=tmp_path / 'organized',
             flag_folder_mode='picked_rejected',
-            include_untagged=False,
             conflict_policy='fail',
         ),
         progress_snapshot_callback=progress_snapshots.append,

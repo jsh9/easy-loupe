@@ -4,6 +4,10 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QApplication, QDialogButtonBox, QMessageBox
 
+from easy_loupe.operations.export import (
+    FlagOrganizeFilesOptions,
+    MetadataOrganizeFilesOptions,
+)
 from easy_loupe.ui.main_window.dialogs import OrganizerDialog
 
 if TYPE_CHECKING:
@@ -115,8 +119,9 @@ def test_organizer_dialog_selected_result_builds_typed_options(
     """
     Verify criterion-specific child controls map into typed options.
 
-    Rating/color use their own untagged checkboxes, while flag organization
-    uses ``flag_folder_mode`` and must not inherit a stale untagged boolean.
+    Rating/color results must omit flag folder modes, and flag results must
+    omit untagged checkboxes, so callers cannot observe stale disabled-control
+    state from another criterion.
     """
     app = QApplication.instance() or QApplication([])
     dialog = OrganizerDialog(current_folder=tmp_path)
@@ -133,11 +138,15 @@ def test_organizer_dialog_selected_result_builds_typed_options(
 
     assert reorganize_result.mode == 'reorganize'
     assert reorganize_result.organize_options is not None
+    assert isinstance(
+        reorganize_result.organize_options,
+        MetadataOrganizeFilesOptions,
+    )
     assert reorganize_result.organize_options.criterion == 'rating'
     assert reorganize_result.organize_options.action == 'move'
     assert (
-        reorganize_result.organize_options.flag_folder_mode
-        == 'picked_rejected_untagged'
+        hasattr(reorganize_result.organize_options, 'flag_folder_mode')
+        is False
     )
     assert reorganize_result.organize_options.include_untagged is True
     assert reorganize_result.organize_options.conflict_policy == 'overwrite'
@@ -150,9 +159,13 @@ def test_organizer_dialog_selected_result_builds_typed_options(
     flag_result = dialog.selected_result()
 
     assert flag_result.organize_options is not None
+    assert isinstance(
+        flag_result.organize_options,
+        FlagOrganizeFilesOptions,
+    )
     assert flag_result.organize_options.criterion == 'flag'
     assert flag_result.organize_options.flag_folder_mode == 'picked_others'
-    assert flag_result.organize_options.include_untagged is False
+    assert hasattr(flag_result.organize_options, 'include_untagged') is False
 
     dialog._button_with_value(dialog.mode_group, 'xmp').setChecked(True)
     xmp_result = dialog.selected_result()
