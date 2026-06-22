@@ -16,7 +16,7 @@ import easy_loupe.ui.theme as theme_module
 from easy_loupe.core import exif as core_exif_module
 from easy_loupe.core.records import METADATA_FILENAME
 from easy_loupe.operations.common import OperationSummary, UndoPlan
-from easy_loupe.operations.export import OrganizeFilesOptions
+from easy_loupe.operations.export import FlagOrganizeFilesOptions
 from easy_loupe.operations.xmp import WriteXmpOptions
 from easy_loupe.ui.main_window.dialogs import OrganizerDialogResult
 from tests.ui._helpers import (
@@ -2450,6 +2450,84 @@ def test_main_window_post_operation_reload_progress_reports_all_load_stages(
     del app
 
 
+def test_main_window_undo_reload_replaces_structured_undo_progress(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify undo reload progress replaces stale undo stage rows immediately.
+
+    The undo workflow switches directly from structured undo progress to
+    structured folder-load progress. Stale undo rows must be hidden before the
+    Qt deferred-delete pass so their text cannot overlap load rows.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_9125', 'dimgray'),
+            ('IMG_9126', 'blue'),
+        ],
+    )
+
+    def fake_read_exif_metadata(
+            files: list[Path],
+            *,
+            batch_size: int,
+            batch_progress_callback: Any,
+    ) -> dict[str, dict[str, Any]]:
+        batch_progress_callback(1, 1, batch_size)
+        return {path.name: {} for path in files}
+
+    monkeypatch.setattr(
+        core_exif_module, 'read_exif_metadata', fake_read_exif_metadata
+    )
+    window.library.set_load_recursively(False)
+    reporter = workflows_module.ProgressReporter(
+        'Undoing photo organization',
+        (
+            workflows_module.ProgressStageDefinition(
+                'undo', 'Undoing photo organization'
+            ),
+        ),
+    )
+    undo_snapshot = reporter.update_stage(
+        'undo',
+        current=1,
+        total=2,
+        overall_progress=50,
+    )
+    window._show_progress_snapshot(undo_snapshot)
+    undo_row = window.progress_stage_list._rows['undo']
+
+    window._reload_current_folder_after_undo()
+    app.processEvents()
+
+    rows = window.progress_stage_list._rows
+    label_texts = {
+        label.text()
+        for label in window.progress_stage_list.findChildren(QLabel)
+        if label.text()
+    }
+
+    assert set(rows) == {
+        'scan',
+        'metadata',
+        'records',
+        'thumbnails',
+        'browse',
+    }
+    assert undo_row.isHidden() is True
+    assert undo_row.parentWidget() is None
+    assert 'Undoing photo organization' not in label_texts
+    assert {'Building photo list', 'Preparing browse grid', '2 of 2'} <= (
+        label_texts
+    )
+
+    window._hide_progress()
+    window.close()
+    del app
+
+
 def test_main_window_recursive_reload_progress_reports_all_load_stages(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -3096,11 +3174,11 @@ def test_main_window_open_organizer_dialog_starts_operation_worker(
         def selected_result() -> OrganizerDialogResult:
             return OrganizerDialogResult(
                 mode='reorganize',
-                organize_options=OrganizeFilesOptions(
+                organize_options=FlagOrganizeFilesOptions(
                     criterion='flag',
                     action='copy',
                     output_parent=tmp_path,
-                    include_untagged=False,
+                    flag_folder_mode='picked_rejected',
                     conflict_policy='fail',
                 ),
             )
@@ -3142,11 +3220,11 @@ def test_main_window_operation_worker_legacy_progress_updates_overlay(
     monkeypatch.setattr(QThread, 'start', lambda _thread: None)
     request = OrganizerDialogResult(
         mode='reorganize',
-        organize_options=OrganizeFilesOptions(
+        organize_options=FlagOrganizeFilesOptions(
             criterion='flag',
             action='copy',
             output_parent=tmp_path,
-            include_untagged=False,
+            flag_folder_mode='picked_rejected',
             conflict_policy='fail',
         ),
     )
@@ -3185,11 +3263,11 @@ def test_main_window_structured_organizer_progress_updates_overlay(
     monkeypatch.setattr(QThread, 'start', lambda _thread: None)
     request = OrganizerDialogResult(
         mode='reorganize',
-        organize_options=OrganizeFilesOptions(
+        organize_options=FlagOrganizeFilesOptions(
             criterion='flag',
             action='copy',
             output_parent=tmp_path,
-            include_untagged=False,
+            flag_folder_mode='picked_rejected',
             conflict_policy='fail',
         ),
     )
@@ -3391,11 +3469,11 @@ def test_main_window_finished_dialog_uses_expected_title_and_undo_button(
         OperationSummary(processed_photos=1, moved_files=2),
         OrganizerDialogResult(
             mode='reorganize',
-            organize_options=OrganizeFilesOptions(
+            organize_options=FlagOrganizeFilesOptions(
                 criterion='flag',
                 action='move',
                 output_parent=tmp_path,
-                include_untagged=False,
+                flag_folder_mode='picked_rejected',
                 conflict_policy='fail',
             ),
         ),
@@ -3438,11 +3516,11 @@ def test_main_window_operation_finished_after_move_reloads_folder_and_shows_dial
     window._operation_kind = 'run'
     window._organizer_request = OrganizerDialogResult(
         mode='reorganize',
-        organize_options=OrganizeFilesOptions(
+        organize_options=FlagOrganizeFilesOptions(
             criterion='flag',
             action='move',
             output_parent=tmp_path,
-            include_untagged=False,
+            flag_folder_mode='picked_rejected',
             conflict_policy='fail',
         ),
     )
@@ -3542,11 +3620,11 @@ def test_main_window_operation_finished_with_undo_starts_worker_immediately(
     window._operation_kind = 'run'
     window._organizer_request = OrganizerDialogResult(
         mode='reorganize',
-        organize_options=OrganizeFilesOptions(
+        organize_options=FlagOrganizeFilesOptions(
             criterion='flag',
             action='copy',
             output_parent=tmp_path,
-            include_untagged=False,
+            flag_folder_mode='picked_rejected',
             conflict_policy='fail',
         ),
     )
@@ -3619,11 +3697,11 @@ def test_main_window_undo_finished_reloads_folder_and_shows_confirmation(
         pytest.param(
             OrganizerDialogResult(
                 mode='reorganize',
-                organize_options=OrganizeFilesOptions(
+                organize_options=FlagOrganizeFilesOptions(
                     criterion='flag',
                     action='copy',
                     output_parent=Path('/tmp'),
-                    include_untagged=False,
+                    flag_folder_mode='picked_rejected',
                     conflict_policy='fail',
                 ),
             ),

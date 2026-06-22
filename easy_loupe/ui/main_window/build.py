@@ -129,13 +129,6 @@ class MainWindowBuildMixin:
         )
         top_bar.addWidget(self.detect_button)
 
-        self.organize_button = QPushButton('Organize')
-        self.organize_button.clicked.connect(self.open_organizer_dialog)
-        self.organize_button.setToolTip(
-            self._shortcut_tooltip('Organize Photos', 'Ctrl+Shift+E')
-        )
-        top_bar.addWidget(self.organize_button)
-
         self.filter_button = QPushButton('Filter')
         self.filter_button.setObjectName('photoFilterButton')
         self.filter_button.setToolTip(
@@ -143,6 +136,13 @@ class MainWindowBuildMixin:
         )
         self.filter_button.clicked.connect(self._show_photo_filter_menu)
         top_bar.addWidget(self.filter_button)
+
+        self.organize_button = QPushButton('Organize')
+        self.organize_button.clicked.connect(self.open_organizer_dialog)
+        self.organize_button.setToolTip(
+            self._shortcut_tooltip('Organize Photos', 'Ctrl+Shift+E')
+        )
+        top_bar.addWidget(self.organize_button)
 
         self.theme_toggle = QCheckBox('Dark theme')
         self.theme_toggle.setChecked(False)

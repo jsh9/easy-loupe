@@ -220,7 +220,10 @@ build keeps a terminal attached so startup errors include a normal traceback.
   `Ctrl+Shift+E` to either reorganize files by one tag criterion or write
   shared XMP sidecars for Lightroom/Capture One style metadata exchange, then
   immediately undo the completed operation from the finished dialog if needed.
-  Reorganized outputs preserve source subfolder paths inside each tag bucket.
+  Picked/rejected organization supports `Picked`, `Rejected`, `Untagged`, and
+  `Others` folder-routing modes, while color-label and rating organization can
+  optionally include untagged photos. Reorganized outputs preserve source
+  subfolder paths inside each tag bucket.
 - Displays metadata in the top bar and thumbnail strips using star ratings, a
   colored label dot, and pick/reject indicators.
 - Supports autofocus-point/manual zoom, split view, per-photo remembered manual

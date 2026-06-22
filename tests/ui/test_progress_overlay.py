@@ -77,3 +77,78 @@ def test_progress_overlay_controller_switches_scalar_and_stage_rows() -> None:
     assert geometry_updates
 
     parent.close()
+
+
+def test_progress_overlay_replaces_structured_rows_immediately() -> None:
+    """
+    Verify stale structured rows are hidden before deferred Qt deletion.
+
+    Undo completion can switch directly from an ``undo`` snapshot to folder
+    reload snapshots. Removed rows must stop painting immediately, before
+    ``deleteLater`` gets its next event-loop turn.
+    """
+    QApplication.instance() or QApplication([])
+    parent = QWidget()
+    parent.resize(640, 480)
+    parent.show()
+    widgets = build_progress_overlay(parent)
+    controller = ProgressOverlayController(
+        widgets, update_geometry=lambda: None
+    )
+
+    controller.show_snapshot(
+        ProgressSnapshot(
+            workflow_label='Undoing photo organization',
+            current_message='Undoing photo organization',
+            overall_progress=50,
+            stages=(
+                ProgressStageSnapshot(
+                    'undo',
+                    'Undoing photo organization',
+                    current=1,
+                    total=2,
+                    status='active',
+                ),
+            ),
+        )
+    )
+    undo_row = widgets.stage_list._rows['undo']
+
+    controller.show_snapshot(
+        ProgressSnapshot(
+            workflow_label='Loading folder',
+            current_message='Preparing browse grid',
+            overall_progress=200,
+            stages=(
+                ProgressStageSnapshot(
+                    'scan',
+                    'Scanning folder',
+                    current=100,
+                    total=100,
+                    status='complete',
+                ),
+                ProgressStageSnapshot(
+                    'browse',
+                    'Preparing browse grid',
+                    current=117,
+                    total=117,
+                    status='complete',
+                ),
+            ),
+        )
+    )
+
+    label_texts = {
+        label.text()
+        for label in widgets.stage_list.findChildren(QLabel)
+        if label.text()
+    }
+    assert set(widgets.stage_list._rows) == {'scan', 'browse'}
+    assert undo_row.isHidden() is True
+    assert undo_row.parentWidget() is None
+    assert 'Undoing photo organization' not in label_texts
+    assert {'Scanning folder', 'Preparing browse grid', '117 of 117'} <= (
+        label_texts
+    )
+
+    parent.close()

@@ -107,11 +107,9 @@ class ProgressStageListWidget(QWidget):
     def update_snapshot(self, snapshot: ProgressSnapshot) -> None:
         """Render the ordered stage rows in ``snapshot``."""
         expected_stage_ids = {stage.stage_id for stage in snapshot.stages}
-        for stage_id, row in list(self._rows.items()):
+        for stage_id in list(self._rows):
             if stage_id not in expected_stage_ids:
-                self._layout.removeWidget(row)
-                row.deleteLater()
-                del self._rows[stage_id]
+                self._remove_stage_row(stage_id)
 
         for index, stage in enumerate(snapshot.stages):
             row = self._rows.get(stage.stage_id)
@@ -128,12 +126,20 @@ class ProgressStageListWidget(QWidget):
 
     def clear_stages(self) -> None:
         """Remove all rendered stage rows and hide the list."""
-        for row in self._rows.values():
-            self._layout.removeWidget(row)
-            row.deleteLater()
+        for stage_id in list(self._rows):
+            self._remove_stage_row(stage_id)
 
-        self._rows.clear()
         self.hide()
+
+    def _remove_stage_row(self, stage_id: str) -> None:
+        """Detach one stale row immediately, then let Qt delete it later."""
+        row = self._rows.pop(stage_id)
+        self._layout.removeWidget(row)
+        # ``deleteLater`` waits for the event loop; hide and detach first so a
+        # stale row cannot paint over the next structured progress snapshot.
+        row.hide()
+        row.setParent(None)
+        row.deleteLater()
 
 
 class ProgressOverlayController:

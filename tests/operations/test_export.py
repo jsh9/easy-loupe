@@ -11,6 +11,9 @@ from easy_loupe.operations.common import (
     undo_operation,
 )
 from easy_loupe.operations.export import (
+    FlagFolderMode,
+    FlagOrganizeFilesOptions,
+    MetadataOrganizeFilesOptions,
     OrganizeFilesOptions,
     organize_photos,
 )
@@ -24,11 +27,29 @@ def test_export_module_exports_organize_photos() -> None:
     assert organize_photos.__name__ == 'organize_photos'
 
 
-@pytest.mark.parametrize('criterion', ['flag', 'color_label', 'rating'])
+FLAG_FOLDER_MODES: tuple[FlagFolderMode, ...] = (
+    'picked_rejected_untagged',
+    'picked_rejected',
+    'picked_others',
+    'rejected_others',
+    'picked_only',
+    'rejected_only',
+)
+ALL_SOURCE_FILENAMES = (
+    'IMG_A.JPG',
+    'IMG_B.CR3',
+    'IMG_B.XMP',
+    'IMG_C.CR3',
+    'IMG_C.JPG',
+    'IMG_C.XMP',
+)
+
+
+@pytest.mark.parametrize('criterion', ['color_label', 'rating'])
 @pytest.mark.parametrize('action', ['copy', 'move'])
 @pytest.mark.parametrize('include_untagged', [False, True])
 @pytest.mark.parametrize('conflict_policy', ['fail', 'skip', 'overwrite'])
-def test_organize_photos_supports_grouped_files_conflicts_and_untagged(
+def test_organize_photos_supports_tagged_criteria_conflicts_and_untagged(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
         criterion: str,
@@ -36,6 +57,12 @@ def test_organize_photos_supports_grouped_files_conflicts_and_untagged(
         include_untagged: bool,
         conflict_policy: str,
 ) -> None:
+    """
+    Verify color/rating criteria keep checkbox-backed untagged behavior.
+
+    Metadata options do not carry a flag folder mode, so this protects the
+    remaining criteria from accidentally inheriting flag-routing logic.
+    """
     source_folder, library = _make_library(tmp_path, monkeypatch)
     output_parent = source_folder
     conflict_path = (
@@ -44,7 +71,7 @@ def test_organize_photos_supports_grouped_files_conflicts_and_untagged(
     conflict_path.parent.mkdir(parents=True, exist_ok=True)
     conflict_path.write_bytes(b'conflict')
 
-    options = OrganizeFilesOptions(
+    options = MetadataOrganizeFilesOptions(
         criterion=criterion,  # type: ignore[arg-type]
         action=action,  # type: ignore[arg-type]
         output_parent=output_parent,
@@ -152,6 +179,182 @@ def test_organize_photos_supports_grouped_files_conflicts_and_untagged(
             )
 
 
+@pytest.mark.parametrize('flag_folder_mode', FLAG_FOLDER_MODES)
+@pytest.mark.parametrize('action', ['copy', 'move'])
+def test_organize_photos_flag_folder_modes_route_files(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        flag_folder_mode: FlagFolderMode,
+        action: str,
+) -> None:
+    """
+    Verify each picked/rejected child mode controls flag bucket routing.
+
+    The flag-specific options type has no ``include_untagged`` boolean; flag
+    organizing should use only ``flag_folder_mode`` to decide untouched photos.
+    """
+    source_folder, library = _make_library(tmp_path, monkeypatch)
+    output_parent = tmp_path / 'organized'
+    expected_bucket_files = _expected_flag_bucket_files(flag_folder_mode)
+    expected_processed_photos = len(
+        _photo_ids_from_bucket_files(expected_bucket_files)
+    )
+    expected_file_count = sum(
+        len(names) for names in expected_bucket_files.values()
+    )
+
+    summary = organize_photos(
+        source_folder,
+        library.get_photos(),
+        FlagOrganizeFilesOptions(
+            criterion='flag',
+            action=action,  # type: ignore[arg-type]
+            output_parent=output_parent,
+            flag_folder_mode=flag_folder_mode,
+            conflict_policy='fail',
+        ),
+    )
+
+    assert summary.processed_photos == expected_processed_photos
+    if action == 'copy':
+        assert summary.copied_files == expected_file_count
+        assert summary.moved_files == 0
+        _assert_sources_present(source_folder, list(ALL_SOURCE_FILENAMES))
+    else:
+        untouched = _untouched_source_files_for_flag_mode(flag_folder_mode)
+        moved = [
+            name for name in ALL_SOURCE_FILENAMES if name not in untouched
+        ]
+        assert summary.copied_files == 0
+        assert summary.moved_files == expected_file_count
+        _assert_sources_present(source_folder, untouched)
+        _assert_sources_absent(source_folder, moved)
+
+    _assert_bucket_files(output_parent, expected_bucket_files)
+
+
+@pytest.mark.parametrize('flag_folder_mode', FLAG_FOLDER_MODES)
+def test_organize_photos_flag_folder_modes_preflight_conflicts(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        flag_folder_mode: FlagFolderMode,
+) -> None:
+    """
+    Verify every flag folder mode participates in destination preflight.
+
+    Each mode can route a different first photo to a different bucket, so
+    conflict detection must be based on the selected routing mode.
+    """
+    source_folder, library = _make_library(tmp_path, monkeypatch)
+    output_parent = tmp_path / 'organized'
+    folder_name, filename = _conflict_destination_for_flag_mode(
+        flag_folder_mode
+    )
+    conflict_path = output_parent / folder_name / filename
+    conflict_path.parent.mkdir(parents=True)
+    conflict_path.write_bytes(b'conflict')
+
+    with pytest.raises(OperationError, match='Destination already exists'):
+        organize_photos(
+            source_folder,
+            library.get_photos(),
+            FlagOrganizeFilesOptions(
+                criterion='flag',
+                action='copy',
+                output_parent=output_parent,
+                flag_folder_mode=flag_folder_mode,
+                conflict_policy='fail',
+            ),
+        )
+
+    assert conflict_path.read_bytes() == b'conflict'
+    _assert_sources_present(source_folder, list(ALL_SOURCE_FILENAMES))
+
+
+@pytest.mark.parametrize(
+    ('criterion', 'include_untagged', 'expected_bucket_files'),
+    [
+        pytest.param(
+            'flag',
+            False,
+            {
+                'Picked': {'IMG_A.JPG'},
+                'Rejected': {'IMG_B.CR3', 'IMG_B.XMP'},
+            },
+            id='flag-skip-untagged',
+        ),
+        pytest.param(
+            'flag',
+            True,
+            {
+                'Picked': {'IMG_A.JPG'},
+                'Rejected': {'IMG_B.CR3', 'IMG_B.XMP'},
+                'Untagged': {'IMG_C.CR3', 'IMG_C.JPG', 'IMG_C.XMP'},
+            },
+            id='flag-include-untagged',
+        ),
+        pytest.param(
+            'color_label',
+            True,
+            {
+                'Red': {'IMG_A.JPG'},
+                'Green': {'IMG_B.CR3', 'IMG_B.XMP'},
+                'Untagged': {'IMG_C.CR3', 'IMG_C.JPG', 'IMG_C.XMP'},
+            },
+            id='color-label',
+        ),
+        pytest.param(
+            'rating',
+            False,
+            {
+                '1 Star': {'IMG_A.JPG'},
+                '3 Stars': {'IMG_B.CR3', 'IMG_B.XMP'},
+            },
+            id='rating',
+        ),
+    ],
+)
+def test_organize_files_options_legacy_constructor_remains_supported(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        criterion: str,
+        include_untagged: bool,
+        expected_bucket_files: dict[str, set[str]],
+) -> None:
+    """
+    Verify the old ``OrganizeFilesOptions(...)`` constructor still works.
+
+    Existing integrations may pass the legacy dataclass directly to
+    ``organize_photos``. This protects the compatibility mapping while the UI
+    uses the newer criterion-specific option types.
+    """
+    source_folder, library = _make_library(tmp_path, monkeypatch)
+    output_parent = tmp_path / 'organized'
+    expected_file_count = sum(
+        len(names) for names in expected_bucket_files.values()
+    )
+
+    summary = organize_photos(
+        source_folder,
+        library.get_photos(),
+        OrganizeFilesOptions(
+            criterion=criterion,  # type: ignore[arg-type]
+            action='copy',
+            output_parent=output_parent,
+            include_untagged=include_untagged,
+            conflict_policy='fail',
+        ),
+    )
+
+    assert summary.processed_photos == len(
+        _photo_ids_from_bucket_files(expected_bucket_files)
+    )
+    assert summary.copied_files == expected_file_count
+    assert summary.moved_files == 0
+    _assert_sources_present(source_folder, list(ALL_SOURCE_FILENAMES))
+    _assert_bucket_files(output_parent, expected_bucket_files)
+
+
 @pytest.mark.parametrize('action', ['copy', 'move'])
 def test_organize_photos_supports_alternate_output_parent(
         tmp_path: Path,
@@ -163,11 +366,11 @@ def test_organize_photos_supports_alternate_output_parent(
     summary = organize_photos(
         source_folder,
         library.get_photos(),
-        OrganizeFilesOptions(
+        FlagOrganizeFilesOptions(
             criterion='flag',
             action=action,  # type: ignore[arg-type]
             output_parent=output_parent,
-            include_untagged=False,
+            flag_folder_mode='picked_rejected',
             conflict_policy='overwrite',
         ),
     )
@@ -190,15 +393,24 @@ def test_organize_photos_supports_alternate_output_parent(
 
 
 @pytest.mark.parametrize('action', ['copy', 'move'])
-@pytest.mark.parametrize('include_untagged', [False, True])
+@pytest.mark.parametrize(
+    'flag_folder_mode',
+    ['picked_rejected', 'picked_rejected_untagged'],
+)
 @pytest.mark.parametrize('use_alternate_output_parent', [False, True])
 def test_organize_photos_undo_restores_original_state_and_cleans_created_folders(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
         action: str,
-        include_untagged: bool,
+        flag_folder_mode: FlagFolderMode,
         use_alternate_output_parent: bool,
 ) -> None:
+    """
+    Verify undo cleanup covers flag runs with and without ``Untagged`` buckets.
+
+    The new default creates an extra bucket for unflagged photos, so undo must
+    still restore source files and remove organizer-created directories.
+    """
     source_folder, library = _make_library(tmp_path, monkeypatch)
     output_parent = (
         tmp_path / 'organized'
@@ -209,11 +421,11 @@ def test_organize_photos_undo_restores_original_state_and_cleans_created_folders
     summary = organize_photos(
         source_folder,
         library.get_photos(),
-        OrganizeFilesOptions(
+        FlagOrganizeFilesOptions(
             criterion='flag',
             action=action,  # type: ignore[arg-type]
             output_parent=output_parent,
-            include_untagged=include_untagged,
+            flag_folder_mode=flag_folder_mode,
             conflict_policy='fail',
         ),
     )
@@ -249,11 +461,11 @@ def test_organize_photos_undo_restores_overwritten_destination_files(
     summary = organize_photos(
         source_folder,
         library.get_photos(),
-        OrganizeFilesOptions(
+        FlagOrganizeFilesOptions(
             criterion='flag',
             action=action,  # type: ignore[arg-type]
             output_parent=output_parent,
-            include_untagged=False,
+            flag_folder_mode='picked_rejected',
             conflict_policy='overwrite',
         ),
     )
@@ -311,11 +523,11 @@ def test_organize_photos_rolls_back_partial_failures(
         organize_photos(
             source_folder,
             library.get_photos(),
-            OrganizeFilesOptions(
+            FlagOrganizeFilesOptions(
                 criterion='flag',
                 action=action,  # type: ignore[arg-type]
                 output_parent=output_parent,
-                include_untagged=False,
+                flag_folder_mode='picked_rejected',
                 conflict_policy='fail',
             ),
         )
@@ -351,11 +563,11 @@ def test_organize_photos_preserves_relative_subfolder_paths(
     summary = organize_photos(
         source_folder,
         library.get_photos(),
-        OrganizeFilesOptions(
+        FlagOrganizeFilesOptions(
             criterion='flag',
             action='copy',
             output_parent=output_parent,
-            include_untagged=False,
+            flag_folder_mode='picked_rejected',
             conflict_policy='fail',
             include_sidecars=True,
         ),
@@ -378,11 +590,11 @@ def test_organize_and_undo_report_structured_progress(
     """
     source_folder, library = _make_library(tmp_path, monkeypatch)
     output_parent = tmp_path / 'organized'
-    options = OrganizeFilesOptions(
+    options = FlagOrganizeFilesOptions(
         criterion='flag',
         action='copy',
         output_parent=output_parent,
-        include_untagged=False,
+        flag_folder_mode='picked_rejected',
         conflict_policy='fail',
     )
     progress_updates: list[tuple[str, int]] = []
@@ -434,11 +646,11 @@ def test_organize_skip_conflict_reports_completed_progress(
     summary = organize_photos(
         source_folder,
         library.get_photos(),
-        OrganizeFilesOptions(
+        FlagOrganizeFilesOptions(
             criterion='flag',
             action='copy',
             output_parent=source_folder,
-            include_untagged=False,
+            flag_folder_mode='picked_rejected',
             conflict_policy='skip',
         ),
         lambda message, progress: progress_updates.append((
@@ -478,11 +690,11 @@ def test_organize_photos_empty_jobs_report_zero_total_progress(
     summary = organize_photos(
         source_folder,
         [],
-        OrganizeFilesOptions(
+        FlagOrganizeFilesOptions(
             criterion='flag',
             action='copy',
             output_parent=tmp_path / 'organized',
-            include_untagged=False,
+            flag_folder_mode='picked_rejected',
             conflict_policy='fail',
         ),
         progress_snapshot_callback=progress_snapshots.append,
@@ -584,6 +796,99 @@ def _assert_destination_files(
     }
     if include_untagged:
         assert len(list((output_parent / 'Untagged').glob('IMG_C*'))) == 3
+
+
+def _expected_flag_bucket_files(
+        flag_folder_mode: FlagFolderMode,
+) -> dict[str, set[str]]:
+    if flag_folder_mode == 'picked_rejected_untagged':
+        return {
+            'Picked': {'IMG_A.JPG'},
+            'Rejected': {'IMG_B.CR3', 'IMG_B.XMP'},
+            'Untagged': {'IMG_C.CR3', 'IMG_C.JPG', 'IMG_C.XMP'},
+        }
+
+    if flag_folder_mode == 'picked_rejected':
+        return {
+            'Picked': {'IMG_A.JPG'},
+            'Rejected': {'IMG_B.CR3', 'IMG_B.XMP'},
+        }
+
+    if flag_folder_mode == 'picked_others':
+        return {
+            'Picked': {'IMG_A.JPG'},
+            'Others': {
+                'IMG_B.CR3',
+                'IMG_B.XMP',
+                'IMG_C.CR3',
+                'IMG_C.JPG',
+                'IMG_C.XMP',
+            },
+        }
+
+    if flag_folder_mode == 'rejected_others':
+        return {
+            'Rejected': {'IMG_B.CR3', 'IMG_B.XMP'},
+            'Others': {
+                'IMG_A.JPG',
+                'IMG_C.CR3',
+                'IMG_C.JPG',
+                'IMG_C.XMP',
+            },
+        }
+
+    if flag_folder_mode == 'picked_only':
+        return {'Picked': {'IMG_A.JPG'}}
+
+    if flag_folder_mode == 'rejected_only':
+        return {'Rejected': {'IMG_B.CR3', 'IMG_B.XMP'}}
+
+    raise AssertionError(f'Unexpected flag folder mode: {flag_folder_mode}')
+
+
+def _untouched_source_files_for_flag_mode(
+        flag_folder_mode: FlagFolderMode,
+) -> list[str]:
+    expected_bucket_files = _expected_flag_bucket_files(flag_folder_mode)
+    moved = {
+        name for names in expected_bucket_files.values() for name in names
+    }
+    return [name for name in ALL_SOURCE_FILENAMES if name not in moved]
+
+
+def _photo_ids_from_bucket_files(
+        bucket_files: dict[str, set[str]],
+) -> set[str]:
+    return {
+        name.split('.', maxsplit=1)[0]
+        for names in bucket_files.values()
+        for name in names
+    }
+
+
+def _conflict_destination_for_flag_mode(
+        flag_folder_mode: FlagFolderMode,
+) -> tuple[str, str]:
+    expected_bucket_files = _expected_flag_bucket_files(flag_folder_mode)
+    for folder_name, names in expected_bucket_files.items():
+        for filename in sorted(names):
+            if filename.endswith(('.CR3', '.JPG')):
+                return folder_name, filename
+
+    raise AssertionError(f'No conflict target for {flag_folder_mode}')
+
+
+def _assert_bucket_files(
+        output_parent: Path,
+        expected_bucket_files: dict[str, set[str]],
+) -> None:
+    assert {
+        path.name for path in output_parent.iterdir() if path.is_dir()
+    } == set(expected_bucket_files)
+    for folder_name, expected_names in expected_bucket_files.items():
+        assert {
+            path.name for path in (output_parent / folder_name).iterdir()
+        } == expected_names
 
 
 def _assert_sources_present(folder: Path, names: list[str]) -> None:

@@ -33,14 +33,71 @@ if TYPE_CHECKING:
     from easy_loupe.core.records import PhotoRecord
 
 ProgressCallback = Callable[[str, int], None]
+MetadataOrganizeCriterion = Literal['color_label', 'rating']
 OrganizeCriterion = Literal['flag', 'color_label', 'rating']
+FlagFolderMode = Literal[
+    'picked_rejected_untagged',
+    'picked_rejected',
+    'picked_others',
+    'rejected_others',
+    'picked_only',
+    'rejected_only',
+]
 OrganizeAction = Literal['copy', 'move']
 ConflictPolicy = Literal['fail', 'skip', 'overwrite']
 
 
 @dataclass(slots=True, frozen=True)
+class FlagOrganizeFilesOptions:
+    """
+    Options for picked/rejected file organization.
+
+    Flag organization has several ways to route photos without a picked or
+    rejected flag, so ``flag_folder_mode`` is the only source of truth for that
+    decision. Keeping this separate from metadata criteria prevents a stale
+    ``include_untagged`` value from looking meaningful for flag runs.
+    """
+
+    criterion: Literal['flag']
+    action: OrganizeAction
+    output_parent: Path
+    flag_folder_mode: FlagFolderMode
+    conflict_policy: ConflictPolicy
+    include_sidecars: bool = True
+
+
+@dataclass(slots=True, frozen=True)
+class MetadataOrganizeFilesOptions:
+    """
+    Options for rating and color-label file organization.
+
+    Rating and color-label organization only need one missing-metadata choice:
+    include untagged photos under ``Untagged`` or skip them. Keeping that
+    boolean separate from flag folder modes makes the valid control surface
+    match the dialog and avoids ignored fields in organizer callers.
+    """
+
+    criterion: MetadataOrganizeCriterion
+    action: OrganizeAction
+    output_parent: Path
+    include_untagged: bool
+    conflict_policy: ConflictPolicy
+    include_sidecars: bool = True
+
+
+@dataclass(slots=True, frozen=True)
 class OrganizeFilesOptions:
-    """Options for reorganizing photos into output folders."""
+    """
+    Legacy options for reorganizing photos into output folders.
+
+    New UI code should prefer ``FlagOrganizeFilesOptions`` or
+    ``MetadataOrganizeFilesOptions`` so invalid criterion-specific fields
+    cannot be mixed, but this dataclass remains callable for existing
+    integrations.
+
+    For legacy flag runs, ``include_untagged`` maps to the old two-choice
+    behavior: picked/rejected only, or picked/rejected plus untagged.
+    """
 
     criterion: OrganizeCriterion
     action: OrganizeAction
@@ -50,10 +107,17 @@ class OrganizeFilesOptions:
     include_sidecars: bool = True
 
 
+type OrganizeFilesRequest = (
+    FlagOrganizeFilesOptions
+    | MetadataOrganizeFilesOptions
+    | OrganizeFilesOptions
+)
+
+
 def organize_photos(
         current_folder: Path,
         photos: list[PhotoRecord],
-        options: OrganizeFilesOptions,
+        options: OrganizeFilesRequest,
         progress_callback: ProgressCallback | None = None,
         *,
         progress_snapshot_callback: StructuredProgressCallback | None = None,
@@ -163,15 +227,11 @@ class _OrganizeJob:
 def _build_jobs(
         current_folder: Path,
         photos: list[PhotoRecord],
-        options: OrganizeFilesOptions,
+        options: OrganizeFilesRequest,
 ) -> list[_OrganizeJob]:
     jobs: list[_OrganizeJob] = []
     for photo in photos:
-        folder_name = _target_folder_name(
-            photo,
-            options.criterion,
-            include_untagged=options.include_untagged,
-        )
+        folder_name = _target_folder_name(photo, options)
         if folder_name is None:
             continue
 
@@ -192,7 +252,7 @@ def _build_jobs(
 def _source_paths_for_photo(
         current_folder: Path,
         photo: PhotoRecord,
-        options: OrganizeFilesOptions,
+        options: OrganizeFilesRequest,
 ) -> tuple[Path, ...]:
     sources: list[Path] = []
     for name in photo.files:
@@ -258,24 +318,78 @@ def _preflight_conflicts(jobs: list[_OrganizeJob]) -> None:
 
 def _target_folder_name(
         photo: PhotoRecord,
-        criterion: OrganizeCriterion,
-        *,
-        include_untagged: bool,
+        options: OrganizeFilesRequest,
 ) -> str | None:
-    if criterion == 'flag':
+    # New flag requests already chose an exact folder mode in the dialog. Route
+    # them before legacy compatibility so they never appear to honor
+    # metadata-only untagged settings.
+    if isinstance(options, FlagOrganizeFilesOptions):
+        return _target_flag_folder_name(photo, options.flag_folder_mode)
+
+    if (
+        isinstance(options, OrganizeFilesOptions)
+        and options.criterion == 'flag'
+    ):
+        # Old callers only had ``include_untagged`` for flag organization.
+        # Translate it to matching modern modes so direct API users keep the
+        # pre-split behavior while sharing the current flag routing helper.
+        legacy_mode: FlagFolderMode = (
+            'picked_rejected_untagged'
+            if options.include_untagged
+            else 'picked_rejected'
+        )
+        return _target_flag_folder_name(photo, legacy_mode)
+
+    if options.criterion == 'color_label':
+        if photo.color_label is not None:
+            return photo.color_label.title()
+
+    elif options.criterion == 'rating':
+        if photo.rating is not None:
+            suffix = 'Star' if photo.rating == 1 else 'Stars'
+            return f'{photo.rating} {suffix}'
+
+    else:
+        raise ValueError(f'Unknown organize criterion: {options.criterion}')
+
+    if options.include_untagged:
+        return 'Untagged'
+
+    return None
+
+
+def _target_flag_folder_name(
+        photo: PhotoRecord,
+        flag_folder_mode: FlagFolderMode,
+) -> str | None:
+    if flag_folder_mode == 'picked_rejected_untagged':
         if photo.flag == 'picked':
             return 'Picked'
 
         if photo.flag == 'rejected':
             return 'Rejected'
-    elif criterion == 'color_label':
-        if photo.color_label is not None:
-            return photo.color_label.title()
-    elif photo.rating is not None:
-        suffix = 'Star' if photo.rating == 1 else 'Stars'
-        return f'{photo.rating} {suffix}'
 
-    if include_untagged:
         return 'Untagged'
 
-    return None
+    if flag_folder_mode == 'picked_rejected':
+        if photo.flag == 'picked':
+            return 'Picked'
+
+        if photo.flag == 'rejected':
+            return 'Rejected'
+
+        return None
+
+    if flag_folder_mode == 'picked_others':
+        return 'Picked' if photo.flag == 'picked' else 'Others'
+
+    if flag_folder_mode == 'rejected_others':
+        return 'Rejected' if photo.flag == 'rejected' else 'Others'
+
+    if flag_folder_mode == 'picked_only':
+        return 'Picked' if photo.flag == 'picked' else None
+
+    if flag_folder_mode == 'rejected_only':
+        return 'Rejected' if photo.flag == 'rejected' else None
+
+    raise ValueError(f'Unknown flag folder mode: {flag_folder_mode}')

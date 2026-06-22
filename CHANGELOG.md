@@ -10,12 +10,24 @@
     operations. Each filter group includes `Select all` and `Select none`
     controls plus an empty-state shortcut, and pressing `Enter` confirms the
     pending popup choices.
+  - `Organize Photos` now has criterion-specific untagged controls. The
+    picked/rejected criterion adds explicit `Picked`, `Rejected`, `Untagged`,
+    and `Others` folder modes, while color-label and rating criteria each have
+    their own optional `Untagged` checkbox.
+
+- Changed
+
+  - The top bar now places `Filter` before `Organize`.
 
 - Fixed
 
   - Filtered compare mode now drops compared photos that stop matching after a
     metadata edit, and exits compare mode instead of restoring a hidden photo
     when too few visible photos remain.
+  - The legacy `OrganizeFilesOptions(...)` constructor remains supported for
+    direct organizer callers.
+  - Undoing a photo organization run no longer leaves stale undo progress text
+    overlapping the folder-reload progress rows.
 
 ## [1.2.4] - 2026-06-21
 

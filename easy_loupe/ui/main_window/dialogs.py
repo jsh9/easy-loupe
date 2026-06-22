@@ -27,9 +27,12 @@ from PySide6.QtWidgets import (
 
 from easy_loupe.operations.export import (
     ConflictPolicy,
+    FlagFolderMode,
+    FlagOrganizeFilesOptions,
+    MetadataOrganizeFilesOptions,
     OrganizeAction,
     OrganizeCriterion,
-    OrganizeFilesOptions,
+    OrganizeFilesRequest,
 )
 from easy_loupe.operations.xmp import MergePolicy, WriteXmpOptions
 
@@ -44,7 +47,7 @@ class OrganizerDialogResult:
     """Selected organizer workflow and typed options."""
 
     mode: OrganizerMode
-    organize_options: OrganizeFilesOptions | None = None
+    organize_options: OrganizeFilesRequest | None = None
     xmp_options: WriteXmpOptions | None = None
 
 
@@ -60,7 +63,7 @@ class OrganizerDialog(QDialog):
         super().__init__(parent)
         self._current_folder = current_folder
         self.setWindowTitle('Organize Photos')
-        self.resize(560, 320)
+        self.resize(680, 520)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 16)
@@ -100,25 +103,44 @@ class OrganizerDialog(QDialog):
                 else self._current_folder
             )
             assert output_parent is not None
+            criterion = cast(
+                'OrganizeCriterion',
+                self._selected_value(self.criterion_group),
+            )
+            action = cast(
+                'OrganizeAction',
+                self._selected_value(self.action_group),
+            )
+            conflict_policy = cast(
+                'ConflictPolicy',
+                self._selected_value(self.conflict_policy_group),
+            )
+            # Build the criterion-specific options here so disabled child
+            # controls cannot leak stale, irrelevant values into the request.
+            if criterion == 'flag':
+                return OrganizerDialogResult(
+                    mode='reorganize',
+                    organize_options=FlagOrganizeFilesOptions(
+                        criterion='flag',
+                        action=action,
+                        output_parent=output_parent,
+                        flag_folder_mode=cast(
+                            'FlagFolderMode',
+                            self._selected_value(self.flag_folder_mode_group),
+                        ),
+                        conflict_policy=conflict_policy,
+                        include_sidecars=True,
+                    ),
+                )
+
             return OrganizerDialogResult(
                 mode='reorganize',
-                organize_options=OrganizeFilesOptions(
-                    criterion=cast(
-                        'OrganizeCriterion',
-                        self._selected_value(self.criterion_group),
-                    ),
-                    action=cast(
-                        'OrganizeAction',
-                        self._selected_value(self.action_group),
-                    ),
+                organize_options=MetadataOrganizeFilesOptions(
+                    criterion=criterion,
+                    action=action,
                     output_parent=output_parent,
-                    include_untagged=(
-                        self.include_untagged_checkbox.isChecked()
-                    ),
-                    conflict_policy=cast(
-                        'ConflictPolicy',
-                        self._selected_value(self.conflict_policy_group),
-                    ),
+                    include_untagged=self._include_untagged_for(criterion),
+                    conflict_policy=conflict_policy,
                     include_sidecars=True,
                 ),
             )
@@ -171,16 +193,11 @@ class OrganizerDialog(QDialog):
         box_layout.setContentsMargins(12, 12, 12, 12)
         box_layout.setSpacing(10)
 
-        criterion_box, self.criterion_group = self._build_boxed_radio_group(
-            self.reorganize_box,
-            (
-                ('By Picked/Rejected', 'flag'),
-                ('By Color Label', 'color_label'),
-                ('By Rating', 'rating'),
-            ),
-            title='Criterion',
-        )
+        criterion_box = self._build_criterion_group(self.reorganize_box)
         box_layout.addWidget(criterion_box)
+        self.criterion_group.buttonToggled.connect(
+            self._handle_criterion_toggled
+        )
 
         action_box, self.action_group = self._build_boxed_radio_group(
             self.reorganize_box,
@@ -211,10 +228,6 @@ class OrganizerDialog(QDialog):
         output_box_layout.setContentsMargins(12, 12, 12, 12)
         output_box_layout.setSpacing(8)
         output_box_layout.addWidget(output_parent_row)
-        self.include_untagged_checkbox = QCheckBox(
-            'Include untagged photos in "Untagged" folder', output_box
-        )
-        output_box_layout.addWidget(self.include_untagged_checkbox)
         box_layout.addWidget(output_box)
 
         conflict_box, self.conflict_policy_group = (
@@ -295,6 +308,98 @@ class OrganizerDialog(QDialog):
         if selected:
             self.output_parent_edit.setText(selected)
 
+    def _build_criterion_group(self, parent: QWidget) -> QGroupBox:
+        container = QGroupBox('Criterion', parent)
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(6)
+
+        self.criterion_group = QButtonGroup(container)
+        flag_button = QRadioButton('By Picked/Rejected', container)
+        flag_button.setProperty('option_value', 'flag')
+        flag_button.setChecked(True)
+        self.criterion_group.addButton(flag_button, 0)
+        layout.addWidget(flag_button)
+
+        self.flag_folder_mode_box = QWidget(container)
+        flag_mode_layout = QVBoxLayout(self.flag_folder_mode_box)
+        flag_mode_layout.setContentsMargins(20, 0, 0, 0)
+        flag_mode_layout.setSpacing(4)
+        self.flag_folder_mode_group = QButtonGroup(self.flag_folder_mode_box)
+        flag_mode_options = (
+            (
+                '3 Folders: Picked / Rejected / Untagged',
+                'picked_rejected_untagged',
+            ),
+            (
+                (
+                    '2 Folders: Picked / Rejected. '
+                    '(Do nothing to untagged photos)'
+                ),
+                'picked_rejected',
+            ),
+            (
+                '2 Folders: Picked / Others (including rejected and untagged)',
+                'picked_others',
+            ),
+            (
+                '2 Folders: Rejected / Others (including picked and untagged)',
+                'rejected_others',
+            ),
+            (
+                '1 Folder: Picked. (Do nothing to rejected and untagged)',
+                'picked_only',
+            ),
+            (
+                (
+                    '1 Folder: Rejected. '
+                    '(Do nothing to picked and untagged photos)'
+                ),
+                'rejected_only',
+            ),
+        )
+        for index, (label, value) in enumerate(flag_mode_options):
+            button = QRadioButton(label, self.flag_folder_mode_box)
+            button.setProperty('option_value', value)
+            self.flag_folder_mode_group.addButton(button, index)
+            flag_mode_layout.addWidget(button)
+            if index == 0:
+                button.setChecked(True)
+
+        layout.addWidget(self.flag_folder_mode_box)
+
+        color_button = QRadioButton('By Color Label', container)
+        color_button.setProperty('option_value', 'color_label')
+        self.criterion_group.addButton(color_button, 1)
+        layout.addWidget(color_button)
+        self.color_include_untagged_box = QWidget(container)
+        color_checkbox_layout = QVBoxLayout(self.color_include_untagged_box)
+        color_checkbox_layout.setContentsMargins(20, 0, 0, 0)
+        color_checkbox_layout.setSpacing(0)
+        self.color_include_untagged_checkbox = QCheckBox(
+            'Include untagged photos in "Untagged" folder',
+            self.color_include_untagged_box,
+        )
+        color_checkbox_layout.addWidget(self.color_include_untagged_checkbox)
+        layout.addWidget(self.color_include_untagged_box)
+
+        rating_button = QRadioButton('By Rating', container)
+        rating_button.setProperty('option_value', 'rating')
+        self.criterion_group.addButton(rating_button, 2)
+        layout.addWidget(rating_button)
+        self.rating_include_untagged_box = QWidget(container)
+        rating_checkbox_layout = QVBoxLayout(self.rating_include_untagged_box)
+        rating_checkbox_layout.setContentsMargins(20, 0, 0, 0)
+        rating_checkbox_layout.setSpacing(0)
+        self.rating_include_untagged_checkbox = QCheckBox(
+            'Include untagged photos in "Untagged" folder',
+            self.rating_include_untagged_box,
+        )
+        rating_checkbox_layout.addWidget(self.rating_include_untagged_checkbox)
+        layout.addWidget(self.rating_include_untagged_box)
+
+        return container
+
     @staticmethod
     def _build_boxed_radio_group(
             parent: QWidget,
@@ -346,7 +451,50 @@ class OrganizerDialog(QDialog):
         if checked:
             self._sync_workflow_state()
 
+    def _handle_criterion_toggled(
+            self,
+            _button: QAbstractButton,
+            checked: bool,  # noqa: FBT001
+    ) -> None:
+        if checked:
+            self._sync_criterion_child_state()
+
     def _sync_workflow_state(self) -> None:
         is_reorganize = self.current_mode() == 'reorganize'
         self.reorganize_box.setEnabled(is_reorganize)
         self.xmp_box.setEnabled(not is_reorganize)
+        # Reapply child state after parent mode toggles: Qt disables
+        # descendants visually, but the selected criterion still controls
+        # which child widgets become editable when re-enabled.
+        self._sync_criterion_child_state()
+
+    def _sync_criterion_child_state(self) -> None:
+        is_reorganize = self.current_mode() == 'reorganize'
+        criterion = self._selected_value(self.criterion_group)
+        self.flag_folder_mode_box.setEnabled(
+            is_reorganize and criterion == 'flag'
+        )
+        self.color_include_untagged_box.setEnabled(
+            is_reorganize and criterion == 'color_label'
+        )
+        self.rating_include_untagged_box.setEnabled(
+            is_reorganize and criterion == 'rating'
+        )
+
+    def _include_untagged_for(
+            self,
+            criterion: OrganizeCriterion,
+    ) -> bool:
+        """
+        Return the criterion-scoped untagged option for file organization.
+
+        Flag organizing now builds ``FlagOrganizeFilesOptions`` instead, so
+        this helper only supplies the checkbox value for metadata criteria.
+        """
+        if criterion == 'color_label':
+            return self.color_include_untagged_checkbox.isChecked()
+
+        if criterion == 'rating':
+            return self.rating_include_untagged_checkbox.isChecked()
+
+        return False
