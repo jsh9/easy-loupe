@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPointF, QSize, Qt, Signal
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from easy_loupe.ui.theme import THEMES, ThemePalette
+from easy_loupe.ui.viewers.clipping import clipping_overlay_pixmap
 
 MAX_ZOOM_FACTOR = 10.0
 """Upper limit on how far the user can zoom into a photo, expressed as a
@@ -45,8 +47,6 @@ FOCUS_POINT_MARKER_PEN_WIDTH = 2
 FOCUS_POINT_MARKER_COLOR = '#ff3b30'
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from PySide6.QtGui import QResizeEvent
 
 
@@ -77,6 +77,10 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
         self._scene = QGraphicsScene(self)
         self._pixmap_item = QGraphicsPixmapItem()
         self._scene.addItem(self._pixmap_item)
+        self._clipping_overlay_item = QGraphicsPixmapItem()
+        self._clipping_overlay_item.setZValue(5)
+        self._clipping_overlay_item.setVisible(False)
+        self._scene.addItem(self._clipping_overlay_item)
         self._focus_point_marker = QGraphicsRectItem(
             -FOCUS_POINT_MARKER_SIZE / 2,
             -FOCUS_POINT_MARKER_SIZE / 2,
@@ -114,6 +118,7 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
         self._manual_views = {} if manual_views is None else manual_views
         self._mode = 'fit'
         self._focus_point_marker_enabled = False
+        self._clipping_warning_enabled = False
         self._focus_point_pending = False
         self._hold_zoom_enabled = hold_zoom_enabled
         self._hold_zoom_active = False
@@ -147,6 +152,7 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
         self._pixmap_item.setPixmap(pixmap)
         self._scene.setSceneRect(pixmap.rect())
         self._image_size = pixmap.size()
+        self._update_clipping_overlay()
         self._focus_point = QPointF(focus_point[0], focus_point[1])
         self._focus_point_pending = focus_point_pending
         self._position_focus_point_marker()
@@ -234,6 +240,7 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
         self._hold_zoom_active = False
         self._actual_size_zoom_active = False
         self._clear_transient_recenter()
+        self._update_clipping_overlay()
         self.resetTransform()
         self._update_focus_point_marker()
         self.visible_region_changed.emit()
@@ -255,6 +262,11 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
         """Set whether loaded photos show the current focus point marker."""
         self._focus_point_marker_enabled = enabled
         self._update_focus_point_marker()
+
+    def set_clipping_warning_visible(self, *, enabled: bool) -> None:
+        """Set whether loaded photos show highlight/shadow clipping."""
+        self._clipping_warning_enabled = enabled
+        self._update_clipping_overlay()
 
     def set_focus_point(self, focus_point: tuple[float, float]) -> None:
         """Update the active focus point without changing the view."""
@@ -961,6 +973,26 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
             and not self._focus_point_pending
             and not self._image_size.isEmpty()
         )
+
+    def _update_clipping_overlay(self) -> None:
+        if (
+            not self._clipping_warning_enabled
+            or self._current_image_key is None
+            or self._image_size.isEmpty()
+        ):
+            self._clipping_overlay_item.setPixmap(QPixmap())
+            self._clipping_overlay_item.setVisible(False)
+            return
+
+        try:
+            overlay = clipping_overlay_pixmap(Path(self._current_image_key))
+        except (OSError, RuntimeError, ValueError):
+            self._clipping_overlay_item.setPixmap(QPixmap())
+            self._clipping_overlay_item.setVisible(False)
+            return
+
+        self._clipping_overlay_item.setPixmap(overlay)
+        self._clipping_overlay_item.setVisible(not overlay.isNull())
 
     def _max_scale(self) -> float:
         """Return the maximum allowed absolute pixel scale."""

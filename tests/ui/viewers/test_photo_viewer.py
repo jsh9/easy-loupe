@@ -186,6 +186,54 @@ def test_photo_viewer_focus_point_marker_tracks_loaded_photo(
     viewer.close()
 
 
+def test_photo_viewer_clipping_warning_tracks_loaded_photo(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify clipping warnings are a persistent viewer overlay preference.
+
+    Toggling should affect the active photo immediately, survive zoom mode
+    changes, and hide cleanly when the photo is cleared without resetting the
+    user's preference.
+    """
+    create_jpeg(tmp_path / 'IMG_7016.JPG', 'white')
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(320, 240)
+    viewer.show()
+    app.processEvents()
+
+    overlay = viewer._clipping_overlay_item
+    viewer.set_photo(tmp_path / 'IMG_7016.JPG', (0.5, 0.5))
+
+    assert viewer._clipping_warning_enabled is False
+    assert overlay.isVisible() is False
+
+    viewer.set_clipping_warning_visible(enabled=True)
+
+    assert viewer._clipping_warning_enabled is True
+    assert overlay.isVisible() is True
+    assert overlay.pixmap().isNull() is False
+    assert overlay.zValue() < viewer._focus_point_marker.zValue()
+
+    viewer.toggle_focus_zoom()
+
+    assert overlay.isVisible() is True
+
+    viewer.clear_photo()
+
+    assert viewer._clipping_warning_enabled is True
+    assert overlay.isVisible() is False
+    assert overlay.pixmap().isNull() is True
+
+    viewer.set_photo(tmp_path / 'IMG_7016.JPG', (0.5, 0.5))
+
+    assert overlay.isVisible() is True
+
+    viewer.close()
+
+
 def test_photo_viewer_hides_focus_marker_while_focus_point_pending(
         tmp_path: Path,
 ) -> None:

@@ -82,6 +82,8 @@ def test_compare_photo_viewer_defaults_to_hidden_af_marker(
     )
     assert viewer._focus_point_marker_enabled is False
     assert viewer.selected_viewer._focus_point_marker_enabled is False
+    assert viewer._clipping_warning_enabled is False
+    assert viewer.selected_viewer._clipping_warning_enabled is False
 
     viewer.set_photos([
         ComparePhoto('A', tmp_path / 'A.JPG', (0.25, 0.5)),
@@ -92,6 +94,53 @@ def test_compare_photo_viewer_defaults_to_hidden_af_marker(
         False,
         False,
     ]
+    assert [pane._clipping_warning_enabled for pane in viewer._viewers] == [
+        False,
+        False,
+    ]
+    _close_viewer(viewer, app)
+
+
+def test_compare_photo_viewer_clipping_warning_applies_to_all_panes(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify compare grid and selected-photo view share clipping visibility.
+
+    Compare creates panes dynamically and has a separate selected-photo viewer,
+    so both paths need to inherit the same inspection overlay preference.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'white')
+    create_jpeg(tmp_path / 'B.JPG', 'black')
+    app = QApplication.instance() or QApplication([])
+    viewer = ComparePhotoViewer()
+
+    viewer.set_clipping_warning_visible(enabled=True)
+    viewer.set_photos([
+        ComparePhoto('A', tmp_path / 'A.JPG', (0.25, 0.5)),
+        ComparePhoto('B', tmp_path / 'B.JPG', (0.75, 0.5)),
+    ])
+
+    assert [pane._clipping_warning_enabled for pane in viewer._viewers] == [
+        True,
+        True,
+    ]
+    assert [
+        pane._clipping_overlay_item.isVisible() for pane in viewer._viewers
+    ] == [True, True]
+
+    viewer.show_active_photo()
+
+    assert viewer.selected_viewer._clipping_warning_enabled is True
+    assert viewer.selected_viewer._clipping_overlay_item.isVisible() is True
+
+    viewer.set_clipping_warning_visible(enabled=False)
+
+    assert [pane._clipping_warning_enabled for pane in viewer._viewers] == [
+        False,
+        False,
+    ]
+    assert viewer.selected_viewer._clipping_warning_enabled is False
     _close_viewer(viewer, app)
 
 

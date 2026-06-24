@@ -272,6 +272,11 @@ Major logic:
   follows the current photo, hides automatically in browse mode, compare mode,
   and busy/progress states, and reappears when returning to eligible normal
   view state if the overlay preference remains enabled.
+- The `J` shortcut toggles `Show Clipping`, a session-only red/blue warning
+  overlay for clipped highlights and shadows. The overlay is drawn from the
+  displayed viewer preview pixels and applies to culling single/split panes,
+  standalone photo-viewer panes, compare grid panes, and selected compare
+  photos. Browse thumbnails do not show clipping warnings.
 
 ## 4. Selection And Browse Behavior
 
@@ -402,6 +407,8 @@ Current shortcut coverage in code includes:
 - `Ctrl+Shift+F`: reset remembered manual zoom centers to AF points or image
   centers while preserving remembered zoom levels
 - `I`: toggle the normal-view EXIF and RGB histogram overlay
+- `J`: toggle the `Show Clipping` red/blue highlight and shadow clipping
+  overlay in viewer panes
 - `Space`: exit browse mode into fit-to-window view mode, promote split view
   into full zoom, toggle focus zoom while already in single-pane view mode, or
   open/toggle the active photo in compare mode

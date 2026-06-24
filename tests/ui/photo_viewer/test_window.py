@@ -885,15 +885,16 @@ def test_photo_viewer_hydration_does_not_expand_standalone_navigation(
     del app
 
 
-def test_photo_viewer_shortcuts_toggle_af_marker_and_info_overlay(
+def test_photo_viewer_shortcuts_toggle_inspection_overlays(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
-    Verify standalone viewer shortcuts control AF and EXIF overlays.
+    Verify standalone viewer shortcuts control inspection overlays.
 
     MainWindow used to own both shortcuts. This guards the decoupled viewer
-    against losing ``F`` marker toggling or ``I`` EXIF/histogram display.
+    against losing ``F`` marker toggling, ``I`` EXIF/histogram display, or
+    ``J`` clipping warnings.
     """
     create_jpeg(tmp_path / 'A.JPG', 'green', size=(2000, 1500))
     app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
@@ -917,7 +918,17 @@ def test_photo_viewer_shortcuts_toggle_af_marker_and_info_overlay(
     window._photo_viewer_exif_request_id = 5
     window._handle_photo_viewer_exif_failed(5, 'exif failed')
     app.processEvents()
+    clipping_overlay = window.viewer.single_viewer._clipping_overlay_item
     assert window.viewer.single_viewer._focus_point_marker.isVisible() is False
+    assert clipping_overlay.isVisible() is False
+
+    window.show_clipping_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._show_clipping is True
+    assert window.viewer._clipping_warning_enabled is True
+    assert window.viewer.single_viewer._clipping_warning_enabled is True
+    assert clipping_overlay.isVisible() is True
 
     window.show_af_point_shortcut.activated.emit()
     app.processEvents()
@@ -930,6 +941,13 @@ def test_photo_viewer_shortcuts_toggle_af_marker_and_info_overlay(
 
     assert window._show_af_point_marker is False
     assert window.viewer.single_viewer._focus_point_marker.isVisible() is False
+
+    window.show_clipping_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._show_clipping is False
+    assert window.viewer.single_viewer._clipping_warning_enabled is False
+    assert clipping_overlay.isVisible() is False
 
     window.info_overlay_shortcut.activated.emit()
     app.processEvents()

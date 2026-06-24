@@ -1467,11 +1467,13 @@ def test_main_window_progress_overlay_disables_and_restores_interaction(
 
     assert window._busy is True
     assert app.focusWidget() is not window.show_af_point_toggle
+    assert app.focusWidget() is not window.show_clipping_toggle
     assert window.menuBar().isEnabled() is False
     assert window.open_button.isEnabled() is False
     assert window.organize_button.isEnabled() is False
     assert window.theme_toggle.isEnabled() is False
     assert window.show_af_point_toggle.isEnabled() is False
+    assert window.show_clipping_toggle.isEnabled() is False
     assert all(
         action.isEnabled() is False for action in window._assignment_actions
     )
@@ -1485,6 +1487,7 @@ def test_main_window_progress_overlay_disables_and_restores_interaction(
     assert window.organize_button.isEnabled() is True
     assert window.theme_toggle.isEnabled() is True
     assert window.show_af_point_toggle.isEnabled() is True
+    assert window.show_clipping_toggle.isEnabled() is True
     assert all(
         action.isEnabled() is True for action in window._assignment_actions
     )
@@ -3144,6 +3147,7 @@ def test_scene_detection_finish_restores_thumbnail_strip_focus(
     assert _list_widget_has_focus(app, window.thumbnail_list) is True
     assert app.focusWidget() is not window.theme_toggle
     assert app.focusWidget() is not window.show_af_point_toggle
+    assert app.focusWidget() is not window.show_clipping_toggle
     assert window.current_photo_id == 'IMG_8211'
     assert window.thumbnail_list.currentRow() == 1
 

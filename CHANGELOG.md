@@ -14,6 +14,9 @@
     picked/rejected criterion adds explicit `Picked`, `Rejected`, `Untagged`,
     and `Others` folder modes, while color-label and rating criteria each have
     their own optional `Untagged` checkbox.
+  - Viewer panes now support a Lightroom-style `Show Clipping` overlay toggled
+    with `J`, drawing red highlight warnings and blue shadow warnings in
+    culling, standalone, and compare viewers.
 
 - Changed
 

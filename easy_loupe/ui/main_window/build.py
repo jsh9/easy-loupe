@@ -42,7 +42,10 @@ from easy_loupe.core.recursive_loading import (
     DEFAULT_LOAD_RECURSIVELY,
     normalize_load_recursively,
 )
-from easy_loupe.ui.defaults import DEFAULT_SHOW_AF_POINT
+from easy_loupe.ui.defaults import (
+    DEFAULT_SHOW_AF_POINT,
+    DEFAULT_SHOW_CLIPPING,
+)
 from easy_loupe.ui.identity import APP_NAME, APP_VERSION
 from easy_loupe.ui.progress_overlay import (
     ProgressOverlayController,
@@ -149,18 +152,7 @@ class MainWindowBuildMixin:
         self.theme_toggle.toggled.connect(self._toggle_theme_checked)
         top_bar.addWidget(self.theme_toggle)
         top_bar.addSpacing(6)
-
-        self.show_af_point_toggle = QCheckBox('Show AF point')
-        self.show_af_point_toggle.setChecked(DEFAULT_SHOW_AF_POINT)
-        self.show_af_point_toggle.setToolTip(
-            self._shortcut_tooltip('Show AF point', 'F')
-        )
-        self.show_af_point_toggle.toggled.connect(
-            lambda checked: self._set_focus_point_marker_visible(
-                enabled=checked
-            )
-        )
-        top_bar.addWidget(self.show_af_point_toggle)
+        self._build_inspection_overlay_controls(top_bar)
 
         top_bar.addSpacing(8)
         self.photo_sort_group = QFrame()
@@ -216,6 +208,31 @@ class MainWindowBuildMixin:
         self.progress_bar.setFixedWidth(220)
         top_bar.addWidget(self.progress_label)
         top_bar.addWidget(self.progress_bar)
+
+    def _build_inspection_overlay_controls(
+            self: MainWindow, target_layout: QHBoxLayout
+    ) -> None:
+        """Build viewer inspection overlay checkboxes in the top bar."""
+        self.show_af_point_toggle = QCheckBox('Show AF point')
+        self.show_af_point_toggle.setChecked(DEFAULT_SHOW_AF_POINT)
+        self.show_af_point_toggle.setToolTip(
+            self._shortcut_tooltip('Show AF point', 'F')
+        )
+        self.show_af_point_toggle.toggled.connect(
+            lambda checked: self._set_focus_point_marker_visible(
+                enabled=checked
+            )
+        )
+        target_layout.addWidget(self.show_af_point_toggle)
+        self.show_clipping_toggle = QCheckBox('Show Clipping')
+        self.show_clipping_toggle.setChecked(DEFAULT_SHOW_CLIPPING)
+        self.show_clipping_toggle.setToolTip(
+            self._shortcut_tooltip('Show Clipping', 'J')
+        )
+        self.show_clipping_toggle.toggled.connect(
+            lambda checked: self._set_clipping_warning_visible(enabled=checked)
+        )
+        target_layout.addWidget(self.show_clipping_toggle)
 
     def _build_photo_open_group(
             self: MainWindow, target_layout: QHBoxLayout
@@ -320,12 +337,18 @@ class MainWindowBuildMixin:
         self.viewer.set_focus_point_marker_visible(
             enabled=self.show_af_point_toggle.isChecked()
         )
+        self.viewer.set_clipping_warning_visible(
+            enabled=self.show_clipping_toggle.isChecked()
+        )
         self.viewer.visible_region_changed.connect(
             self._refresh_visible_region_overlay
         )
         self.compare_viewer = ComparePhotoViewer()
         self.compare_viewer.set_focus_point_marker_visible(
             enabled=self.show_af_point_toggle.isChecked()
+        )
+        self.compare_viewer.set_clipping_warning_visible(
+            enabled=self.show_clipping_toggle.isChecked()
         )
         self.compare_viewer.active_photo_changed.connect(
             self._compare_active_photo_changed
@@ -948,6 +971,9 @@ class MainWindowBuildMixin:
         self.show_af_point_shortcut = self._make_shortcut(
             'F', self._toggle_show_af_point
         )
+        self.show_clipping_shortcut = self._make_shortcut(
+            'J', self._toggle_show_clipping
+        )
         self.recenter_zoom_shortcut = self._make_shortcut(
             'Shift+F', self._handle_recenter_zoom_shortcut
         )
@@ -1214,6 +1240,20 @@ class MainWindowBuildMixin:
         self.show_af_point_toggle.setChecked(
             not self.show_af_point_toggle.isChecked()
         )
+
+    def _toggle_show_clipping(self: MainWindow) -> None:
+        """Toggle the highlight/shadow clipping overlay checkbox."""
+        self.show_clipping_toggle.setChecked(
+            not self.show_clipping_toggle.isChecked()
+        )
+
+    def _set_clipping_warning_visible(
+            self: MainWindow, *, enabled: bool
+    ) -> None:
+        """Apply clipping-warning visibility to every viewer mode."""
+        self.viewer.set_clipping_warning_visible(enabled=enabled)
+        if hasattr(self, 'compare_viewer'):
+            self.compare_viewer.set_clipping_warning_visible(enabled=enabled)
 
     def _toggle_info_overlay(self: MainWindow) -> None:
         """Toggle the EXIF and histogram overlay preference."""

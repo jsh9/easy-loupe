@@ -7,7 +7,10 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QSplitter, QStackedLayout, QWidget
 
-from easy_loupe.ui.defaults import DEFAULT_SHOW_AF_POINT
+from easy_loupe.ui.defaults import (
+    DEFAULT_SHOW_AF_POINT,
+    DEFAULT_SHOW_CLIPPING,
+)
 from easy_loupe.ui.theme import (
     SPLIT_VIEW_PANE_COUNT,
     THEMES,
@@ -33,6 +36,7 @@ class MainPhotoViewer(QWidget):
         self._current_focus_point = (0.5, 0.5)
         self._current_focus_point_pending = False
         self._focus_point_marker_enabled = DEFAULT_SHOW_AF_POINT
+        self._clipping_warning_enabled = DEFAULT_SHOW_CLIPPING
         self._mode = 'single-fit'
 
         self.single_viewer = PhotoViewer(
@@ -57,6 +61,15 @@ class MainPhotoViewer(QWidget):
         )
         self.split_zoom_viewer.set_focus_point_marker_visible(
             enabled=self._focus_point_marker_enabled
+        )
+        self.single_viewer.set_clipping_warning_visible(
+            enabled=self._clipping_warning_enabled
+        )
+        self.split_fit_viewer.set_clipping_warning_visible(
+            enabled=self._clipping_warning_enabled
+        )
+        self.split_zoom_viewer.set_clipping_warning_visible(
+            enabled=self._clipping_warning_enabled
         )
         self.split_fit_viewer.setMinimumWidth(180)
         self.split_zoom_viewer.setMinimumWidth(180)
@@ -161,6 +174,13 @@ class MainPhotoViewer(QWidget):
         self.single_viewer.set_focus_point_marker_visible(enabled=enabled)
         self.split_fit_viewer.set_focus_point_marker_visible(enabled=enabled)
         self.split_zoom_viewer.set_focus_point_marker_visible(enabled=enabled)
+
+    def set_clipping_warning_visible(self, *, enabled: bool) -> None:
+        """Set whether all panes show highlight/shadow clipping."""
+        self._clipping_warning_enabled = enabled
+        self.single_viewer.set_clipping_warning_visible(enabled=enabled)
+        self.split_fit_viewer.set_clipping_warning_visible(enabled=enabled)
+        self.split_zoom_viewer.set_clipping_warning_visible(enabled=enabled)
 
     def set_focus_point(self, focus_point: tuple[float, float]) -> None:
         """Update the active photo focus point without reloading the image."""
