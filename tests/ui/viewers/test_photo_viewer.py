@@ -234,6 +234,52 @@ def test_photo_viewer_clipping_warning_tracks_loaded_photo(
     viewer.close()
 
 
+def test_photo_viewer_scales_bounded_clipping_overlay_to_photo(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify bounded clipping overlays still cover the loaded image scene.
+
+    The generated overlay pixmap may be smaller than the displayed preview, so
+    the graphics item must scale it back into photo coordinate space. Clearing
+    must also reset that transform so later photos cannot inherit stale scale.
+    """
+    create_jpeg(
+        tmp_path / 'IMG_7017.JPG',
+        'white',
+        size=(4000, 1000),
+    )
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(320, 240)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_photo(tmp_path / 'IMG_7017.JPG', (0.5, 0.5))
+    viewer.set_clipping_warning_visible(enabled=True)
+
+    overlay = viewer._clipping_overlay_item
+    transform = overlay.transform()
+
+    assert overlay.pixmap().width() == 2000
+    assert overlay.pixmap().height() == 500
+    assert transform.m11() == pytest.approx(2.0)
+    assert transform.m22() == pytest.approx(2.0)
+    assert overlay.boundingRect().width() * transform.m11() == pytest.approx(
+        4000
+    )
+    assert overlay.boundingRect().height() * transform.m22() == pytest.approx(
+        1000
+    )
+
+    viewer.clear_photo()
+
+    assert overlay.transform().m11() == pytest.approx(1.0)
+    assert overlay.transform().m22() == pytest.approx(1.0)
+    viewer.close()
+
+
 def test_photo_viewer_hides_focus_marker_while_focus_point_pending(
         tmp_path: Path,
 ) -> None:

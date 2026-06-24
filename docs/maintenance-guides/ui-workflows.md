@@ -276,7 +276,9 @@ Major logic:
   overlay for clipped highlights and shadows. The overlay is drawn from the
   displayed viewer preview pixels and applies to culling single/split panes,
   standalone photo-viewer panes, compare grid panes, and selected compare
-  photos. Browse thumbnails do not show clipping warnings.
+  photos. Cached clipping-overlay pixmaps are capped to a 2000-pixel long edge
+  and scaled back over the full viewer scene. Browse thumbnails do not show
+  clipping warnings.
 
 ## 4. Selection And Browse Behavior
 

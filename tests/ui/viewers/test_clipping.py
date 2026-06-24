@@ -6,6 +6,7 @@ from PIL import Image
 from PySide6.QtWidgets import QApplication
 
 from easy_loupe.ui.viewers.clipping import (
+    CLIPPING_OVERLAY_MAX_LONG_EDGE,
     HIGHLIGHT_CLIPPING_RGBA,
     SHADOW_CLIPPING_RGBA,
     build_clipping_overlay_image,
@@ -65,4 +66,24 @@ def test_clipping_overlay_pixmap_uses_displayed_image_path(
     assert rendered.pixelColor(0, 0).alpha() == HIGHLIGHT_CLIPPING_RGBA[3]
     assert rendered.pixelColor(1, 0).blue() == SHADOW_CLIPPING_RGBA[2]
     assert rendered.pixelColor(1, 0).alpha() == SHADOW_CLIPPING_RGBA[3]
+    del app
+
+
+def test_clipping_overlay_pixmap_caps_long_edge(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify cached clipping overlays are bounded for large viewer previews.
+
+    The app may show full-size JPEG previews, so clipping overlays need their
+    own size cap to avoid retaining native-resolution pixmaps in the cache.
+    """
+    image_path = tmp_path / 'large_preview.jpg'
+    Image.new('RGB', (4000, 1000), color='white').save(image_path)
+
+    app = QApplication.instance() or QApplication([])
+    pixmap = clipping_overlay_pixmap(image_path)
+
+    assert pixmap.width() == CLIPPING_OVERLAY_MAX_LONG_EDGE
+    assert pixmap.height() == 500
     del app

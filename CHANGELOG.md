@@ -8,6 +8,11 @@
     with `J`, drawing red highlight warnings and blue shadow warnings in
     culling, standalone, and compare viewers.
 
+- Fixed
+
+  - Clipping-warning overlays now cache smaller bounded pixmaps to reduce
+    memory use when reviewing large photos.
+
 ## [1.3.0] - 2026-06-22
 
 - Added

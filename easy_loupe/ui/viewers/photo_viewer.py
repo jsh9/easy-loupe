@@ -7,7 +7,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPointF, QSize, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QMouseEvent, QPen, QPixmap
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QMouseEvent,
+    QPen,
+    QPixmap,
+    QTransform,
+)
 from PySide6.QtWidgets import (
     QGraphicsItem,
     QGraphicsPixmapItem,
@@ -980,19 +987,35 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
             or self._current_image_key is None
             or self._image_size.isEmpty()
         ):
-            self._clipping_overlay_item.setPixmap(QPixmap())
-            self._clipping_overlay_item.setVisible(False)
+            self._clear_clipping_overlay()
             return
 
         try:
             overlay = clipping_overlay_pixmap(Path(self._current_image_key))
         except (OSError, RuntimeError, ValueError):
-            self._clipping_overlay_item.setPixmap(QPixmap())
-            self._clipping_overlay_item.setVisible(False)
+            self._clear_clipping_overlay()
             return
 
+        if overlay.isNull() or overlay.width() <= 0 or overlay.height() <= 0:
+            self._clear_clipping_overlay()
+            return
+
+        # Cached clipping pixmaps can be smaller than the photo pixmap, so
+        # scale the item in scene coordinates to keep warnings aligned.
+        scale_x = self._image_size.width() / overlay.width()
+        scale_y = self._image_size.height() / overlay.height()
         self._clipping_overlay_item.setPixmap(overlay)
-        self._clipping_overlay_item.setVisible(not overlay.isNull())
+        self._clipping_overlay_item.setTransform(
+            QTransform.fromScale(scale_x, scale_y)
+        )
+        self._clipping_overlay_item.setVisible(True)
+
+    def _clear_clipping_overlay(self) -> None:
+        # Clear the transform with the pixmap so later photos cannot inherit
+        # stale scaling from a differently sized bounded overlay.
+        self._clipping_overlay_item.setPixmap(QPixmap())
+        self._clipping_overlay_item.setTransform(QTransform())
+        self._clipping_overlay_item.setVisible(False)
 
     def _max_scale(self) -> float:
         """Return the maximum allowed absolute pixel scale."""

@@ -16,6 +16,7 @@ HIGHLIGHT_CLIPPING_THRESHOLD = 250
 SHADOW_CLIPPING_THRESHOLD = 5
 HIGHLIGHT_CLIPPING_RGBA = (255, 59, 48, 156)
 SHADOW_CLIPPING_RGBA = (0, 122, 255, 156)
+CLIPPING_OVERLAY_MAX_LONG_EDGE = 2000
 
 
 def clipping_overlay_pixmap(
@@ -23,6 +24,7 @@ def clipping_overlay_pixmap(
         *,
         highlight_threshold: int = HIGHLIGHT_CLIPPING_THRESHOLD,
         shadow_threshold: int = SHADOW_CLIPPING_THRESHOLD,
+        max_long_edge: int = CLIPPING_OVERLAY_MAX_LONG_EDGE,
 ) -> QPixmap:
     """Return a cached clipping-warning pixmap for a displayed image path."""
     stat = image_path.stat()
@@ -32,6 +34,7 @@ def clipping_overlay_pixmap(
         stat.st_size,
         highlight_threshold,
         shadow_threshold,
+        max_long_edge,
     )
 
 
@@ -69,22 +72,48 @@ def build_clipping_overlay_image(
     return overlay
 
 
-@lru_cache(maxsize=128)
+@lru_cache(maxsize=16)
 def _clipping_overlay_pixmap_cached(
         image_path: str,
         _mtime_ns: int,
         _size: int,
         highlight_threshold: int,
         shadow_threshold: int,
+        max_long_edge: int,
 ) -> QPixmap:
     with Image.open(image_path) as opened:
-        overlay = build_clipping_overlay_image(
+        # Build the cached mask from a capped copy so QPixmap memory stays
+        # bounded; PhotoViewer scales that overlay back to scene coordinates.
+        display_image = _resize_image_to_max_long_edge(
             opened,
-            highlight_threshold=highlight_threshold,
-            shadow_threshold=shadow_threshold,
+            max_long_edge=max_long_edge,
         )
+        try:
+            overlay = build_clipping_overlay_image(
+                display_image,
+                highlight_threshold=highlight_threshold,
+                shadow_threshold=shadow_threshold,
+            )
+        finally:
+            display_image.close()
 
     return _pixmap_from_rgba_image(overlay)
+
+
+def _resize_image_to_max_long_edge(
+        image: Image.Image,
+        *,
+        max_long_edge: int,
+) -> Image.Image:
+    resized = image.copy()
+    long_edge = max(resized.size)
+    if max_long_edge > 0 and long_edge > max_long_edge:
+        resized.thumbnail(
+            (max_long_edge, max_long_edge),
+            Image.Resampling.LANCZOS,
+        )
+
+    return resized
 
 
 def _all_channels_mask(channels: tuple[Image.Image, ...]) -> Image.Image:
