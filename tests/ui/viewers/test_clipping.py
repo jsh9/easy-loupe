@@ -114,6 +114,35 @@ def test_clipping_overlay_pixmap_preserves_small_highlight_after_cap(
     del app
 
 
+def test_clipping_overlay_pixmap_preserves_single_pixel_hits_after_cap(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify aggressive downsampling preserves one-pixel clipping hits.
+
+    A single clipped source pixel can average below one 8-bit mask value when
+    shrinking a large binary mask. This regression test forces that path for
+    both highlight and shadow warnings using a lossless PNG preview.
+    """
+    image_path = tmp_path / 'tiny_hits_preview.png'
+    image = Image.new('RGB', (100, 100), color=(128, 128, 128))
+    image.putpixel((0, 0), (255, 255, 255))
+    image.putpixel((99, 99), (0, 0, 0))
+    image.save(image_path)
+
+    app = QApplication.instance() or QApplication([])
+    pixmap = clipping_overlay_pixmap(image_path, max_long_edge=2)
+    rendered = pixmap.toImage()
+
+    assert pixmap.width() == 2
+    assert pixmap.height() == 2
+    assert rendered.pixelColor(0, 0).red() == HIGHLIGHT_CLIPPING_RGBA[0]
+    assert rendered.pixelColor(0, 0).alpha() == HIGHLIGHT_CLIPPING_RGBA[3]
+    assert rendered.pixelColor(1, 1).blue() == SHADOW_CLIPPING_RGBA[2]
+    assert rendered.pixelColor(1, 1).alpha() == SHADOW_CLIPPING_RGBA[3]
+    del app
+
+
 def test_clipping_overlay_pixmap_preserves_small_shadow_after_cap(
         tmp_path: Path,
 ) -> None:

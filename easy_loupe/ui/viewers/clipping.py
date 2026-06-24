@@ -8,7 +8,7 @@ from io import BytesIO
 from threading import Lock
 from typing import TYPE_CHECKING
 
-from PIL import Image, ImageChops
+from PIL import Image, ImageChops, ImageMath
 from PySide6.QtGui import QImage, QPixmap
 
 if TYPE_CHECKING:
@@ -241,13 +241,27 @@ def _bounded_size(
 def _resize_hit_mask(
         mask: Image.Image, target_size: tuple[int, int]
 ) -> Image.Image:
+    """Resize a binary clipping mask without losing sub-byte hit averages."""
     if mask.size == target_size:
         return mask.copy()
 
-    resized = mask.resize(target_size, Image.Resampling.BOX)
+    # Resize in float mode so a single clipped pixel still produces a positive
+    # value after BOX filtering; 8-bit resizing can round that hit to zero.
+    float_mask = mask.convert('F')
+    resized = float_mask.resize(target_size, Image.Resampling.BOX)
     try:
-        return resized.point(lambda value: 255 if value > 0 else 0)
+        binary_mask = ImageMath.lambda_eval(
+            lambda args: (
+                ImageMath.imagemath_convert(args['resized'] > 0, 'L') * 255
+            ),
+            resized=resized,
+        )
+        try:
+            return binary_mask.convert('L')
+        finally:
+            binary_mask.close()
     finally:
+        float_mask.close()
         resized.close()
 
 
