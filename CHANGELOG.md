@@ -4,6 +4,14 @@
 
 - Added
 
+  - Viewer panes now support a Lightroom-style `Show Clipping` overlay toggled
+    with `J`, drawing red highlight warnings and blue shadow warnings in
+    culling, standalone, and compare viewers.
+
+## [1.3.0] - 2026-06-22
+
+- Added
+
   - Culling mode now has a session-only metadata filter for ratings, color
     labels, and flags. The filter hides non-matching photos from the thumbnail,
     browse, and scene views without changing loaded metadata or file
@@ -14,9 +22,6 @@
     picked/rejected criterion adds explicit `Picked`, `Rejected`, `Untagged`,
     and `Others` folder modes, while color-label and rating criteria each have
     their own optional `Untagged` checkbox.
-  - Viewer panes now support a Lightroom-style `Show Clipping` overlay toggled
-    with `J`, drawing red highlight warnings and blue shadow warnings in
-    culling, standalone, and compare viewers.
 
 - Changed
 
