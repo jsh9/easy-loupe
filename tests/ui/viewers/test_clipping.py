@@ -87,3 +87,52 @@ def test_clipping_overlay_pixmap_caps_long_edge(
     assert pixmap.width() == CLIPPING_OVERLAY_MAX_LONG_EDGE
     assert pixmap.height() == 500
     del app
+
+
+def test_clipping_overlay_pixmap_preserves_small_highlight_after_cap(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify bounded overlays do not average away tiny highlight warnings.
+
+    The overlay is generated from full preview masks before downsampling so a
+    single clipped source pixel should still be visible in the cached overlay.
+    """
+    image_path = tmp_path / 'large_highlight_preview.png'
+    image = Image.new('RGB', (4000, 1000), color=(128, 128, 128))
+    image.putpixel((0, 0), (255, 255, 255))
+    image.save(image_path)
+
+    app = QApplication.instance() or QApplication([])
+    pixmap = clipping_overlay_pixmap(image_path)
+    rendered = pixmap.toImage()
+
+    assert pixmap.width() == CLIPPING_OVERLAY_MAX_LONG_EDGE
+    assert pixmap.height() == 500
+    assert rendered.pixelColor(0, 0).red() == HIGHLIGHT_CLIPPING_RGBA[0]
+    assert rendered.pixelColor(0, 0).alpha() == HIGHLIGHT_CLIPPING_RGBA[3]
+    del app
+
+
+def test_clipping_overlay_pixmap_preserves_small_shadow_after_cap(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify bounded overlays do not average away tiny shadow warnings.
+
+    Shadows use the same hit-preserving mask resize path as highlights.
+    """
+    image_path = tmp_path / 'large_shadow_preview.png'
+    image = Image.new('RGB', (4000, 1000), color=(128, 128, 128))
+    image.putpixel((0, 0), (0, 0, 0))
+    image.save(image_path)
+
+    app = QApplication.instance() or QApplication([])
+    pixmap = clipping_overlay_pixmap(image_path)
+    rendered = pixmap.toImage()
+
+    assert pixmap.width() == CLIPPING_OVERLAY_MAX_LONG_EDGE
+    assert pixmap.height() == 500
+    assert rendered.pixelColor(0, 0).blue() == SHADOW_CLIPPING_RGBA[2]
+    assert rendered.pixelColor(0, 0).alpha() == SHADOW_CLIPPING_RGBA[3]
+    del app

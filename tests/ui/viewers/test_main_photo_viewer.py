@@ -12,6 +12,7 @@ from easy_loupe.ui.viewers.main_photo_viewer import MainPhotoViewer
 from tests.ui._helpers import (
     create_jpeg,
     create_main_window_with_library,
+    process_events_until,
     trigger_viewer_shortcut,
 )
 
@@ -62,7 +63,10 @@ def test_main_photo_viewer_clipping_warning_applies_to_split_panes(
     viewer.set_clipping_warning_visible(enabled=True)
     viewer.set_photo(tmp_path / 'IMG_8052.JPG', (0.5, 0.5))
 
-    assert viewer.single_viewer._clipping_overlay_item.isVisible() is True
+    process_events_until(
+        app,
+        viewer.single_viewer._clipping_overlay_item.isVisible,
+    )
 
     viewer.toggle_split_view()
     app.processEvents()
@@ -70,6 +74,13 @@ def test_main_photo_viewer_clipping_warning_applies_to_split_panes(
     assert viewer._clipping_warning_enabled is True
     assert viewer.split_fit_viewer._clipping_warning_enabled is True
     assert viewer.split_zoom_viewer._clipping_warning_enabled is True
+    process_events_until(
+        app,
+        lambda: (
+            viewer.split_fit_viewer._clipping_overlay_item.isVisible()
+            and viewer.split_zoom_viewer._clipping_overlay_item.isVisible()
+        ),
+    )
     assert viewer.split_fit_viewer._clipping_overlay_item.isVisible() is True
     assert viewer.split_zoom_viewer._clipping_overlay_item.isVisible() is True
 

@@ -7,8 +7,9 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QGraphicsItem
 
+import easy_loupe.ui.viewers.clipping as clipping_module
 import easy_loupe.ui.viewers.photo_viewer as photo_viewer_module
-from tests.ui._helpers import create_jpeg
+from tests.ui._helpers import create_jpeg, process_events_until
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -192,9 +193,9 @@ def test_photo_viewer_clipping_warning_tracks_loaded_photo(
     """
     Verify clipping warnings are a persistent viewer overlay preference.
 
-    Toggling should affect the active photo immediately, survive zoom mode
-    changes, and hide cleanly when the photo is cleared without resetting the
-    user's preference.
+    Toggling should apply to the active photo, survive zoom mode changes, and
+    hide cleanly when the photo is cleared without resetting the user's
+    preference.
     """
     create_jpeg(tmp_path / 'IMG_7016.JPG', 'white')
 
@@ -213,7 +214,7 @@ def test_photo_viewer_clipping_warning_tracks_loaded_photo(
     viewer.set_clipping_warning_visible(enabled=True)
 
     assert viewer._clipping_warning_enabled is True
-    assert overlay.isVisible() is True
+    process_events_until(app, overlay.isVisible)
     assert overlay.pixmap().isNull() is False
     assert overlay.zValue() < viewer._focus_point_marker.zValue()
 
@@ -229,6 +230,7 @@ def test_photo_viewer_clipping_warning_tracks_loaded_photo(
 
     viewer.set_photo(tmp_path / 'IMG_7016.JPG', (0.5, 0.5))
 
+    # The first load populated the cache, so revisiting the photo is immediate.
     assert overlay.isVisible() is True
 
     viewer.close()
@@ -260,6 +262,7 @@ def test_photo_viewer_scales_bounded_clipping_overlay_to_photo(
     viewer.set_clipping_warning_visible(enabled=True)
 
     overlay = viewer._clipping_overlay_item
+    process_events_until(app, overlay.isVisible)
     transform = overlay.transform()
 
     assert overlay.pixmap().width() == 2000
@@ -277,6 +280,177 @@ def test_photo_viewer_scales_bounded_clipping_overlay_to_photo(
 
     assert overlay.transform().m11() == pytest.approx(1.0)
     assert overlay.transform().m22() == pytest.approx(1.0)
+    viewer.close()
+
+
+def test_photo_viewer_clipping_cache_miss_starts_background_job(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify uncached clipping overlays do not block ``set_photo``.
+
+    Cache misses should schedule background generation and leave the overlay
+    hidden until the worker result is delivered.
+    """
+    create_jpeg(tmp_path / 'IMG_7025.JPG', 'white')
+    started_jobs = []
+
+    class FakeThreadPool:
+        @staticmethod
+        def start(job: object) -> None:
+            started_jobs.append(job)
+
+    monkeypatch.setattr(
+        photo_viewer_module.QThreadPool,
+        'globalInstance',
+        staticmethod(FakeThreadPool),
+    )
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(320, 240)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_clipping_warning_visible(enabled=True)
+    viewer.set_photo(tmp_path / 'IMG_7025.JPG', (0.5, 0.5))
+
+    assert len(started_jobs) == 1
+    assert viewer._clipping_overlay_item.isVisible() is False
+    viewer.close()
+
+
+def test_photo_viewer_clipping_cache_hit_applies_immediately(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify cached clipping payloads still appear without background delay.
+
+    This keeps the async cache-miss path from regressing repeat navigation,
+    where users expect already-generated warnings to follow the photo at once.
+    """
+    image_path = tmp_path / 'IMG_7026.JPG'
+    create_jpeg(image_path, 'white')
+    cache_key = clipping_module.clipping_overlay_cache_key(image_path)
+    clipping_module.clipping_overlay_payload_for_key(cache_key)
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(320, 240)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_clipping_warning_visible(enabled=True)
+    viewer.set_photo(image_path, (0.5, 0.5))
+
+    assert viewer._clipping_overlay_item.isVisible() is True
+    viewer.close()
+
+
+def test_photo_viewer_ignores_stale_clipping_worker_result(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify late clipping results cannot repaint a previous photo's overlay.
+
+    The worker result is delivered after the viewer has moved on, so the
+    request-id/key gate must protect the current photo from stale UI state.
+    """
+    first_path = tmp_path / 'IMG_7027.JPG'
+    second_path = tmp_path / 'IMG_7028.JPG'
+    create_jpeg(first_path, 'white')
+    create_jpeg(second_path, 'black')
+    started_jobs = []
+
+    class FakeThreadPool:
+        @staticmethod
+        def start(job: object) -> None:
+            started_jobs.append(job)
+
+    monkeypatch.setattr(
+        photo_viewer_module.QThreadPool,
+        'globalInstance',
+        staticmethod(FakeThreadPool),
+    )
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(320, 240)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_clipping_warning_visible(enabled=True)
+    viewer.set_photo(first_path, (0.5, 0.5))
+    viewer.set_photo(second_path, (0.5, 0.5))
+
+    assert len(started_jobs) == 2
+    stale_job = started_jobs[0]
+    stale_payload = clipping_module.clipping_overlay_payload_for_key(
+        stale_job.cache_key
+    )
+    stale_job.signals.finished.emit(
+        stale_job.request_id, stale_job.cache_key, stale_payload
+    )
+    app.processEvents()
+
+    assert viewer._clipping_overlay_item.isVisible() is False
+
+    current_job = started_jobs[1]
+    current_payload = clipping_module.clipping_overlay_payload_for_key(
+        current_job.cache_key
+    )
+    current_job.signals.finished.emit(
+        current_job.request_id, current_job.cache_key, current_payload
+    )
+    app.processEvents()
+
+    assert viewer._clipping_overlay_item.isVisible() is True
+    viewer.close()
+
+
+def test_photo_viewer_ignores_disabled_clipping_worker_result(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify disabling clipping before completion keeps the overlay hidden.
+
+    This covers the same async race as fast navigation, but with the user's
+    overlay preference changing while a background request is still pending.
+    """
+    image_path = tmp_path / 'IMG_7029.JPG'
+    create_jpeg(image_path, 'white')
+    started_jobs = []
+
+    class FakeThreadPool:
+        @staticmethod
+        def start(job: object) -> None:
+            started_jobs.append(job)
+
+    monkeypatch.setattr(
+        photo_viewer_module.QThreadPool,
+        'globalInstance',
+        staticmethod(FakeThreadPool),
+    )
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(320, 240)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_clipping_warning_visible(enabled=True)
+    viewer.set_photo(image_path, (0.5, 0.5))
+    viewer.set_clipping_warning_visible(enabled=False)
+
+    job = started_jobs[0]
+    payload = clipping_module.clipping_overlay_payload_for_key(job.cache_key)
+    job.signals.finished.emit(job.request_id, job.cache_key, payload)
+    app.processEvents()
+
+    assert viewer._clipping_overlay_item.isVisible() is False
     viewer.close()
 
 

@@ -16,7 +16,7 @@ from easy_loupe.progress import ProgressReporter, ProgressStageDefinition
 from easy_loupe.ui.launch import CullingLaunchRequest
 from easy_loupe.ui.photo_viewer.window import PhotoViewerWindow
 from easy_loupe.ui.photo_viewer.workers import PhotoViewerExifResult
-from tests.ui._helpers import create_jpeg, stub_read_exif
+from tests.ui._helpers import create_jpeg, process_events_until, stub_read_exif
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -928,6 +928,7 @@ def test_photo_viewer_shortcuts_toggle_inspection_overlays(
     assert window._show_clipping is True
     assert window.viewer._clipping_warning_enabled is True
     assert window.viewer.single_viewer._clipping_warning_enabled is True
+    process_events_until(app, clipping_overlay.isVisible)
     assert clipping_overlay.isVisible() is True
 
     window.show_af_point_shortcut.activated.emit()

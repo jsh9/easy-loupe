@@ -6,7 +6,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QPointF, QSize, Qt, Signal
+from PySide6.QtCore import (
+    QObject,
+    QPointF,
+    QRunnable,
+    QSize,
+    Qt,
+    QThreadPool,
+    Signal,
+)
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -25,7 +33,14 @@ from PySide6.QtWidgets import (
 )
 
 from easy_loupe.ui.theme import THEMES, ThemePalette
-from easy_loupe.ui.viewers.clipping import clipping_overlay_pixmap
+from easy_loupe.ui.viewers.clipping import (
+    ClippingOverlayCacheKey,
+    ClippingOverlayPayload,
+    clipping_overlay_cache_key,
+    clipping_overlay_payload_for_key,
+    clipping_overlay_pixmap_from_payload,
+    get_cached_clipping_overlay_payload,
+)
 
 MAX_ZOOM_FACTOR = 10.0
 """Upper limit on how far the user can zoom into a photo, expressed as a
@@ -55,6 +70,37 @@ FOCUS_POINT_MARKER_COLOR = '#ff3b30'
 
 if TYPE_CHECKING:
     from PySide6.QtGui import QResizeEvent
+
+
+class _ClippingOverlaySignals(QObject):
+    """Signals emitted by a background clipping-overlay runnable."""
+
+    finished = Signal(int, object, object)
+    failed = Signal(int, object)
+
+
+class _ClippingOverlayRunnable(QRunnable):
+    """Build one clipping overlay payload outside the GUI thread."""
+
+    def __init__(
+            self,
+            request_id: int,
+            cache_key: ClippingOverlayCacheKey,
+    ) -> None:
+        super().__init__()
+        self.request_id = request_id
+        self.cache_key = cache_key
+        self.signals = _ClippingOverlaySignals()
+
+    def run(self) -> None:
+        """Generate a GUI-safe overlay payload and report completion."""
+        try:
+            payload = clipping_overlay_payload_for_key(self.cache_key)
+        except Exception:  # noqa: BLE001 - keep worker failures off the UI.
+            self.signals.failed.emit(self.request_id, self.cache_key)
+            return
+
+        self.signals.finished.emit(self.request_id, self.cache_key, payload)
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +172,11 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
         self._mode = 'fit'
         self._focus_point_marker_enabled = False
         self._clipping_warning_enabled = False
+        self._clipping_overlay_key: ClippingOverlayCacheKey | None = None
+        self._clipping_overlay_request_id = 0
+        # Keep QRunnable wrappers alive until their signals arrive; otherwise
+        # Qt can drop the per-job signal object before completion is delivered.
+        self._clipping_overlay_jobs: dict[int, _ClippingOverlayRunnable] = {}
         self._focus_point_pending = False
         self._hold_zoom_enabled = hold_zoom_enabled
         self._hold_zoom_active = False
@@ -987,23 +1038,88 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
             or self._current_image_key is None
             or self._image_size.isEmpty()
         ):
+            self._invalidate_clipping_overlay_request()
             self._clear_clipping_overlay()
             return
 
         try:
-            overlay = clipping_overlay_pixmap(Path(self._current_image_key))
+            cache_key = clipping_overlay_cache_key(
+                Path(self._current_image_key)
+            )
         except (OSError, RuntimeError, ValueError):
+            self._invalidate_clipping_overlay_request()
             self._clear_clipping_overlay()
             return
 
-        if overlay.isNull() or overlay.width() <= 0 or overlay.height() <= 0:
+        self._clipping_overlay_key = cache_key
+        request_id = self._next_clipping_overlay_request_id()
+        payload = get_cached_clipping_overlay_payload(cache_key)
+        if payload is not None:
+            self._apply_clipping_overlay_payload(payload)
+            return
+
+        self._clear_clipping_overlay()
+        job = _ClippingOverlayRunnable(request_id, cache_key)
+        job.signals.finished.connect(self._handle_clipping_overlay_finished)
+        job.signals.failed.connect(self._handle_clipping_overlay_failed)
+        # Store by request id so stale jobs keep their signal bridge alive but
+        # still fail the current-request check when users navigate quickly.
+        self._clipping_overlay_jobs[request_id] = job
+        QThreadPool.globalInstance().start(job)
+
+    def _next_clipping_overlay_request_id(self) -> int:
+        self._clipping_overlay_request_id += 1
+        return self._clipping_overlay_request_id
+
+    def _invalidate_clipping_overlay_request(self) -> None:
+        self._next_clipping_overlay_request_id()
+        self._clipping_overlay_key = None
+
+    def _handle_clipping_overlay_finished(
+            self,
+            request_id: int,
+            cache_key: ClippingOverlayCacheKey,
+            payload: ClippingOverlayPayload,
+    ) -> None:
+        self._clipping_overlay_jobs.pop(request_id, None)
+        if not self._clipping_overlay_result_current(request_id, cache_key):
+            return
+
+        self._apply_clipping_overlay_payload(payload)
+
+    def _handle_clipping_overlay_failed(
+            self,
+            request_id: int,
+            cache_key: ClippingOverlayCacheKey,
+    ) -> None:
+        self._clipping_overlay_jobs.pop(request_id, None)
+        if self._clipping_overlay_result_current(request_id, cache_key):
+            self._clear_clipping_overlay()
+
+    def _clipping_overlay_result_current(
+            self,
+            request_id: int,
+            cache_key: ClippingOverlayCacheKey,
+    ) -> bool:
+        return (
+            self._clipping_warning_enabled
+            and not self._image_size.isEmpty()
+            and request_id == self._clipping_overlay_request_id
+            and cache_key == self._clipping_overlay_key
+        )
+
+    def _apply_clipping_overlay_payload(
+            self, payload: ClippingOverlayPayload
+    ) -> None:
+        overlay = clipping_overlay_pixmap_from_payload(payload)
+        if overlay.isNull() or payload.width <= 0 or payload.height <= 0:
             self._clear_clipping_overlay()
             return
 
         # Cached clipping pixmaps can be smaller than the photo pixmap, so
         # scale the item in scene coordinates to keep warnings aligned.
-        scale_x = self._image_size.width() / overlay.width()
-        scale_y = self._image_size.height() / overlay.height()
+        scale_x = self._image_size.width() / payload.width
+        scale_y = self._image_size.height() / payload.height
         self._clipping_overlay_item.setPixmap(overlay)
         self._clipping_overlay_item.setTransform(
             QTransform.fromScale(scale_x, scale_y)

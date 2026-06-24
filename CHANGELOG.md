@@ -10,8 +10,10 @@
 
 - Fixed
 
-  - Clipping-warning overlays now cache smaller bounded pixmaps to reduce
-    memory use when reviewing large photos.
+  - Clipping-warning overlays now preserve tiny clipped highlights and shadows
+    when bounding large cached overlays.
+  - Uncached clipping-warning overlays now render off the UI thread so
+    first-time navigation and large compare grids remain responsive.
 
 ## [1.3.0] - 2026-06-22
 

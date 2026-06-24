@@ -7,6 +7,7 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
+import easy_loupe.ui.viewers.photo_viewer as photo_viewer_module
 from easy_loupe.ui.theme import THEMES
 from easy_loupe.ui.viewers.compare_photo_viewer import (
     ACTIVE_COMPARE_BORDER_WIDTH,
@@ -18,7 +19,7 @@ from easy_loupe.ui.viewers.compare_photo_viewer import (
     ComparePhoto,
     ComparePhotoViewer,
 )
-from tests.ui._helpers import create_jpeg
+from tests.ui._helpers import create_jpeg, process_events_until
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -125,6 +126,12 @@ def test_compare_photo_viewer_clipping_warning_applies_to_all_panes(
         True,
         True,
     ]
+    process_events_until(
+        app,
+        lambda: all(
+            pane._clipping_overlay_item.isVisible() for pane in viewer._viewers
+        ),
+    )
     assert [
         pane._clipping_overlay_item.isVisible() for pane in viewer._viewers
     ] == [True, True]
@@ -141,6 +148,49 @@ def test_compare_photo_viewer_clipping_warning_applies_to_all_panes(
         False,
     ]
     assert viewer.selected_viewer._clipping_warning_enabled is False
+    _close_viewer(viewer, app)
+
+
+def test_compare_photo_viewer_twenty_pane_clipping_uses_background_jobs(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify max-size compare grids do not generate clipping overlays inline.
+
+    A 20-photo compare grid exceeds one screenful of overlay work, so pane
+    construction should only enqueue background jobs on cache misses.
+    """
+    photos = []
+    for index in range(20):
+        image_path = tmp_path / f'IMG_{index:04d}.JPG'
+        create_jpeg(image_path, 'white')
+        photos.append(ComparePhoto(str(index), image_path, (0.5, 0.5)))
+
+    started_jobs = []
+
+    class FakeThreadPool:
+        @staticmethod
+        def start(job: object) -> None:
+            started_jobs.append(job)
+
+    monkeypatch.setattr(
+        photo_viewer_module.QThreadPool,
+        'globalInstance',
+        staticmethod(FakeThreadPool),
+    )
+
+    app = QApplication.instance() or QApplication([])
+    viewer = ComparePhotoViewer(photo_limit=20)
+    viewer.set_clipping_warning_visible(enabled=True)
+    viewer.set_photos(photos)
+
+    assert len(viewer._viewers) == 20
+    assert len(started_jobs) == 20
+    assert all(pane._clipping_warning_enabled for pane in viewer._viewers)
+    assert all(
+        not pane._clipping_overlay_item.isVisible() for pane in viewer._viewers
+    )
     _close_viewer(viewer, app)
 
 
