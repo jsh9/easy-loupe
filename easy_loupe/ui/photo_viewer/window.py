@@ -43,7 +43,10 @@ from easy_loupe.core.recursive_loading import (
     resolve_relative_path,
 )
 from easy_loupe.progress import ProgressSnapshot
-from easy_loupe.ui.defaults import DEFAULT_SHOW_AF_POINT
+from easy_loupe.ui.defaults import (
+    DEFAULT_SHOW_AF_POINT,
+    DEFAULT_SHOW_CLIPPING,
+)
 from easy_loupe.ui.folder_access import FolderAccessManager
 from easy_loupe.ui.identity import APP_NAME, easy_loupe_icon
 from easy_loupe.ui.launch import CullingLaunchRequest
@@ -245,6 +248,7 @@ class PhotoViewerWindow(QMainWindow):
             ),
         ])
         self._show_af_point_marker = DEFAULT_SHOW_AF_POINT
+        self._show_clipping = DEFAULT_SHOW_CLIPPING
         self._info_overlay_enabled = False
         self._info_overlay_refresh_deferred = False
         self._minimap_photo_id: str | None = None
@@ -273,6 +277,7 @@ class PhotoViewerWindow(QMainWindow):
         self.viewer.set_focus_point_marker_visible(
             enabled=DEFAULT_SHOW_AF_POINT
         )
+        self.viewer.set_clipping_warning_visible(enabled=DEFAULT_SHOW_CLIPPING)
         self.viewer.visible_region_changed.connect(
             self._refresh_visible_region_overlay
         )
@@ -463,6 +468,9 @@ class PhotoViewerWindow(QMainWindow):
         self.show_af_point_shortcut = self._make_shortcut(
             'F', self._toggle_show_af_point
         )
+        self.show_clipping_shortcut = self._make_shortcut(
+            'J', self._toggle_show_clipping
+        )
         self.recenter_zoom_shortcut = self._make_shortcut(
             'Shift+F', self.viewer.recenter_manual_view
         )
@@ -548,6 +556,11 @@ class PhotoViewerWindow(QMainWindow):
         self.viewer.set_focus_point_marker_visible(
             enabled=self._show_af_point_marker
         )
+
+    def _toggle_show_clipping(self) -> None:
+        """Toggle highlight/shadow clipping in the standalone viewer."""
+        self._show_clipping = not self._show_clipping
+        self.viewer.set_clipping_warning_visible(enabled=self._show_clipping)
 
     def _handle_reset_zoom_centers_shortcut(self) -> None:
         if not confirm_reset_zoom_centers(self):

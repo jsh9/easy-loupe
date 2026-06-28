@@ -863,6 +863,7 @@ class MainWindowPresentationMixin:
             """
         )
         self.show_af_point_toggle.setStyleSheet(self.theme_toggle.styleSheet())
+        self.show_clipping_toggle.setStyleSheet(self.theme_toggle.styleSheet())
         self.photo_load_recursively_checkbox.setStyleSheet(
             self.theme_toggle.styleSheet()
         )

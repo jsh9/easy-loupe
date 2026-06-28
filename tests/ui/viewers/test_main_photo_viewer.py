@@ -12,6 +12,7 @@ from easy_loupe.ui.viewers.main_photo_viewer import MainPhotoViewer
 from tests.ui._helpers import (
     create_jpeg,
     create_main_window_with_library,
+    process_events_until,
     trigger_viewer_shortcut,
 )
 
@@ -34,8 +35,61 @@ def test_main_photo_viewer_defaults_to_hidden_af_marker() -> None:
     assert viewer.single_viewer._focus_point_marker_enabled is False
     assert viewer.split_fit_viewer._focus_point_marker_enabled is False
     assert viewer.split_zoom_viewer._focus_point_marker_enabled is False
+    assert viewer._clipping_warning_enabled is False
+    assert viewer.single_viewer._clipping_warning_enabled is False
+    assert viewer.split_fit_viewer._clipping_warning_enabled is False
+    assert viewer.split_zoom_viewer._clipping_warning_enabled is False
     viewer.close()
     app.processEvents()
+
+
+def test_main_photo_viewer_clipping_warning_applies_to_split_panes(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify clipping visibility is synchronized across single and split panes.
+
+    Split mode rebuilds both pane pixmaps, so the clipping preference must be
+    stored on the container and applied to every embedded ``PhotoViewer``.
+    """
+    create_jpeg(tmp_path / 'IMG_8052.JPG', 'white')
+
+    app = QApplication.instance() or QApplication([])
+    viewer = MainPhotoViewer()
+    viewer.resize(640, 480)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_clipping_warning_visible(enabled=True)
+    viewer.set_photo(tmp_path / 'IMG_8052.JPG', (0.5, 0.5))
+
+    process_events_until(
+        app,
+        viewer.single_viewer._clipping_overlay_item.isVisible,
+    )
+
+    viewer.toggle_split_view()
+    app.processEvents()
+
+    assert viewer._clipping_warning_enabled is True
+    assert viewer.split_fit_viewer._clipping_warning_enabled is True
+    assert viewer.split_zoom_viewer._clipping_warning_enabled is True
+    process_events_until(
+        app,
+        lambda: (
+            viewer.split_fit_viewer._clipping_overlay_item.isVisible()
+            and viewer.split_zoom_viewer._clipping_overlay_item.isVisible()
+        ),
+    )
+    assert viewer.split_fit_viewer._clipping_overlay_item.isVisible() is True
+    assert viewer.split_zoom_viewer._clipping_overlay_item.isVisible() is True
+
+    viewer.set_clipping_warning_visible(enabled=False)
+
+    assert viewer.single_viewer._clipping_warning_enabled is False
+    assert viewer.split_fit_viewer._clipping_warning_enabled is False
+    assert viewer.split_zoom_viewer._clipping_warning_enabled is False
+    viewer.close()
 
 
 def test_main_window_split_shortcut_enters_and_exits_split_with_preserved_manual_view(

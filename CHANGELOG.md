@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-06-28
+
+- Added
+
+  - Viewer panes now support a Lightroom-style `Show Clipping` overlay toggled
+    with `J`, drawing red warnings when any RGB channel clips high and blue
+    warnings when any RGB channel clips low in culling, standalone, and compare
+    viewers.
+
+- Fixed
+
+  - Clipping-warning overlays now downsample displayed previews before
+    thresholding so large photos render faster; very small clipped specks may
+    be missed by design.
+  - Uncached clipping-warning overlays now render off the UI thread so
+    first-time navigation and large compare grids remain responsive.
+  - Clipping-warning overlay work now skips stale rapid-navigation requests
+    before entering the thread pool, and cached overlay decoding runs off the
+    UI thread.
+  - Clipping-warning overlay work now cancels cleanly when viewer panes close,
+    avoiding stale thread-pool signal delivery during teardown.
+
+## [1.3.0] - 2026-06-22
+
 - Added
 
   - Culling mode now has a session-only metadata filter for ratings, color

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from time import monotonic
 from typing import TYPE_CHECKING, Any
 
 from PIL import Image
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QKeySequence
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 import easy_loupe.core.exif as core_exif_module
@@ -14,6 +16,7 @@ from easy_loupe.core.photo_library import PhotoLibrary
 from easy_loupe.core.records import SceneGroup
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     import pytest
@@ -34,6 +37,26 @@ def create_jpeg(
         path: Path, color: str, *, size: tuple[int, int] = (640, 480)
 ) -> None:
     Image.new('RGB', size, color=color).save(path, format='JPEG')
+
+
+def process_events_until(
+        app: QApplication,
+        predicate: Callable[[], bool],
+        *,
+        timeout_ms: int = 1000,
+        interval_ms: int = 10,
+) -> None:
+    """Process Qt events until a deferred UI condition becomes true."""
+    deadline = monotonic() + (timeout_ms / 1000)
+    while monotonic() < deadline:
+        app.processEvents()
+        if predicate():
+            return
+
+        QTest.qWait(interval_ms)
+
+    app.processEvents()
+    assert predicate()
 
 
 def make_photo_record(

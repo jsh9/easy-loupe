@@ -272,6 +272,21 @@ Major logic:
   follows the current photo, hides automatically in browse mode, compare mode,
   and busy/progress states, and reappears when returning to eligible normal
   view state if the overlay preference remains enabled.
+- The `J` shortcut toggles `Show Clipping`, a session-only red/blue warning
+  overlay for clipped highlights and shadows. The overlay is drawn from the
+  displayed viewer preview pixels and applies to culling single/split panes,
+  standalone photo-viewer panes, compare grid panes, and selected compare
+  photos. Clipping analysis first downsamples the displayed preview to a
+  3000-pixel long edge, then scales the resulting overlay back over the full
+  viewer scene. Highlights use any RGB channel at or above the high threshold,
+  shadows use any RGB channel at or below the low threshold, and highlight
+  paint wins when both masks hit the same pixel. Overlay generation and cached
+  PNG decoding run off the UI thread and may appear shortly after the photo;
+  stale requests are checked before entering the thread pool during rapid
+  navigation, and viewer teardown cancels delayed starts plus marks in-flight
+  jobs so late results cannot update deleted panes. This speed-first analysis
+  can miss tiny clipped specks after downsampling. Browse thumbnails do not
+  show clipping warnings.
 
 ## 4. Selection And Browse Behavior
 
@@ -404,6 +419,8 @@ Current shortcut coverage in code includes:
 - `Ctrl+Shift+F`: reset remembered manual zoom centers to AF points or image
   centers while preserving remembered zoom levels
 - `I`: toggle the normal-view EXIF and RGB histogram overlay
+- `J`: toggle the `Show Clipping` red/blue highlight and shadow clipping
+  overlay in viewer panes
 - `Space`: exit browse mode into fit-to-window view mode, promote split view
   into full zoom, toggle focus zoom while already in single-pane view mode, or
   open/toggle the active photo in compare mode
@@ -501,6 +518,9 @@ alive until worker code has stopped running.
   that require extra live zoom and resize while temporarily recentered.
 - Verify `Ctrl+Shift+F` preserves remembered zoom levels, resets centers to
   photo-relative AF/default centers, and survives late AF metadata loading.
+- Verify clipping-warning overlays by waiting for the background overlay paint
+  instead of assuming immediate visibility; Windows full UI-suite runs can
+  deliver the delayed `QThreadPool` result more slowly than focused tests.
 - Verify scene-detection completion preserves split view in normal view mode
   but still exits browse mode back to fit view.
 - Verify vertical thumbnail-strip Shift range selection releases rows outside

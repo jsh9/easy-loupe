@@ -229,7 +229,8 @@ build keeps a terminal attached so startup errors include a normal traceback.
 - Supports autofocus-point/manual zoom, split view, per-photo remembered manual
   zoom state, an AF point marker that is hidden by default and toggled with
   `F`, temporary AF/default recentering with `Shift+F`, reset of remembered
-  zoom centers with `Ctrl+Shift+F`, and `W/A/S/D` panning.
+  zoom centers with `Ctrl+Shift+F`, highlight/shadow clipping warnings toggled
+  with `J`, and `W/A/S/D` panning.
 - Shows the current visible region on strip thumbnails while zoomed in, using a
   red zoom box and a darkened mask outside the box.
 - In scene mode, the visible-region overlay appears on the horizontal scene
@@ -348,13 +349,13 @@ Common transitions:
   scene-stack rows using an anchored range that releases rows outside the range
   when you reverse direction
 - Zoom and pan: `\` toggles split view, `F` toggles the AF point marker from
-  its hidden default, `-` zooms out, `=` / `+` zoom in, `Shift+F` temporarily
-  recenters manual zoom on the AF point or image center, `Ctrl+Shift+F` resets
-  remembered zoom centers while preserving zoom levels, `W/A/S/D` pan the
-  active zoomed view or compare pane set, the strip thumbnail overlay tracks
-  the current visible region while zoomed, left/right arrows move within the
-  current scene in view mode, and arrow keys move the active pane in compare
-  mode
+  its hidden default, `J` toggles highlight/shadow clipping warnings, `-` zooms
+  out, `=` / `+` zoom in, `Shift+F` temporarily recenters manual zoom on the AF
+  point or image center, `Ctrl+Shift+F` resets remembered zoom centers while
+  preserving zoom levels, `W/A/S/D` pan the active zoomed view or compare pane
+  set, the strip thumbnail overlay tracks the current visible region while
+  zoomed, left/right arrows move within the current scene in view mode, and
+  arrow keys move the active pane in compare mode
 
 ## 6. Metadata File
 

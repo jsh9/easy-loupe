@@ -348,6 +348,10 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:  # no
         == 'F'
     )
     assert (
+        window.show_clipping_shortcut.key().toString(QKeySequence.PortableText)
+        == 'J'
+    )
+    assert (
         window.info_overlay_shortcut.key().toString(QKeySequence.PortableText)
         == 'I'
     )
@@ -371,10 +375,18 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:  # no
     )
     assert window.show_af_point_toggle.text() == 'Show AF point'
     assert window.show_af_point_toggle.isChecked() is False
+    assert window.show_clipping_toggle.text() == 'Show Clipping'
+    assert window.show_clipping_toggle.isChecked() is False
     assert (
         window.show_af_point_toggle.toolTip()
         == main_window_module.MainWindow._shortcut_tooltip(
             'Show AF point', 'F'
+        )
+    )
+    assert (
+        window.show_clipping_toggle.toolTip()
+        == main_window_module.MainWindow._shortcut_tooltip(
+            'Show Clipping', 'J'
         )
     )
     assert not hasattr(window, 'zoom_to_af_point_toggle')
@@ -382,6 +394,11 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:  # no
     assert window.viewer.single_viewer._focus_point_marker_enabled is False
     assert window.viewer.split_fit_viewer._focus_point_marker_enabled is False
     assert window.viewer.split_zoom_viewer._focus_point_marker_enabled is False
+    assert window.viewer._clipping_warning_enabled is False
+    assert window.viewer.single_viewer._clipping_warning_enabled is False
+    assert window.viewer.split_fit_viewer._clipping_warning_enabled is False
+    assert window.viewer.split_zoom_viewer._clipping_warning_enabled is False
+    assert window.compare_viewer._clipping_warning_enabled is False
 
     window.show_af_point_shortcut.activated.emit()
 
@@ -391,12 +408,27 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:  # no
     assert window.viewer.split_fit_viewer._focus_point_marker_enabled is True
     assert window.viewer.split_zoom_viewer._focus_point_marker_enabled is True
 
+    window.show_clipping_shortcut.activated.emit()
+
+    assert window.show_clipping_toggle.isChecked() is True
+    assert window.viewer._clipping_warning_enabled is True
+    assert window.viewer.single_viewer._clipping_warning_enabled is True
+    assert window.viewer.split_fit_viewer._clipping_warning_enabled is True
+    assert window.viewer.split_zoom_viewer._clipping_warning_enabled is True
+    assert window.compare_viewer._clipping_warning_enabled is True
+
     window.show_af_point_toggle.setChecked(False)
+    window.show_clipping_toggle.setChecked(False)
 
     assert window.viewer._focus_point_marker_enabled is False
     assert window.viewer.single_viewer._focus_point_marker_enabled is False
     assert window.viewer.split_fit_viewer._focus_point_marker_enabled is False
     assert window.viewer.split_zoom_viewer._focus_point_marker_enabled is False
+    assert window.viewer._clipping_warning_enabled is False
+    assert window.viewer.single_viewer._clipping_warning_enabled is False
+    assert window.viewer.split_fit_viewer._clipping_warning_enabled is False
+    assert window.viewer.split_zoom_viewer._clipping_warning_enabled is False
+    assert window.compare_viewer._clipping_warning_enabled is False
     assert (
         window.metadata_label.text()
         == f'Metadata: {theme_module.NO_METADATA_TEXT}'

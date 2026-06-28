@@ -16,7 +16,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from easy_loupe.ui.defaults import DEFAULT_SHOW_AF_POINT
+from easy_loupe.ui.defaults import (
+    DEFAULT_SHOW_AF_POINT,
+    DEFAULT_SHOW_CLIPPING,
+)
 from easy_loupe.ui.theme import NO_METADATA_TEXT, THEMES, ThemePalette
 from easy_loupe.ui.viewers.photo_viewer import ManualView, PhotoViewer
 
@@ -208,6 +211,7 @@ class ComparePhotoViewer(QWidget):
         self._theme = THEMES['light']
         self._locked_zoom = True
         self._focus_point_marker_enabled = DEFAULT_SHOW_AF_POINT
+        self._clipping_warning_enabled = DEFAULT_SHOW_CLIPPING
         self._active_index = 0
         self._rows = 1
         self._columns = 1
@@ -250,6 +254,9 @@ class ComparePhotoViewer(QWidget):
         self.selected_viewer = PhotoViewer(self.selected_widget)
         self.selected_viewer.set_focus_point_marker_visible(
             enabled=self._focus_point_marker_enabled
+        )
+        self.selected_viewer.set_clipping_warning_visible(
+            enabled=self._clipping_warning_enabled
         )
         self.selected_metadata_label = QLabel(self.selected_widget)
         self.selected_metadata_label.setObjectName('compareMetadataLabel')
@@ -346,6 +353,9 @@ class ComparePhotoViewer(QWidget):
         viewer = ComparePanePhotoViewer(frame)
         viewer.set_focus_point_marker_visible(
             enabled=self._focus_point_marker_enabled
+        )
+        viewer.set_clipping_warning_visible(
+            enabled=self._clipping_warning_enabled
         )
         viewer.set_theme(self._theme)
         viewer.set_photo(photo.image_path, photo.focus_point)
@@ -531,6 +541,14 @@ class ComparePhotoViewer(QWidget):
 
         self.selected_viewer.set_focus_point_marker_visible(enabled=enabled)
 
+    def set_clipping_warning_visible(self, *, enabled: bool) -> None:
+        """Set whether compared panes show highlight/shadow clipping."""
+        self._clipping_warning_enabled = enabled
+        for viewer in self._viewers:
+            viewer.set_clipping_warning_visible(enabled=enabled)
+
+        self.selected_viewer.set_clipping_warning_visible(enabled=enabled)
+
     def set_theme(self, theme: ThemePalette) -> None:
         """Apply the current app theme."""
         self._theme = theme
@@ -631,6 +649,9 @@ class ComparePhotoViewer(QWidget):
         """Load one compare photo into the selected-photo viewer."""
         self.selected_viewer.set_focus_point_marker_visible(
             enabled=self._focus_point_marker_enabled
+        )
+        self.selected_viewer.set_clipping_warning_visible(
+            enabled=self._clipping_warning_enabled
         )
         self.selected_viewer.set_photo(photo.image_path, photo.focus_point)
         self.selected_metadata_label.setText(

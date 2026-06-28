@@ -1405,6 +1405,7 @@ class MainWindowWorkflowMixin:
         )
         self.theme_toggle.setEnabled(enabled)
         self.show_af_point_toggle.setEnabled(enabled)
+        self.show_clipping_toggle.setEnabled(enabled)
         self.photo_load_recursively_checkbox.setEnabled(enabled)
         for button in self.photo_sort_buttons.values():
             button.setEnabled(enabled)

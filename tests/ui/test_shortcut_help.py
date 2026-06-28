@@ -49,6 +49,7 @@ def test_shortcut_help_catalog_covers_each_context() -> None:
         for row in group.rows
     ]
     assert any(row.shortcut == 'G / Enter' for row in photo_viewer_rows)
+    assert any(row.shortcut == 'J' for row in photo_viewer_rows)
 
     empty_rows = [
         row
@@ -65,6 +66,7 @@ def test_shortcut_help_catalog_covers_each_context() -> None:
         for row in group.rows
     ]
     assert any(row.shortcut == 'Ctrl+Shift+M' for row in no_scene_rows)
+    assert any(row.shortcut == 'J' for row in no_scene_rows)
     assert not any(row.shortcut == 'Left / Right' for row in no_scene_rows)
     assert not any(
         row.shortcut == 'Shift+Left / Shift+Right' for row in no_scene_rows
@@ -85,6 +87,7 @@ def test_shortcut_help_catalog_covers_each_context() -> None:
         for row in group.rows
     ]
     assert any(row.shortcut == 'Left / Right' for row in culling_rows)
+    assert any(row.shortcut == 'J' for row in culling_rows)
     assert any(
         row.shortcut == 'Shift+Left / Shift+Right' for row in culling_rows
     )
@@ -110,6 +113,7 @@ def test_shortcut_help_catalog_covers_each_context() -> None:
         for row in group.rows
     ]
     assert any(row.shortcut == 'Arrow keys' for row in compare_rows)
+    assert any(row.shortcut == 'J' for row in compare_rows)
     compare_esc_rows = [
         row.description for row in compare_rows if row.shortcut == 'Esc'
     ]
@@ -125,6 +129,7 @@ def test_shortcut_help_catalog_covers_each_context() -> None:
         for row in group.rows
     ]
     assert any(row.shortcut == 'G' for row in selected_compare_rows)
+    assert any(row.shortcut == 'J' for row in selected_compare_rows)
     selected_compare_esc_rows = [
         row.description
         for row in selected_compare_rows
