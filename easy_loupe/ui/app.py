@@ -159,7 +159,6 @@ class WindowManager:
         self._culling_window_factory = culling_window_factory
         self._photo_window_factory = photo_window_factory
         self._app = app
-        self._quit_requested = False
         self._windows: list[_ManagedWindow] = []
         if self._app is not None:
             # Qt otherwise quits when the last visible window closes. Hidden
@@ -248,24 +247,16 @@ class WindowManager:
 
     def _handle_application_quit(self) -> bool:
         """
-        Close managed windows and defer app quit until they are destroyed.
+        Ignore application quit while any EasyLoupe windows are retained.
 
-        Hidden deferred-close windows may still own active QThreads. Keeping
-        the event loop alive until ``destroyed`` avoids PySide finalization
-        deleting those thread objects while they are still running.
+        Ctrl/Cmd+Q can arrive as a native Qt quit event before a window
+        shortcut sees it. Treat that event as disabled while windows exist, but
+        allow the internal app.quit() call after the final retained window is
+        destroyed to finish the event loop.
         """
-        if not self._windows:
-            return True
-
-        if not self._quit_requested:
-            # A consumed Qt quit event can be delivered again. Close retained
-            # windows once so hidden deferred-close windows keep draining their
-            # worker cleanup instead of receiving repeated close requests.
-            self._quit_requested = True
-            for window in list(self._windows):
-                window.close()
-
-        return not self._windows
+        # Returning False consumes the native Quit event. Returning True is
+        # safe only after every worker-owning window has been forgotten.
+        return bool(not self._windows)
 
 
 class StartupCoordinator:

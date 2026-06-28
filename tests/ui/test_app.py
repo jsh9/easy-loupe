@@ -400,7 +400,9 @@ def test_window_manager_quits_after_last_window_is_destroyed() -> None:
     Quit the app only after the final retained window is destroyed.
 
     A normal close can destroy immediately; background-close windows reach the
-    same path later from their deferred final close.
+    same path later from their deferred final close. This is the intentional
+    exit path that remains after native quit requests are disabled while
+    windows are retained.
     """
     app = _FakeApplication()
     manager = app_module.WindowManager(
@@ -416,12 +418,13 @@ def test_window_manager_quits_after_last_window_is_destroyed() -> None:
     assert app.quit_calls == 1
 
 
-def test_window_manager_quit_request_closes_retained_windows() -> None:
+def test_window_manager_quit_request_ignores_retained_windows() -> None:
     """
-    Close retained windows when Qt delivers an application quit request.
+    Ignore application quit requests while windows are retained.
 
-    Synchronously destroyed windows can allow the current quit event to proceed
-    because no hidden worker-owning windows remain retained.
+    Ctrl/Cmd+Q can arrive as a native quit event, so retained windows must not
+    be closed by that path. Users close windows through window-scoped close
+    shortcuts or the window controls instead.
     """
     app = _FakeApplication()
     manager = app_module.WindowManager(
@@ -432,20 +435,20 @@ def test_window_manager_quit_request_closes_retained_windows() -> None:
     first = manager.open_culling_window()
     second = manager.open_photo_window(Path('IMG_1000.JPG'))
 
-    assert app.request_quit() is True
+    assert app.request_quit() is False
 
-    assert first.close_calls == 1
-    assert second.close_calls == 1
-    assert manager.windows() == []
+    assert first.close_calls == 0
+    assert second.close_calls == 0
+    assert manager.windows() == [first, second]
+    assert app.quit_calls == 0
 
 
-def test_window_manager_deferred_quit_waits_for_window_destroyed() -> None:
+def test_window_manager_quit_request_ignores_deferred_close_window() -> None:
     """
-    Keep the app alive while a close-hidden window is still retained.
+    Avoid re-closing a hidden deferred-close window on app quit.
 
-    This is the regression path from the crash report: the first close hides
-    the window but worker cleanup has not emitted ``destroyed`` yet, so the
-    application-level quit event must be consumed until final teardown.
+    A normal close may hide a window while worker cleanup drains. A later
+    native quit event must be consumed without sending another close request.
     """
     app = _FakeApplication()
     manager = app_module.WindowManager(
@@ -454,6 +457,7 @@ def test_window_manager_deferred_quit_waits_for_window_destroyed() -> None:
         app=app,
     )
     window = manager.open_culling_window()
+    window.close()
 
     assert app.request_quit() is False
 

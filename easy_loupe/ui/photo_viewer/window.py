@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -414,6 +415,19 @@ class PhotoViewerWindow(QMainWindow):
         )
 
     def _build_shortcuts(self) -> None:
+        # Lifecycle shortcuts bypass normal UI shortcut blocking so close
+        # requests and the Ctrl/Cmd+Q no-op still work while overlays are up.
+        self.close_window_shortcut = self._make_lifecycle_shortcut(
+            'Ctrl+W', self.close
+        )
+        self.disable_quit_shortcut = self._make_lifecycle_shortcut(
+            'Ctrl+Q', self._ignore_quit_shortcut
+        )
+        if sys.platform == 'win32':
+            self.windows_close_window_shortcut = self._make_lifecycle_shortcut(
+                'Alt+F4', self.close
+            )
+
         self.space_shortcut = self._make_shortcut(
             Qt.Key_Space, self.viewer.toggle_focus_zoom
         )
@@ -482,6 +496,25 @@ class PhotoViewerWindow(QMainWindow):
                 block_by_shortcut_help=block_by_shortcut_help
             ),
         )
+
+    def _make_lifecycle_shortcut(
+            self,
+            key: str,
+            callback: Callable[[], object],
+    ) -> QShortcut:
+        """Create a window-scoped shortcut outside normal UI blocking."""
+        shortcut = QShortcut(QKeySequence(key), self)
+        shortcut.setContext(Qt.WindowShortcut)
+        shortcut.activated.connect(callback)
+        return shortcut
+
+    def _ignore_quit_shortcut(self) -> None:
+        """
+        Consume Ctrl/Cmd+Q at the window layer.
+
+        Native Qt quit events can bypass QShortcut dispatch, so WindowManager
+        also ignores app-level quit while windows are retained.
+        """
 
     def _shortcut_help_modal_active(self) -> bool:
         return (

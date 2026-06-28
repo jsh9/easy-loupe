@@ -320,6 +320,9 @@ Common transitions:
 - Shortcut help: `?` or `Help > Keyboard Shortcuts` opens or closes the
   context-aware shortcut overlay; while it is open, other keyboard shortcuts
   wait, and `Esc` closes the overlay before other Esc behavior
+- Window: `Ctrl+W` closes the active EasyLoupe window (`Cmd+W` on macOS), and
+  `Alt+F4` does the same on Windows; `Ctrl+Q`/`Cmd+Q` does nothing while an
+  EasyLoupe window is active
 - Ratings: `1`-`5` assign, `0` clears
 - Color labels: `6` red, `7` yellow, `8` green, `9` blue, `` ` `` clears, and
   purple is available from `Assign to Photo > Color Label`

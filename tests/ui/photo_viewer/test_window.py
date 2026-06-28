@@ -68,6 +68,11 @@ def _trigger_viewer_shortcut(window: PhotoViewerWindow, key_text: str) -> None:
     raise AssertionError(f'Missing viewer shortcut for {key_text!r}')
 
 
+def _assert_window_shortcut(shortcut: Any, key_text: str) -> None:
+    assert shortcut.key().toString(QKeySequence.PortableText) == key_text
+    assert shortcut.context() == Qt.WindowShortcut
+
+
 def _assert_close_tuple(
         actual: tuple[float, ...],
         expected: tuple[float, ...],
@@ -433,6 +438,70 @@ def test_photo_viewer_shortcut_help_toggles_and_esc_closes_first(
 
     assert window.transient_message_overlay.isHidden() is True
     window.close()
+    app.processEvents()
+
+
+def test_photo_viewer_ctrl_w_closes_only_that_window(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify Ctrl/Cmd+W closes one standalone viewer window.
+
+    System-opened photos create independent windows, so this guards the close
+    shortcut against becoming an application-wide quit path.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    create_jpeg(tmp_path / 'B.JPG', 'blue')
+    app, first_window = _open_viewer(
+        tmp_path, monkeypatch, startup_name='A.JPG'
+    )
+    _app, second_window = _open_viewer(
+        tmp_path, monkeypatch, startup_name='B.JPG'
+    )
+
+    _assert_window_shortcut(first_window.close_window_shortcut, 'Ctrl+W')
+    _assert_window_shortcut(first_window.disable_quit_shortcut, 'Ctrl+Q')
+
+    first_window.close_window_shortcut.activated.emit()
+    app.processEvents()
+
+    assert first_window.isHidden() is True
+    assert second_window.isVisible() is True
+
+    # Shortcut-level quit suppression is separate from native app quit
+    # handling; both paths must leave retained windows open.
+    second_window.disable_quit_shortcut.activated.emit()
+    app.processEvents()
+
+    assert second_window.isVisible() is True
+    second_window.close()
+    first_window.deleteLater()
+    second_window.deleteLater()
+    app.processEvents()
+
+
+def test_photo_viewer_registers_windows_alt_f4_close_shortcut(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify Windows Alt+F4 follows the standalone close-window path.
+
+    The shortcut is registered only on Windows, so this forces that platform
+    branch to keep the alternate close gesture covered on other CI runners.
+    """
+    monkeypatch.setattr(photo_viewer_window_module.sys, 'platform', 'win32')
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+
+    _assert_window_shortcut(window.windows_close_window_shortcut, 'Alt+F4')
+
+    window.windows_close_window_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.isHidden() is True
+    window.deleteLater()
     app.processEvents()
 
 
