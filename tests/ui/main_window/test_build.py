@@ -5,7 +5,10 @@ from typing import TYPE_CHECKING
 import pytest
 from PySide6.QtCore import QEvent, Qt
 
-from tests.ui._helpers import create_main_window_with_library
+from tests.ui._helpers import (
+    create_main_window_with_library,
+    set_qt_active_window,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -89,8 +92,7 @@ def test_change_event_restores_navigation_focus_when_window_reactivates(
         monkeypatch,
         photo_specs=[('IMG_K500', 'dimgray'), ('IMG_K501', 'blue')],
     )
-    window.activateWindow()
-    window.raise_()
+    set_qt_active_window(window)
     app.processEvents()
     if not window.isActiveWindow():
         pytest.skip('Window activation is not available in this Qt session')
