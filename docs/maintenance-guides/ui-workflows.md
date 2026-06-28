@@ -283,8 +283,10 @@ Major logic:
   paint wins when both masks hit the same pixel. Overlay generation and cached
   PNG decoding run off the UI thread and may appear shortly after the photo;
   stale requests are checked before entering the thread pool during rapid
-  navigation. This speed-first analysis can miss tiny clipped specks after
-  downsampling. Browse thumbnails do not show clipping warnings.
+  navigation, and viewer teardown cancels delayed starts plus marks in-flight
+  jobs so late results cannot update deleted panes. This speed-first analysis
+  can miss tiny clipped specks after downsampling. Browse thumbnails do not
+  show clipping warnings.
 
 ## 4. Selection And Browse Behavior
 

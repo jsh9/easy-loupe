@@ -19,6 +19,8 @@
   - Clipping-warning overlay work now skips stale rapid-navigation requests
     before entering the thread pool, and cached overlay decoding runs off the
     UI thread.
+  - Clipping-warning overlay work now cancels cleanly when viewer panes close,
+    avoiding stale thread-pool signal delivery during teardown.
 
 ## [1.3.0] - 2026-06-22
 

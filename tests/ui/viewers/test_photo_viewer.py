@@ -325,6 +325,116 @@ def test_photo_viewer_clipping_cache_miss_starts_background_job(
     viewer.close()
 
 
+def test_photo_viewer_close_before_clipping_delay_prevents_job_start(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify closing the viewer cancels delayed clipping work before enqueue.
+
+    The delayed start exists to skip stale rapid-navigation requests. Closing
+    the widget is another stale path, so teardown must stop the child timer
+    before it can hand work to the global thread pool.
+    """
+    create_jpeg(tmp_path / 'IMG_7030.JPG', 'white')
+    started_jobs = []
+
+    class FakeThreadPool:
+        @staticmethod
+        def start(job: object) -> None:
+            started_jobs.append(job)
+
+    monkeypatch.setattr(
+        photo_viewer_module.QThreadPool,
+        'globalInstance',
+        staticmethod(FakeThreadPool),
+    )
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(320, 240)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_clipping_warning_visible(enabled=True)
+    viewer.set_photo(tmp_path / 'IMG_7030.JPG', (0.5, 0.5))
+    assert viewer._clipping_overlay_start_timer.isActive() is True
+
+    viewer.close()
+    app.processEvents()
+    QTest.qWait(photo_viewer_module.CLIPPING_OVERLAY_JOB_START_DELAY_MS * 2)
+    app.processEvents()
+
+    assert started_jobs == []
+    assert viewer._clipping_overlay_start_timer.isActive() is False
+    assert viewer._pending_clipping_overlay_request is None
+    assert viewer._clipping_overlay_jobs == {}
+
+
+def test_photo_viewer_close_after_clipping_enqueue_cancels_job(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify an enqueued clipping job becomes inert after viewer teardown.
+
+    A job may already be held by the thread pool when the widget closes. The
+    worker can finish its Python run method later, but it must not build new
+    overlay data, emit Qt signals, or mutate the now-closed viewer.
+    """
+    image_path = tmp_path / 'IMG_7031.JPG'
+    create_jpeg(image_path, 'white')
+    started_jobs = []
+
+    class FakeThreadPool:
+        @staticmethod
+        def start(job: object) -> None:
+            started_jobs.append(job)
+
+    monkeypatch.setattr(
+        photo_viewer_module.QThreadPool,
+        'globalInstance',
+        staticmethod(FakeThreadPool),
+    )
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(320, 240)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_clipping_warning_visible(enabled=True)
+    viewer.set_photo(image_path, (0.5, 0.5))
+    process_events_until(app, lambda: len(started_jobs) == 1)
+    job = started_jobs[0]
+    emitted_signals = []
+    job.signals.finished.connect(
+        lambda *_args: emitted_signals.append('finished')
+    )
+    job.signals.failed.connect(lambda *_args: emitted_signals.append('failed'))
+
+    build_calls = []
+
+    def fail_if_build_runs(*_args: object, **_kwargs: object) -> object:
+        build_calls.append('build')
+        raise AssertionError('cancelled clipping job should not build')
+
+    monkeypatch.setattr(
+        clipping_module, '_build_clipping_overlay_payload', fail_if_build_runs
+    )
+
+    viewer.close()
+    app.processEvents()
+    job.run()
+    app.processEvents()
+
+    assert job._cancelled.is_set() is True
+    assert build_calls == []
+    assert emitted_signals == []
+    assert viewer._clipping_overlay_jobs == {}
+    assert viewer._clipping_overlay_item.isVisible() is False
+
+
 def test_photo_viewer_clipping_cache_hit_applies_asynchronously(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
