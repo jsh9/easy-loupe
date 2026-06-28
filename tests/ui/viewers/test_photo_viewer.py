@@ -265,10 +265,10 @@ def test_photo_viewer_scales_bounded_clipping_overlay_to_photo(
     process_events_until(app, overlay.isVisible)
     transform = overlay.transform()
 
-    assert overlay.pixmap().width() == 2000
-    assert overlay.pixmap().height() == 500
-    assert transform.m11() == pytest.approx(2.0)
-    assert transform.m22() == pytest.approx(2.0)
+    assert overlay.pixmap().width() == 3000
+    assert overlay.pixmap().height() == 750
+    assert transform.m11() == pytest.approx(4000 / 3000)
+    assert transform.m22() == pytest.approx(1000 / 750)
     assert overlay.boundingRect().width() * transform.m11() == pytest.approx(
         4000
     )

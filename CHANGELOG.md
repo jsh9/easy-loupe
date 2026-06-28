@@ -5,13 +5,15 @@
 - Added
 
   - Viewer panes now support a Lightroom-style `Show Clipping` overlay toggled
-    with `J`, drawing red highlight warnings and blue shadow warnings in
-    culling, standalone, and compare viewers.
+    with `J`, drawing red warnings when any RGB channel clips high and blue
+    warnings when any RGB channel clips low in culling, standalone, and compare
+    viewers.
 
 - Fixed
 
-  - Clipping-warning overlays now preserve tiny clipped highlights and shadows
-    when bounding large cached overlays.
+  - Clipping-warning overlays now downsample displayed previews before
+    thresholding so large photos render faster; very small clipped specks may
+    be missed by design.
   - Uncached clipping-warning overlays now render off the UI thread so
     first-time navigation and large compare grids remain responsive.
 

@@ -276,12 +276,14 @@ Major logic:
   overlay for clipped highlights and shadows. The overlay is drawn from the
   displayed viewer preview pixels and applies to culling single/split panes,
   standalone photo-viewer panes, compare grid panes, and selected compare
-  photos. Cached clipping-overlay payloads are capped to a 2000-pixel long edge
-  and scaled back over the full viewer scene. First-time uncached overlays are
-  generated off the UI thread and may appear shortly after the photo. Bounding
-  must preserve tiny clipped highlights and shadows by downsampling binary
-  clipping masks rather than source RGB pixels. Browse thumbnails do not show
-  clipping warnings.
+  photos. Clipping analysis first downsamples the displayed preview to a
+  3000-pixel long edge, then scales the resulting overlay back over the full
+  viewer scene. Highlights use any RGB channel at or above the high threshold,
+  shadows use any RGB channel at or below the low threshold, and highlight
+  paint wins when both masks hit the same pixel. First-time uncached overlays
+  are generated off the UI thread and may appear shortly after the photo. This
+  speed-first analysis can miss tiny clipped specks after downsampling. Browse
+  thumbnails do not show clipping warnings.
 
 ## 4. Selection And Browse Behavior
 
