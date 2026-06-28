@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-06-28
+
 - Added
 
   - Viewer panes now support a Lightroom-style `Show Clipping` overlay toggled
