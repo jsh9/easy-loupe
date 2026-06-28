@@ -387,6 +387,47 @@ def test_shortcut_help_overlay_top_aligns_and_scales_fonts(
     # change still needs a full grid rebuild.
     render_call_count = 0
     original_render_groups = overlay._render_groups
+    initial_signature = (
+        overlay._column_count,
+        overlay._applied_scale_metrics,
+    )
+
+    def layout_signature_for_width(
+            parent_width: int,
+    ) -> tuple[int, tuple[int, ...]]:
+        panel_width = max(int(parent_width * 0.9), 1)
+        panel_height = max(int(parent.height() * 0.9), 1)
+        column_count = ShortcutHelpOverlay._column_count_for_width(panel_width)
+        font_scale = ShortcutHelpOverlay._font_scale_for_size(
+            panel_width,
+            panel_height,
+            column_count,
+        )
+        return (
+            column_count,
+            ShortcutHelpOverlay._scale_metrics(font_scale),
+        )
+
+    stable_resize_width: int | None = None
+    for offset in range(1, 200):
+        for candidate_width in (
+            parent.width() + offset,
+            parent.width() - offset,
+        ):
+            if candidate_width <= 0:
+                continue
+
+            if (
+                layout_signature_for_width(candidate_width)
+                == initial_signature
+            ):
+                stable_resize_width = candidate_width
+                break
+
+        if stable_resize_width is not None:
+            break
+
+    assert stable_resize_width is not None
 
     def count_render_groups(*args: object, **kwargs: object) -> None:
         nonlocal render_call_count
@@ -394,7 +435,7 @@ def test_shortcut_help_overlay_top_aligns_and_scales_fonts(
         original_render_groups(*args, **kwargs)
 
     monkeypatch.setattr(overlay, '_render_groups', count_render_groups)
-    parent.resize(1002, 800)
+    parent.resize(stable_resize_width, parent.height())
     overlay.update_geometry()
     assert render_call_count == 0
 
