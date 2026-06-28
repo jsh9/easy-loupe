@@ -85,6 +85,16 @@ def assert_default_photo_sort_control(window: Any) -> None:
     assert window.library.sort_reversed is False
 
 
+def assert_window_shortcut(shortcut: Any, key_text: str) -> None:
+    assert shortcut.key().toString(QKeySequence.PortableText) == key_text
+    assert shortcut.context() == Qt.WindowShortcut
+
+
+def assert_action_shortcut(action: QAction, key_text: str) -> None:
+    assert action.shortcut().toString(QKeySequence.PortableText) == key_text
+    assert action.shortcutContext() == Qt.WindowShortcut
+
+
 def _collect_photo_ids_from_list(list_widget: Any) -> list[str]:
     return [
         str(list_widget.item(index).data(Qt.UserRole))
@@ -194,11 +204,34 @@ def _create_recursive_loading_window(
 
 
 def test_main_window_registers_open_detect_and_organize_actions() -> None:  # noqa: PLR0915
+    """
+    Verify culling-window menu actions and lifecycle shortcut ownership.
+
+    Close Window/Close App are explicit File-menu actions rather than bare
+    shortcuts, so this checks their menu placement, shortcut contract, and
+    signal wiring before other tests exercise real key dispatch.
+    """
     app = QApplication.instance() or QApplication([])
     window = main_window_module.MainWindow()
+    close_app_requests: list[str] = []
+    window.close_app_requested.connect(
+        lambda: close_app_requests.append('requested')
+    )
 
     assert window.windowTitle() == 'EasyLoupe'
     assert not window.windowIcon().isNull()
+    assert window.file_menu.title() == '&File'
+    assert [
+        action.text()
+        for action in window.file_menu.actions()
+        if not action.isSeparator()
+    ] == [
+        'Open Folder',
+        'Detect Scenes',
+        'Organize Photos...',
+        'Close Window',
+        'Close App',
+    ]
     assert (
         window.open_action.shortcut().toString(QKeySequence.PortableText)
         == 'Ctrl+O'
@@ -213,6 +246,13 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:  # no
         == 'Ctrl+Shift+E'
     )
     assert window.organize_action.isEnabled() is False
+    assert window.close_window_action.menuRole() == QAction.NoRole
+    assert_action_shortcut(window.close_window_action, 'Ctrl+W')
+    assert window.close_app_action.menuRole() == QAction.NoRole
+    assert window.close_app_action.shortcut().isEmpty() is True
+    window.close_app_action.trigger()
+    assert close_app_requests == ['requested']
+    assert_window_shortcut(window.disable_quit_shortcut, 'Ctrl+Q')
     assert window.history_menu.title() == '&History'
     assert_default_photo_sort_control(window)
     assert window.compare_menu.title() == '&Compare'
@@ -1844,6 +1884,81 @@ def test_main_window_theme_toggle_switches_between_light_and_dark() -> None:
 
     window.close()
     del app
+
+
+def test_main_window_ctrl_w_closes_only_that_window() -> None:
+    """
+    Verify real lifecycle key dispatch for culling windows.
+
+    Multiple EasyLoupe windows can coexist, so Ctrl/Cmd+W must close only the
+    active window and Ctrl/Cmd+Q must remain a no-op. Real key events matter
+    because direct signal emission would miss Qt focus or shortcut-routing
+    regressions.
+    """
+    app = QApplication.instance() or QApplication([])
+    first_window = main_window_module.MainWindow()
+    second_window = main_window_module.MainWindow()
+    first_window._initial_folder_prompt_pending = False
+    second_window._initial_folder_prompt_pending = False
+    first_window.show()
+    second_window.show()
+    app.processEvents()
+
+    assert_action_shortcut(first_window.close_window_action, 'Ctrl+W')
+    assert_window_shortcut(second_window.disable_quit_shortcut, 'Ctrl+Q')
+
+    # Give the target focus before sending a real key event so the assertion
+    # covers Qt WindowShortcut routing instead of just the connected slot.
+    first_window.activateWindow()
+    first_window.raise_()
+    app.processEvents()
+    QTest.keyClick(first_window, Qt.Key_W, Qt.ControlModifier)
+    app.processEvents()
+
+    assert first_window.isHidden() is True
+    assert second_window.isVisible() is True
+
+    # Shortcut-level quit suppression is separate from native app quit
+    # handling; both paths must leave retained windows open.
+    # Activate the remaining window so Ctrl/Cmd+Q is tested through the same
+    # focus-sensitive route a user would trigger.
+    second_window.activateWindow()
+    second_window.raise_()
+    app.processEvents()
+    QTest.keyClick(second_window, Qt.Key_Q, Qt.ControlModifier)
+    app.processEvents()
+
+    assert second_window.isVisible() is True
+    second_window.close()
+    first_window.deleteLater()
+    second_window.deleteLater()
+    app.processEvents()
+
+
+def test_main_window_registers_windows_alt_f4_close_shortcut(
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify Windows Alt+F4 follows the close-window shortcut path.
+
+    The shortcut is registered only on Windows, so this forces that platform
+    branch to keep the alternate close gesture covered on other CI runners.
+    """
+    monkeypatch.setattr(build_module.sys, 'platform', 'win32')
+    app = QApplication.instance() or QApplication([])
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    window.show()
+    app.processEvents()
+
+    assert_window_shortcut(window.windows_close_window_shortcut, 'Alt+F4')
+
+    window.windows_close_window_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.isHidden() is True
+    window.deleteLater()
+    app.processEvents()
 
 
 def test_browse_mode_shortcut_does_nothing_when_no_photos_loaded() -> None:

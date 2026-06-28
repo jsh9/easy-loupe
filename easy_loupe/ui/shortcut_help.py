@@ -632,6 +632,7 @@ def _photo_viewer_groups() -> tuple[ShortcutHelpGroup, ...]:
                 ShortcutHelpRow('J', 'Toggle highlight and shadow clipping'),
             ),
         ),
+        _window_group(),
         HELP_DISMISSAL_GROUP,
     )
 
@@ -642,6 +643,7 @@ def _culling_empty_groups() -> tuple[ShortcutHelpGroup, ...]:
             'Library',
             (ShortcutHelpRow('Ctrl+O', 'Open a photo folder'),),
         ),
+        _window_group(),
         HELP_DISMISSAL_GROUP,
     )
 
@@ -668,6 +670,7 @@ def _culling_view_groups() -> tuple[ShortcutHelpGroup, ...]:
             ),
         ),
         _inspection_group(),
+        _window_group(),
         HELP_DISMISSAL_GROUP,
     )
 
@@ -689,6 +692,7 @@ def _culling_view_no_scenes_groups() -> tuple[ShortcutHelpGroup, ...]:
             ),
         ),
         _inspection_group(),
+        _window_group(),
         HELP_DISMISSAL_GROUP,
     )
 
@@ -749,6 +753,7 @@ def _browse_groups() -> tuple[ShortcutHelpGroup, ...]:
                 ),
             ),
         ),
+        _window_group(),
         HELP_DISMISSAL_GROUP,
     )
 
@@ -781,6 +786,7 @@ def _compare_grid_groups() -> tuple[ShortcutHelpGroup, ...]:
             ),
         ),
         _metadata_group(compare=True),
+        _window_group(),
         HELP_TOGGLE_GROUP,
     )
 
@@ -814,7 +820,18 @@ def _compare_selected_photo_groups() -> tuple[ShortcutHelpGroup, ...]:
             ),
         ),
         _metadata_group(compare=True),
+        _window_group(),
         HELP_TOGGLE_GROUP,
+    )
+
+
+def _window_group() -> ShortcutHelpGroup:
+    # Keep the catalog platform-specific so macOS renders Ctrl as Cmd but does
+    # not advertise a non-native Option+F4 close shortcut.
+    shortcut = 'Ctrl+W / Alt+F4' if sys.platform == 'win32' else 'Ctrl+W'
+    return ShortcutHelpGroup(
+        'Window',
+        (ShortcutHelpRow(shortcut, 'Close this EasyLoupe window'),),
     )
 
 

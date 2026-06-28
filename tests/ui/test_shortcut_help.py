@@ -38,6 +38,10 @@ def test_shortcut_help_catalog_covers_each_context() -> None:
         rows = [row for group in groups for row in group.rows]
         assert any(row.shortcut == '?' for row in rows)
         assert any(row.shortcut == 'Esc' for row in rows)
+        # Window close belongs in every help context, but disabled quit must
+        # not be advertised as an available command.
+        assert any(row.shortcut.startswith('Ctrl+W') for row in rows)
+        assert not any('Ctrl+Q' in row.shortcut for row in rows)
 
     photo_viewer_rows = [
         row
@@ -147,12 +151,14 @@ def test_shortcut_help_formats_modifier_labels_for_platform(
 
     assert shortcut_help_module.shortcut_modifier_label() == 'Ctrl'
     assert shortcut_help_module.format_shortcut_label('Ctrl+O') == 'Ctrl+O'
+    assert shortcut_help_module.format_shortcut_label('Ctrl+W') == 'Ctrl+W'
     assert shortcut_help_module.format_shortcut_label('Shift+F') == 'Shift+F'
 
     monkeypatch.setattr(shortcut_help_module.sys, 'platform', 'darwin')
 
     assert shortcut_help_module.shortcut_modifier_label() == 'Cmd'
     assert shortcut_help_module.format_shortcut_label('Ctrl+O') == 'Cmd+O'
+    assert shortcut_help_module.format_shortcut_label('Ctrl+W') == 'Cmd+W'
     assert (
         shortcut_help_module.format_shortcut_label('Ctrl+Shift+F')
         == 'Cmd+Shift+F'
@@ -162,6 +168,26 @@ def test_shortcut_help_formats_modifier_labels_for_platform(
         == 'Cmd+Z / Cmd+Y'
     )
     assert shortcut_help_module.format_shortcut_label('Shift+F') == 'Shift+F'
+
+
+def test_shortcut_help_catalog_adds_alt_f4_on_windows(
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify Windows help exposes Alt+F4 as a close-window shortcut.
+
+    The catalog is platform-specific, so this protects the Windows-only help
+    row even when tests run on macOS or Linux.
+    """
+    monkeypatch.setattr(shortcut_help_module.sys, 'platform', 'win32')
+
+    for context in ShortcutHelpContext:
+        rows = [
+            row
+            for group in shortcut_help_groups(context)
+            for row in group.rows
+        ]
+        assert any(row.shortcut == 'Ctrl+W / Alt+F4' for row in rows)
 
 
 def test_shortcut_help_formats_arrow_labels_and_spacing(
@@ -228,6 +254,7 @@ def test_shortcut_help_overlay_renders_mac_modifier_labels(
         for label in overlay.findChildren(QLabel, 'shortcutHelpShortcutLabel')
     }
     assert 'Cmd+O' in shortcut_texts
+    assert 'Cmd+W' in shortcut_texts
     assert 'Cmd+Shift+F' in shortcut_texts
     assert 'Cmd+Shift+M' in shortcut_texts
     assert 'Cmd+Z / Cmd+Y' in shortcut_texts

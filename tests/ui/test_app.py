@@ -259,6 +259,7 @@ class _FakeCullingWindow:
     def __init__(self, launch_request: object = None) -> None:
         self.launch_request = launch_request
         self.attributes: list[tuple[object, bool]] = []
+        self.close_app_requested = _FakeSignal()
         self.destroyed = _FakeSignal()
         self.geometry_calls: list[object] = []
         self.move_calls: list[object] = []
@@ -309,6 +310,7 @@ class _FakePhotoWindow:
     def __init__(self, startup_file: object = None) -> None:
         self.startup_file = startup_file
         self.attributes: list[tuple[object, bool]] = []
+        self.close_app_requested = _FakeSignal()
         self.destroyed = _FakeSignal()
         self.culling_requested = _FakeSignal()
         self.screen: object | None = None
@@ -400,7 +402,9 @@ def test_window_manager_quits_after_last_window_is_destroyed() -> None:
     Quit the app only after the final retained window is destroyed.
 
     A normal close can destroy immediately; background-close windows reach the
-    same path later from their deferred final close.
+    same path later from their deferred final close. This is the intentional
+    exit path that remains after native quit requests are disabled while
+    windows are retained.
     """
     app = _FakeApplication()
     manager = app_module.WindowManager(
@@ -416,12 +420,13 @@ def test_window_manager_quits_after_last_window_is_destroyed() -> None:
     assert app.quit_calls == 1
 
 
-def test_window_manager_quit_request_closes_retained_windows() -> None:
+def test_window_manager_quit_request_ignores_retained_windows() -> None:
     """
-    Close retained windows when Qt delivers an application quit request.
+    Ignore application quit requests while windows are retained.
 
-    Synchronously destroyed windows can allow the current quit event to proceed
-    because no hidden worker-owning windows remain retained.
+    Ctrl/Cmd+Q can arrive as a native quit event, so retained windows must not
+    be closed by that path. Users close windows through window-scoped close
+    shortcuts or the window controls instead.
     """
     app = _FakeApplication()
     manager = app_module.WindowManager(
@@ -432,20 +437,118 @@ def test_window_manager_quit_request_closes_retained_windows() -> None:
     first = manager.open_culling_window()
     second = manager.open_photo_window(Path('IMG_1000.JPG'))
 
-    assert app.request_quit() is True
+    assert app.request_quit() is False
+
+    assert first.close_calls == 0
+    assert second.close_calls == 0
+    assert manager.windows() == [first, second]
+    assert app.quit_calls == 0
+
+
+def test_window_manager_close_all_windows_closes_retained_windows() -> None:
+    """
+    Close App should close every retained window through normal close paths.
+
+    The app-close command is explicit menu behavior, so it closes all live
+    windows even though native quit events remain disabled for accidental
+    Ctrl/Cmd+Q delivery.
+    """
+    app = _FakeApplication()
+    manager = app_module.WindowManager(
+        culling_window_factory=_FakeCullingWindow,
+        photo_window_factory=_FakePhotoWindow,
+        app=app,
+    )
+    first = manager.open_culling_window()
+    second = manager.open_photo_window(Path('IMG_1000.JPG'))
+
+    manager.close_all_windows()
 
     assert first.close_calls == 1
     assert second.close_calls == 1
     assert manager.windows() == []
+    assert app.quit_calls == 1
 
 
-def test_window_manager_deferred_quit_waits_for_window_destroyed() -> None:
+def test_window_manager_close_app_signal_closes_all_windows_once() -> None:
     """
-    Keep the app alive while a close-hidden window is still retained.
+    Route retained window Close App signals through the manager once.
 
-    This is the regression path from the crash report: the first close hides
-    the window but worker cleanup has not emitted ``destroyed`` yet, so the
-    application-level quit event must be consumed until final teardown.
+    A deferred-close window remains retained while worker cleanup drains, so a
+    second Close App request must not send another close to that hidden window.
+    """
+    app = _FakeApplication()
+    manager = app_module.WindowManager(
+        culling_window_factory=_DeferredCloseCullingWindow,
+        photo_window_factory=_FakePhotoWindow,
+        app=app,
+    )
+    first = manager.open_culling_window()
+    second = manager.open_photo_window(Path('IMG_1000.JPG'))
+
+    second.close_app_requested.emit()
+
+    assert first.close_calls == 1
+    assert second.close_calls == 1
+    assert manager.windows() == [first]
+    assert app.quit_calls == 0
+
+    first.close_app_requested.emit()
+
+    assert first.close_calls == 1
+    assert manager.windows() == [first]
+    assert app.quit_calls == 0
+
+    first.finish_close()
+
+    assert manager.windows() == []
+    assert app.quit_calls == 1
+
+
+def test_window_manager_close_app_reaches_late_window() -> None:
+    """
+    Close new windows opened while a deferred Close App sweep is draining.
+
+    The manager must avoid re-closing the hidden deferred window, but a later
+    Close App request should still reach windows retained after that first
+    sweep.
+    """
+    app = _FakeApplication()
+    manager = app_module.WindowManager(
+        culling_window_factory=_DeferredCloseCullingWindow,
+        photo_window_factory=_FakePhotoWindow,
+        app=app,
+    )
+    deferred = manager.open_culling_window()
+    first_photo = manager.open_photo_window(Path('IMG_1000.JPG'))
+
+    first_photo.close_app_requested.emit()
+
+    assert deferred.close_calls == 1
+    assert first_photo.close_calls == 1
+    assert manager.windows() == [deferred]
+    assert app.quit_calls == 0
+
+    second_photo = manager.open_photo_window(Path('IMG_1001.JPG'))
+    second_photo.close_app_requested.emit()
+
+    assert deferred.close_calls == 1
+    assert second_photo.close_calls == 1
+    assert manager.windows() == [deferred]
+    assert app.quit_calls == 0
+
+    deferred.finish_close()
+
+    assert manager.windows() == []
+    assert app.quit_calls == 1
+
+
+def test_window_manager_quit_request_ignores_deferred_close_window() -> None:
+    """
+    Avoid re-closing a hidden deferred-close window on app quit.
+
+    A normal close may hide a window while worker cleanup drains. A later
+    native quit event must be consumed without sending another close request.
     """
     app = _FakeApplication()
     manager = app_module.WindowManager(
@@ -454,6 +557,7 @@ def test_window_manager_deferred_quit_waits_for_window_destroyed() -> None:
         app=app,
     )
     window = manager.open_culling_window()
+    window.close()
 
     assert app.request_quit() is False
 
