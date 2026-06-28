@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import warnings
 from time import monotonic
 from typing import TYPE_CHECKING, Any
 
@@ -58,6 +59,24 @@ def process_events_until(
 
     app.processEvents()
     assert predicate()
+
+
+def set_qt_active_window(window: Any) -> None:
+    """
+    Route Qt window-scoped focus and shortcuts without desktop activation.
+
+    ``activateWindow()`` asks the window manager to focus and raise the test
+    window, which steals focus from the developer running the suite. Qt's
+    internal active-window setter is sufficient for these unit tests because
+    they send key events directly to the target widget.
+    """
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            'ignore',
+            message=r"Function: 'QApplication\.setActiveWindow",
+            category=DeprecationWarning,
+        )
+        QApplication.setActiveWindow(window)
 
 
 def make_photo_record(

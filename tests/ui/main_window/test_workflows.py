@@ -24,6 +24,7 @@ from tests.ui._helpers import (
     create_jpeg,
     create_main_window_with_library,
     record_fit_view_calls,
+    set_qt_active_window,
     set_scene_detection_result,
     stub_read_exif,
     thumbnail_item_widget,
@@ -656,11 +657,10 @@ def test_merge_selected_photos_from_browse_saves_and_undoes(
             ('IMG_7442', 'green'),
         ],
     )
-    # This test asserts native Qt focus ownership. Earlier UI tests can leave
-    # the shared QApplication with no active window, so make this window active
-    # before exercising the browse-mode focus restoration path.
-    window.activateWindow()
-    window.raise_()
+    # This test asserts Qt focus ownership. Earlier UI tests can leave the
+    # shared QApplication with no active window, so make this the Qt-active
+    # window without asking the desktop to focus or raise it.
+    set_qt_active_window(window)
     app.processEvents()
     if not window.isActiveWindow():
         pytest.skip('Window activation is not available in this Qt session')
@@ -1465,8 +1465,7 @@ def test_main_window_progress_overlay_disables_and_restores_interaction(
         monkeypatch,
         photo_specs=[('IMG_7410', 'dimgray')],
     )
-    window.activateWindow()
-    window.raise_()
+    set_qt_active_window(window)
     app.processEvents()
 
     window.thumbnail_list.setFocus(Qt.OtherFocusReason)
@@ -1992,8 +1991,7 @@ def test_backtick_shortcut_clears_color_label_from_runtime_keypress(
     app.processEvents()
     assert photo.color_label == 'green'
 
-    window.activateWindow()
-    window.raise_()
+    set_qt_active_window(window)
     app.processEvents()
     window.thumbnail_list.setFocus(Qt.OtherFocusReason)
     app.processEvents()
@@ -2222,12 +2220,10 @@ def test_main_window_choose_folder_success_populates_ui(
     window = main_window_module.MainWindow()
     window._initial_folder_prompt_pending = False
     window.show()
+    set_qt_active_window(window)
     app.processEvents()
 
     window.choose_folder()
-    app.processEvents()
-    window.activateWindow()
-    window.raise_()
     app.processEvents()
     if not window.isActiveWindow():
         pytest.skip('Window activation is not available in this Qt session')
@@ -3119,8 +3115,7 @@ def test_scene_detection_finish_restores_thumbnail_strip_focus(
             ('IMG_8212', 'blue'),
         ],
     )
-    window.activateWindow()
-    window.raise_()
+    set_qt_active_window(window)
     app.processEvents()
 
     window.thumbnail_list.setCurrentRow(1)

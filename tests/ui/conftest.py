@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSettings, Qt
+from PySide6.QtWidgets import QWidget
 
 from easy_loupe.ui.identity import APP_NAME
 from easy_loupe.ui.main_window.build import (
@@ -15,6 +16,32 @@ from easy_loupe.ui.main_window.build import (
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+
+@pytest.fixture(autouse=True)  # noqa: RUF076 - prevent UI test focus theft.
+def show_windows_without_desktop_activation(
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Show top-level UI test widgets without asking the OS for focus.
+
+    The UI tests need real widget geometry and paint events, but normal
+    ``show()`` calls can pull EasyLoupe in front of the developer's active app.
+    Keeping the non-activating flag in the shared fixture prevents that focus
+    theft without changing production window behavior.
+    """
+    original_show = QWidget.show
+
+    def show_without_desktop_activation(widget: QWidget) -> None:
+        if widget.isWindow():
+            widget.setAttribute(
+                Qt.WidgetAttribute.WA_ShowWithoutActivating,
+                True,
+            )
+
+        original_show(widget)
+
+    monkeypatch.setattr(QWidget, 'show', show_without_desktop_activation)
 
 
 @pytest.fixture(autouse=True)  # noqa: RUF076 - isolate Qt settings globally.

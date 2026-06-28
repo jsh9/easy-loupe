@@ -23,6 +23,7 @@ from easy_loupe.core.photo_library import PhotoLibrary
 from tests.ui._helpers import (
     create_jpeg,
     create_main_window_with_library,
+    set_qt_active_window,
     stub_read_exif,
     trigger_scene_shortcut,
 )
@@ -624,8 +625,7 @@ def test_restore_active_navigation_focus_targets_active_list(
         photo_specs=[('IMG_8700', 'dimgray'), ('IMG_8701', 'blue')],
         scene_groups=scene_groups,
     )
-    window.activateWindow()
-    window.raise_()
+    set_qt_active_window(window)
     app.processEvents()
     if not window.isActiveWindow():
         pytest.skip('Window activation is not available in this Qt session')
@@ -672,8 +672,7 @@ def test_restore_active_navigation_focus_ignores_inactive_window(
         monkeypatch,
         photo_specs=[('IMG_8800', 'dimgray'), ('IMG_8801', 'blue')],
     )
-    window.activateWindow()
-    window.raise_()
+    set_qt_active_window(window)
     app.processEvents()
 
     window.open_button.setFocus(Qt.OtherFocusReason)

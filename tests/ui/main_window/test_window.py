@@ -27,6 +27,7 @@ from easy_loupe.ui.viewers.exif_overlay import HISTOGRAM_HEIGHT
 from tests.ui._helpers import (
     create_jpeg,
     create_main_window_with_library,
+    set_qt_active_window,
     stub_read_exif,
 )
 
@@ -1907,10 +1908,9 @@ def test_main_window_ctrl_w_closes_only_that_window() -> None:
     assert_action_shortcut(first_window.close_window_action, 'Ctrl+W')
     assert_window_shortcut(second_window.disable_quit_shortcut, 'Ctrl+Q')
 
-    # Give the target focus before sending a real key event so the assertion
-    # covers Qt WindowShortcut routing instead of just the connected slot.
-    first_window.activateWindow()
-    first_window.raise_()
+    # Make the target Qt-active before sending a real key event so the
+    # assertion covers WindowShortcut routing instead of just the slot.
+    set_qt_active_window(first_window)
     app.processEvents()
     QTest.keyClick(first_window, Qt.Key_W, Qt.ControlModifier)
     app.processEvents()
@@ -1920,10 +1920,9 @@ def test_main_window_ctrl_w_closes_only_that_window() -> None:
 
     # Shortcut-level quit suppression is separate from native app quit
     # handling; both paths must leave retained windows open.
-    # Activate the remaining window so Ctrl/Cmd+Q is tested through the same
-    # focus-sensitive route a user would trigger.
-    second_window.activateWindow()
-    second_window.raise_()
+    # Make the remaining window Qt-active so Ctrl/Cmd+Q is tested through the
+    # same focus-sensitive route a user would trigger.
+    set_qt_active_window(second_window)
     app.processEvents()
     QTest.keyClick(second_window, Qt.Key_Q, Qt.ControlModifier)
     app.processEvents()
