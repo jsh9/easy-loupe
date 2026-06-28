@@ -21,7 +21,7 @@ repos:
         exclude: ^tests/(helpers|.*/_helpers)\.py$
       - id: check-merge-conflict
   - repo: https://github.com/jsh9/muff-pre-commit
-    rev: 0.15.18
+    rev: 0.14.11
     hooks:
       - id: muff-format
         args: [--config, muff.toml]
