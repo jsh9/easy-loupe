@@ -518,6 +518,9 @@ alive until worker code has stopped running.
   that require extra live zoom and resize while temporarily recentered.
 - Verify `Ctrl+Shift+F` preserves remembered zoom levels, resets centers to
   photo-relative AF/default centers, and survives late AF metadata loading.
+- Verify clipping-warning overlays by waiting for the background overlay paint
+  instead of assuming immediate visibility; Windows full UI-suite runs can
+  deliver the delayed `QThreadPool` result more slowly than focused tests.
 - Verify scene-detection completion preserves split view in normal view mode
   but still exits browse mode back to fit view.
 - Verify vertical thumbnail-strip Shift range selection releases rows outside

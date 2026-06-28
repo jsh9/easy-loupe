@@ -1032,7 +1032,9 @@ def test_photo_viewer_shortcuts_toggle_inspection_overlays(
     assert window._show_clipping is True
     assert window.viewer._clipping_warning_enabled is True
     assert window.viewer.single_viewer._clipping_warning_enabled is True
-    process_events_until(app, clipping_overlay.isVisible)
+    # Clipping work is intentionally delayed and backgrounded; Windows can
+    # deliver it slowly after long UI-order runs, so wait for the real paint.
+    process_events_until(app, clipping_overlay.isVisible, timeout_ms=5_000)
     assert clipping_overlay.isVisible() is True
 
     window.show_af_point_shortcut.activated.emit()
