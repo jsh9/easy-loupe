@@ -160,7 +160,7 @@ class WindowManager:
         self._culling_window_factory = culling_window_factory
         self._photo_window_factory = photo_window_factory
         self._app = app
-        self._close_all_requested = False
+        self._close_all_requested_window_ids: set[int] = set()
         self._windows: list[_ManagedWindow] = []
         if self._app is not None:
             # Qt otherwise quits when the last visible window closes. Hidden
@@ -227,14 +227,19 @@ class WindowManager:
 
     def close_all_windows(self) -> None:
         """Close every retained EasyLoupe window through normal close paths."""
-        # Treat Close App as a one-shot close sweep so a hidden deferred-close
-        # window does not receive repeated close events while its worker slots
-        # are still draining.
-        if self._close_all_requested or not self._windows:
+        windows_to_close = [
+            window
+            for window in self._windows
+            if id(window) not in self._close_all_requested_window_ids
+        ]
+        if not windows_to_close:
             return
 
-        self._close_all_requested = True
-        for window in list(self._windows):
+        for window in windows_to_close:
+            # Track each retained window before closing so a hidden deferred
+            # cleanup window is not sent repeated close events, while later
+            # windows opened during that cleanup remain closable.
+            self._close_all_requested_window_ids.add(id(window))
             window.close()
 
     def _handle_culling_request(
@@ -255,6 +260,7 @@ class WindowManager:
 
     def _remove_window(self, window: _ManagedWindow) -> None:
         """Forget a destroyed window so Qt can quit after the last close."""
+        self._close_all_requested_window_ids.discard(id(window))
         try:
             self._windows.remove(window)
         except ValueError:

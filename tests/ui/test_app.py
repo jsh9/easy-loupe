@@ -505,6 +505,44 @@ def test_window_manager_close_app_signal_closes_all_windows_once() -> None:
     assert app.quit_calls == 1
 
 
+def test_window_manager_close_app_reaches_late_window() -> None:
+    """
+    Close new windows opened while a deferred Close App sweep is draining.
+
+    The manager must avoid re-closing the hidden deferred window, but a later
+    Close App request should still reach windows retained after that first
+    sweep.
+    """
+    app = _FakeApplication()
+    manager = app_module.WindowManager(
+        culling_window_factory=_DeferredCloseCullingWindow,
+        photo_window_factory=_FakePhotoWindow,
+        app=app,
+    )
+    deferred = manager.open_culling_window()
+    first_photo = manager.open_photo_window(Path('IMG_1000.JPG'))
+
+    first_photo.close_app_requested.emit()
+
+    assert deferred.close_calls == 1
+    assert first_photo.close_calls == 1
+    assert manager.windows() == [deferred]
+    assert app.quit_calls == 0
+
+    second_photo = manager.open_photo_window(Path('IMG_1001.JPG'))
+    second_photo.close_app_requested.emit()
+
+    assert deferred.close_calls == 1
+    assert second_photo.close_calls == 1
+    assert manager.windows() == [deferred]
+    assert app.quit_calls == 0
+
+    deferred.finish_close()
+
+    assert manager.windows() == []
+    assert app.quit_calls == 1
+
+
 def test_window_manager_quit_request_ignores_deferred_close_window() -> None:
     """
     Avoid re-closing a hidden deferred-close window on app quit.
