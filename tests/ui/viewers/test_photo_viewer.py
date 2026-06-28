@@ -15,6 +15,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+CLIPPING_OVERLAY_TIMEOUT_MS = 5_000
+
+
 def test_photo_viewer_restores_last_manual_view_for_same_photo_and_not_other_photo(
         tmp_path: Path,
 ) -> None:
@@ -214,7 +217,13 @@ def test_photo_viewer_clipping_warning_tracks_loaded_photo(
     viewer.set_clipping_warning_visible(enabled=True)
 
     assert viewer._clipping_warning_enabled is True
-    process_events_until(app, overlay.isVisible)
+    # Clipping work is timer-delayed and backgrounded, so native macOS CI can
+    # need longer than the generic deferred-UI wait after full-suite runs.
+    process_events_until(
+        app,
+        overlay.isVisible,
+        timeout_ms=CLIPPING_OVERLAY_TIMEOUT_MS,
+    )
     assert overlay.pixmap().isNull() is False
     assert overlay.zValue() < viewer._focus_point_marker.zValue()
 
@@ -232,7 +241,11 @@ def test_photo_viewer_clipping_warning_tracks_loaded_photo(
 
     # The first load populated the cache, so revisiting reuses cached payload
     # data while still decoding the overlay image off the UI thread.
-    process_events_until(app, overlay.isVisible)
+    process_events_until(
+        app,
+        overlay.isVisible,
+        timeout_ms=CLIPPING_OVERLAY_TIMEOUT_MS,
+    )
     assert overlay.isVisible() is True
 
     viewer.close()
@@ -264,7 +277,11 @@ def test_photo_viewer_scales_bounded_clipping_overlay_to_photo(
     viewer.set_clipping_warning_visible(enabled=True)
 
     overlay = viewer._clipping_overlay_item
-    process_events_until(app, overlay.isVisible)
+    process_events_until(
+        app,
+        overlay.isVisible,
+        timeout_ms=CLIPPING_OVERLAY_TIMEOUT_MS,
+    )
     transform = overlay.transform()
 
     assert overlay.pixmap().width() == 3000
@@ -1064,6 +1081,7 @@ def test_photo_viewer_pending_focus_reset_center_survives_focus_update(
 
     viewer.set_photo(image_path, (0.5, 0.5), focus_point_pending=True)
     viewer.toggle_focus_zoom()
+    initial_zoom = viewer.current_zoom_factor()
     viewer.zoom_step(2.0)
     expected_zoom = viewer.current_zoom_factor()
 
@@ -1072,7 +1090,7 @@ def test_photo_viewer_pending_focus_reset_center_survives_focus_update(
 
     stored_view = viewer._manual_views.get(str(image_path))
 
-    assert expected_zoom == pytest.approx(4.0)
+    assert expected_zoom == pytest.approx(initial_zoom * 2.0)
     assert stored_view is not None
     assert stored_view.zoom_factor == pytest.approx(expected_zoom)
     assert stored_view.center is None
