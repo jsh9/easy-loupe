@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence, QShortcut
 from PySide6.QtWidgets import QMainWindow
 
@@ -46,6 +46,8 @@ class MainWindow(
     QMainWindow,
 ):
     """Desktop photo-culling main window and view-state controller."""
+
+    close_app_requested = Signal()
 
     def __init__(
             self, launch_request: CullingLaunchRequest | None = None

@@ -387,6 +387,8 @@ Current shortcut coverage in code includes:
 - `Ctrl+Shift+E`: open the organizer/XMP dialog
 - `Ctrl+Shift+M`: merge selected photos into a scene
 - `?`: show or hide the context-aware shortcut help overlay
+- `Ctrl+W`: close the active EasyLoupe window; this appears as `Cmd+W` on macOS
+- `Alt+F4`: close the active EasyLoupe window on Windows
 - `1`-`5`, `0`: rating changes
 - `6`-`9`: red/yellow/green/blue color labels
 - `` ` ``: clear color label
@@ -433,6 +435,15 @@ compare-mode Esc behavior.
 Keyboard shortcuts are part of the product behavior, not incidental
 implementation.
 
+`Ctrl+Q`/`Cmd+Q` is deliberately consumed as a no-op shortcut while an
+EasyLoupe window is active: it must not close a window, close the app, or be
+wired to application quit.
+
+`File > Close Window` owns the `Ctrl+W`/`Cmd+W` shortcut and follows the same
+per-window close path as the window control. `File > Close App` is an explicit
+menu-only command with no shortcut; it asks `WindowManager` to close every
+retained EasyLoupe window through the same deferred-close paths.
+
 Window close while scene detection or organizer/undo work is active must hide
 the visible window immediately, request best-effort worker shutdown, and defer
 the actual Qt teardown until the relevant `QThread.finished` cleanup clears the
@@ -442,18 +453,21 @@ threads. Only workers with an explicit `cancel()` hook are cooperatively
 cancellable; file-operation workers drain to completion while teardown remains
 deferred invisibly.
 
-`WindowManager` owns application quit deferral for these hidden-close paths:
-the app disables implicit last-visible-window quit and exits only after the
-manager has forgotten every destroyed window. Preserve that boundary so
-`QThread` child objects are not destroyed by PySide application finalization
-while their worker code is still running.
+`WindowManager` owns event-loop lifetime for these hidden-close paths: the app
+disables implicit last-visible-window quit and exits only after the manager has
+forgotten every destroyed window. Native application quit events are ignored
+while windows are retained, so preserve the explicit Close App and close-window
+paths plus the last-window teardown boundary that keep `QThread` child objects
+alive until worker code has stopped running.
 
 ## 7. Verification Pointers
 
 - For shutdown fixes involving `QThread` cleanup, verify both source runs and
-  the packaged app by closing and using `Cmd+Q` while scene detection,
-  organizer/undo work, standalone EXIF refresh, prefetch, or folder hydration
-  is active.
+  the packaged app by closing windows with the window control,
+  `File > Close Window`, `Ctrl+W`/`Cmd+W`, and `File > Close App` while scene
+  detection, organizer/undo work, standalone EXIF refresh, prefetch, or folder
+  hydration is active. On Windows, verify `Alt+F4` follows the same
+  close-window path.
 - If scene detection changes, test grouping behavior, not just helper
   functions, and preserve ordering assumptions based on capture time.
 - If progress reporting changes, verify both legacy progress tuples and the

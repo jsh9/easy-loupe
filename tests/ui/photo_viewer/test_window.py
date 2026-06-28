@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from PySide6.QtCore import QPoint, QSettings, Qt
-from PySide6.QtGui import QKeySequence
+from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QMessageBox
 
@@ -66,6 +66,16 @@ def _trigger_viewer_shortcut(window: PhotoViewerWindow, key_text: str) -> None:
             return
 
     raise AssertionError(f'Missing viewer shortcut for {key_text!r}')
+
+
+def _assert_window_shortcut(shortcut: Any, key_text: str) -> None:
+    assert shortcut.key().toString(QKeySequence.PortableText) == key_text
+    assert shortcut.context() == Qt.WindowShortcut
+
+
+def _assert_action_shortcut(action: Any, key_text: str) -> None:
+    assert action.shortcut().toString(QKeySequence.PortableText) == key_text
+    assert action.shortcutContext() == Qt.WindowShortcut
 
 
 def _assert_close_tuple(
@@ -384,12 +394,30 @@ def test_photo_viewer_shortcut_help_toggles_and_esc_closes_first(
     Verify standalone viewer help uses ? and wins the first Esc press.
 
     The viewer already uses Esc to dismiss transient messages, so this guards
-    the new shortcut-help overlay from being skipped by that older behavior.
+    the new shortcut-help overlay from being skipped by that older behavior. It
+    also checks the viewer's File-menu lifecycle actions because standalone
+    viewer windows used to expose only Help-menu actions.
     """
     create_jpeg(tmp_path / 'A.JPG', 'green')
     create_jpeg(tmp_path / 'B.JPG', 'blue')
     app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+    close_app_requests: list[str] = []
+    window.close_app_requested.connect(
+        lambda: close_app_requests.append('requested')
+    )
 
+    assert window.file_menu.title() == '&File'
+    assert [
+        action.text()
+        for action in window.file_menu.actions()
+        if not action.isSeparator()
+    ] == ['Close Window', 'Close App']
+    assert window.close_window_action.menuRole() == QAction.NoRole
+    _assert_action_shortcut(window.close_window_action, 'Ctrl+W')
+    assert window.close_app_action.menuRole() == QAction.NoRole
+    assert window.close_app_action.shortcut().isEmpty() is True
+    window.close_app_action.trigger()
+    assert close_app_requests == ['requested']
     assert window.help_menu.title() == '&Help'
     assert window.shortcut_help_action.text() == 'Keyboard Shortcuts'
     assert (
@@ -433,6 +461,82 @@ def test_photo_viewer_shortcut_help_toggles_and_esc_closes_first(
 
     assert window.transient_message_overlay.isHidden() is True
     window.close()
+    app.processEvents()
+
+
+def test_photo_viewer_ctrl_w_closes_only_that_window(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify real lifecycle key dispatch for standalone viewer windows.
+
+    System-opened photos create independent windows, so Ctrl/Cmd+W must close
+    only the active viewer and Ctrl/Cmd+Q must remain a no-op. Real key events
+    matter because direct signal emission would miss Qt focus or
+    shortcut-routing regressions.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    create_jpeg(tmp_path / 'B.JPG', 'blue')
+    app, first_window = _open_viewer(
+        tmp_path, monkeypatch, startup_name='A.JPG'
+    )
+    _app, second_window = _open_viewer(
+        tmp_path, monkeypatch, startup_name='B.JPG'
+    )
+
+    _assert_action_shortcut(first_window.close_window_action, 'Ctrl+W')
+    _assert_window_shortcut(second_window.disable_quit_shortcut, 'Ctrl+Q')
+
+    # Give the target focus before sending a real key event so the assertion
+    # covers Qt WindowShortcut routing instead of just the connected slot.
+    first_window.activateWindow()
+    first_window.raise_()
+    app.processEvents()
+    QTest.keyClick(first_window, Qt.Key_W, Qt.ControlModifier)
+    app.processEvents()
+
+    assert first_window.isHidden() is True
+    assert second_window.isVisible() is True
+
+    # Shortcut-level quit suppression is separate from native app quit
+    # handling; both paths must leave retained windows open.
+    # Activate the remaining window so Ctrl/Cmd+Q is tested through the same
+    # focus-sensitive route a user would trigger.
+    second_window.activateWindow()
+    second_window.raise_()
+    app.processEvents()
+    QTest.keyClick(second_window, Qt.Key_Q, Qt.ControlModifier)
+    app.processEvents()
+
+    assert second_window.isVisible() is True
+    second_window.close()
+    first_window.deleteLater()
+    second_window.deleteLater()
+    app.processEvents()
+
+
+def test_photo_viewer_registers_windows_alt_f4_close_shortcut(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify Windows Alt+F4 follows the standalone close-window path.
+
+    The shortcut is registered only on Windows, so this forces that platform
+    branch to keep the alternate close gesture covered on other CI runners.
+    """
+    monkeypatch.setattr(photo_viewer_window_module.sys, 'platform', 'win32')
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+
+    _assert_window_shortcut(window.windows_close_window_shortcut, 'Alt+F4')
+
+    window.windows_close_window_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.isHidden() is True
+    window.deleteLater()
     app.processEvents()
 
 

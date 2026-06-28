@@ -656,6 +656,15 @@ def test_merge_selected_photos_from_browse_saves_and_undoes(
             ('IMG_7442', 'green'),
         ],
     )
+    # This test asserts native Qt focus ownership. Earlier UI tests can leave
+    # the shared QApplication with no active window, so make this window active
+    # before exercising the browse-mode focus restoration path.
+    window.activateWindow()
+    window.raise_()
+    app.processEvents()
+    if not window.isActiveWindow():
+        pytest.skip('Window activation is not available in this Qt session')
+
     window._enter_browse_mode()
     _select_list_rows(window.browse_list, [0, 1])
     app.processEvents()
@@ -2217,6 +2226,8 @@ def test_main_window_choose_folder_success_populates_ui(
     window.activateWindow()
     window.raise_()
     app.processEvents()
+    if not window.isActiveWindow():
+        pytest.skip('Window activation is not available in this Qt session')
 
     assert window.library.current_folder == tmp_path.resolve()
     assert len(window.library.photos) == 2
