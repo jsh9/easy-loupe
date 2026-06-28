@@ -117,7 +117,7 @@ class PhotoRecord:
 
     @property
     def preview_version(self) -> str:
-        """Return the cache version derived from the preview source mtime."""
+        """The cache version derived from the preview source mtime."""
         stat = self.preview_source.stat()
         return str(stat.st_mtime_ns)
 

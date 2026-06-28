@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 from PIL import Image
@@ -23,9 +24,11 @@ def test_compute_rgb_histogram_returns_normalized_rgb_channels(
     assert len(red) == 256
     assert len(green) == 256
     assert len(blue) == 256
-    assert red[128] == 1.0
-    assert red[32] == 1.0
-    assert green[128] == 1.0
-    assert green[32] == 1.0
-    assert blue[32] == 1.0
-    assert max(blue[:32] + blue[33:]) == 0.0
+    assert math.isclose(red[128], 1.0, rel_tol=0.0, abs_tol=0.0)
+    assert math.isclose(red[32], 1.0, rel_tol=0.0, abs_tol=0.0)
+    assert math.isclose(green[128], 1.0, rel_tol=0.0, abs_tol=0.0)
+    assert math.isclose(green[32], 1.0, rel_tol=0.0, abs_tol=0.0)
+    assert math.isclose(blue[32], 1.0, rel_tol=0.0, abs_tol=0.0)
+    assert math.isclose(
+        max(blue[:32] + blue[33:]), 0.0, rel_tol=0.0, abs_tol=0.0
+    )

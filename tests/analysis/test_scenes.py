@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -162,17 +163,23 @@ def test_scene_merge_heuristics_cover_primary_histogram_fallback_and_gap() -> (
 
 
 def test_cosine_similarity_returns_zero_for_zero_vectors() -> None:
-    assert (
-        analysis_scenes_module._cosine_similarity([0.0, 0.0], [1.0, 2.0])
-        == 0.0
+    assert math.isclose(
+        analysis_scenes_module._cosine_similarity([0.0, 0.0], [1.0, 2.0]),
+        0.0,
+        rel_tol=0.0,
+        abs_tol=0.0,
     )
-    assert (
-        analysis_scenes_module._cosine_similarity([1.0, 2.0], [0.0, 0.0])
-        == 0.0
+    assert math.isclose(
+        analysis_scenes_module._cosine_similarity([1.0, 2.0], [0.0, 0.0]),
+        0.0,
+        rel_tol=0.0,
+        abs_tol=0.0,
     )
-    assert (
-        analysis_scenes_module._cosine_similarity([0.0, 0.0], [0.0, 0.0])
-        == 0.0
+    assert math.isclose(
+        analysis_scenes_module._cosine_similarity([0.0, 0.0], [0.0, 0.0]),
+        0.0,
+        rel_tol=0.0,
+        abs_tol=0.0,
     )
 
 
