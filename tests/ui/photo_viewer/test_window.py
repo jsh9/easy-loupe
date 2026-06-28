@@ -446,10 +446,12 @@ def test_photo_viewer_ctrl_w_closes_only_that_window(
         monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
-    Verify Ctrl/Cmd+W closes one standalone viewer window.
+    Verify real lifecycle key dispatch for standalone viewer windows.
 
-    System-opened photos create independent windows, so this guards the close
-    shortcut against becoming an application-wide quit path.
+    System-opened photos create independent windows, so Ctrl/Cmd+W must close
+    only the active viewer and Ctrl/Cmd+Q must remain a no-op. Real key events
+    matter because direct signal emission would miss Qt focus or
+    shortcut-routing regressions.
     """
     create_jpeg(tmp_path / 'A.JPG', 'green')
     create_jpeg(tmp_path / 'B.JPG', 'blue')
@@ -461,9 +463,14 @@ def test_photo_viewer_ctrl_w_closes_only_that_window(
     )
 
     _assert_window_shortcut(first_window.close_window_shortcut, 'Ctrl+W')
-    _assert_window_shortcut(first_window.disable_quit_shortcut, 'Ctrl+Q')
+    _assert_window_shortcut(second_window.disable_quit_shortcut, 'Ctrl+Q')
 
-    first_window.close_window_shortcut.activated.emit()
+    # Give the target focus before sending a real key event so the assertion
+    # covers Qt WindowShortcut routing instead of just the connected slot.
+    first_window.activateWindow()
+    first_window.raise_()
+    app.processEvents()
+    QTest.keyClick(first_window, Qt.Key_W, Qt.ControlModifier)
     app.processEvents()
 
     assert first_window.isHidden() is True
@@ -471,7 +478,12 @@ def test_photo_viewer_ctrl_w_closes_only_that_window(
 
     # Shortcut-level quit suppression is separate from native app quit
     # handling; both paths must leave retained windows open.
-    second_window.disable_quit_shortcut.activated.emit()
+    # Activate the remaining window so Ctrl/Cmd+Q is tested through the same
+    # focus-sensitive route a user would trigger.
+    second_window.activateWindow()
+    second_window.raise_()
+    app.processEvents()
+    QTest.keyClick(second_window, Qt.Key_Q, Qt.ControlModifier)
     app.processEvents()
 
     assert second_window.isVisible() is True

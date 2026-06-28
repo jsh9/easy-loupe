@@ -1823,10 +1823,12 @@ def test_main_window_theme_toggle_switches_between_light_and_dark() -> None:
 
 def test_main_window_ctrl_w_closes_only_that_window() -> None:
     """
-    Verify Ctrl/Cmd+W uses the normal per-window close path.
+    Verify real lifecycle key dispatch for culling windows.
 
-    Multiple EasyLoupe windows can coexist, so this regression guards against
-    accidentally routing close-window shortcuts through application quit.
+    Multiple EasyLoupe windows can coexist, so Ctrl/Cmd+W must close only the
+    active window and Ctrl/Cmd+Q must remain a no-op. Real key events matter
+    because direct signal emission would miss Qt focus or shortcut-routing
+    regressions.
     """
     app = QApplication.instance() or QApplication([])
     first_window = main_window_module.MainWindow()
@@ -1837,7 +1839,15 @@ def test_main_window_ctrl_w_closes_only_that_window() -> None:
     second_window.show()
     app.processEvents()
 
-    first_window.close_window_shortcut.activated.emit()
+    assert_window_shortcut(first_window.close_window_shortcut, 'Ctrl+W')
+    assert_window_shortcut(second_window.disable_quit_shortcut, 'Ctrl+Q')
+
+    # Give the target focus before sending a real key event so the assertion
+    # covers Qt WindowShortcut routing instead of just the connected slot.
+    first_window.activateWindow()
+    first_window.raise_()
+    app.processEvents()
+    QTest.keyClick(first_window, Qt.Key_W, Qt.ControlModifier)
     app.processEvents()
 
     assert first_window.isHidden() is True
@@ -1845,7 +1855,12 @@ def test_main_window_ctrl_w_closes_only_that_window() -> None:
 
     # Shortcut-level quit suppression is separate from native app quit
     # handling; both paths must leave retained windows open.
-    second_window.disable_quit_shortcut.activated.emit()
+    # Activate the remaining window so Ctrl/Cmd+Q is tested through the same
+    # focus-sensitive route a user would trigger.
+    second_window.activateWindow()
+    second_window.raise_()
+    app.processEvents()
+    QTest.keyClick(second_window, Qt.Key_Q, Qt.ControlModifier)
     app.processEvents()
 
     assert second_window.isVisible() is True
