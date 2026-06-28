@@ -394,8 +394,8 @@ def test_photo_viewer_shortcut_help_toggles_and_esc_closes_first(
     Verify standalone viewer help uses ? and wins the first Esc press.
 
     The viewer already uses Esc to dismiss transient messages, so this guards
-    the new shortcut-help overlay from being skipped by that older behavior.
-    It also checks the viewer's File-menu lifecycle actions because standalone
+    the new shortcut-help overlay from being skipped by that older behavior. It
+    also checks the viewer's File-menu lifecycle actions because standalone
     viewer windows used to expose only Help-menu actions.
     """
     create_jpeg(tmp_path / 'A.JPG', 'green')
