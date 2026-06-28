@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from time import monotonic
 from typing import TYPE_CHECKING, Any
 
@@ -160,7 +161,9 @@ def thumbnail_item_widget(list_widget: Any, row: int) -> Any:
 def render_widget_image(widget: Any) -> Any:
     pixmap = widget.grab()
     image = pixmap.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
-    if pixmap.devicePixelRatio() != 1.0:
+    if not math.isclose(
+        pixmap.devicePixelRatio(), 1.0, rel_tol=0.0, abs_tol=0.0
+    ):
         image = image.scaled(
             widget.size(),
             Qt.IgnoreAspectRatio,

@@ -69,12 +69,12 @@ class ThreadSlot:
 
     @property
     def thread(self) -> object | None:
-        """Return the currently stored thread reference."""
+        """The currently stored thread reference."""
         return getattr(self.owner, self.thread_attr, None)
 
     @property
     def worker(self) -> object | None:
-        """Return the currently stored worker reference."""
+        """The currently stored worker reference."""
         return getattr(self.owner, self.worker_attr, None)
 
     def is_active(self) -> bool:

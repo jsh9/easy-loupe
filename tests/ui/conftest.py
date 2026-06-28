@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture(autouse=True)  # noqa: RUF076 - isolate Qt settings globally.
 def clear_main_window_settings() -> Iterator[None]:
     settings = QSettings(APP_NAME, APP_NAME)
     setting_keys = [

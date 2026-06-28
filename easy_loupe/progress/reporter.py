@@ -53,7 +53,7 @@ class CountedProgressStage:
 
     @property
     def total(self) -> int:
-        """Return the stage's determinate item count."""
+        """The stage's determinate item count."""
         return self._total
 
     def start(self, *, message: str | None = None) -> ProgressSnapshot:
