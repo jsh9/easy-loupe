@@ -24,6 +24,18 @@ if TYPE_CHECKING:
     import pytest
 
 
+MUTED_PLACEHOLDER_COLORS: dict[str, str] = {
+    'red': '#a85f5f',
+    'blue': '#5f7fa8',
+    'yellow': '#b8a75a',
+    'green': '#6f946f',
+    'purple': '#856aa6',
+    'cyan': '#5f9aa0',
+    'magenta': '#a66a92',
+    'orange': '#b8845f',
+}
+
+
 def stub_read_exif(
         monkeypatch: pytest.MonkeyPatch,
         exif_map: dict[str, dict[str, Any]],
@@ -38,7 +50,8 @@ def stub_read_exif(
 def create_jpeg(
         path: Path, color: str, *, size: tuple[int, int] = (640, 480)
 ) -> None:
-    Image.new('RGB', size, color=color).save(path, format='JPEG')
+    fill_color = MUTED_PLACEHOLDER_COLORS.get(color, color)
+    Image.new('RGB', size, color=fill_color).save(path, format='JPEG')
 
 
 def process_events_until(
