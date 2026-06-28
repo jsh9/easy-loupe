@@ -71,6 +71,10 @@ Major logic:
   identity, and best-effort macOS process/app-switcher identity hooks.
 - Keep package-data configuration aligned when adding or renaming assets under
   `easy_loupe/ui/assets/`.
+- The active app icon artifacts are committed as `EasyLoupe.png`,
+  `EasyLoupe.ico`, `EasyLoupe.icns`, and `EasyLoupe.svg`. Regenerate them
+  together from the approved source artwork so runtime Qt identity, Windows
+  packaging, and macOS packaging use the same visual.
 - For macOS document-open behavior, keep the bundle identifier stable
   (`com.easyloupe.EasyLoupe`) and keep the signed app valid after Info.plist
   changes.

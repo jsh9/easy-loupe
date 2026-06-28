@@ -160,8 +160,9 @@ uv run python scripts/build_app/build_app_windows.py --onefile
 The one-file build should be much larger than the launcher `.exe` from the
 one-folder build because it embeds the dependency payload.
 
-The script creates `easy_loupe\ui\assets\EasyLoupe.ico` from the packaged PNG
-when the `.ico` asset is missing.
+Committed icon artifacts live under `easy_loupe\ui\assets\EasyLoupe.*`.
+Regenerate `EasyLoupe.png`, `EasyLoupe.ico`, `EasyLoupe.icns`, and
+`EasyLoupe.svg` together when changing the packaged app artwork.
 
 The Windows and macOS build scripts download the official ExifTool release
 payload from <https://exiftool.org/> / SourceForge into the ignored `build`

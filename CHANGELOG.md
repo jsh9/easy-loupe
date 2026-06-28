@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Changed
+
+  - Replaced the packaged EasyLoupe app icon with the new NYC skyline and
+    magnifying-glass artwork.
+
 ## [1.4.0] - 2026-06-28
 
 - Added
