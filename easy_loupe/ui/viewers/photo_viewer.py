@@ -165,8 +165,8 @@ def _dispose_photo_viewer_clipping(
     """
     Run clipping cleanup from Qt's destroyed signal without retaining a pane.
 
-    The weak reference keeps teardown from extending the lifetime of the
-    viewer it is trying to protect.
+    The weak reference keeps teardown from extending the lifetime of the viewer
+    it is trying to protect.
     """
     viewer = viewer_ref()
     if viewer is not None:
