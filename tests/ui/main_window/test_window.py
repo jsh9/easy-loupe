@@ -90,6 +90,11 @@ def assert_window_shortcut(shortcut: Any, key_text: str) -> None:
     assert shortcut.context() == Qt.WindowShortcut
 
 
+def assert_action_shortcut(action: QAction, key_text: str) -> None:
+    assert action.shortcut().toString(QKeySequence.PortableText) == key_text
+    assert action.shortcutContext() == Qt.WindowShortcut
+
+
 def _collect_photo_ids_from_list(list_widget: Any) -> list[str]:
     return [
         str(list_widget.item(index).data(Qt.UserRole))
@@ -199,11 +204,34 @@ def _create_recursive_loading_window(
 
 
 def test_main_window_registers_open_detect_and_organize_actions() -> None:  # noqa: PLR0915
+    """
+    Verify culling-window menu actions and lifecycle shortcut ownership.
+
+    Close Window/Close App are explicit File-menu actions rather than bare
+    shortcuts, so this checks their menu placement, shortcut contract, and
+    signal wiring before other tests exercise real key dispatch.
+    """
     app = QApplication.instance() or QApplication([])
     window = main_window_module.MainWindow()
+    close_app_requests: list[str] = []
+    window.close_app_requested.connect(
+        lambda: close_app_requests.append('requested')
+    )
 
     assert window.windowTitle() == 'EasyLoupe'
     assert not window.windowIcon().isNull()
+    assert window.file_menu.title() == '&File'
+    assert [
+        action.text()
+        for action in window.file_menu.actions()
+        if not action.isSeparator()
+    ] == [
+        'Open Folder',
+        'Detect Scenes',
+        'Organize Photos...',
+        'Close Window',
+        'Close App',
+    ]
     assert (
         window.open_action.shortcut().toString(QKeySequence.PortableText)
         == 'Ctrl+O'
@@ -218,7 +246,12 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:  # no
         == 'Ctrl+Shift+E'
     )
     assert window.organize_action.isEnabled() is False
-    assert_window_shortcut(window.close_window_shortcut, 'Ctrl+W')
+    assert window.close_window_action.menuRole() == QAction.NoRole
+    assert_action_shortcut(window.close_window_action, 'Ctrl+W')
+    assert window.close_app_action.menuRole() == QAction.NoRole
+    assert window.close_app_action.shortcut().isEmpty() is True
+    window.close_app_action.trigger()
+    assert close_app_requests == ['requested']
     assert_window_shortcut(window.disable_quit_shortcut, 'Ctrl+Q')
     assert window.history_menu.title() == '&History'
     assert_default_photo_sort_control(window)
@@ -1839,7 +1872,7 @@ def test_main_window_ctrl_w_closes_only_that_window() -> None:
     second_window.show()
     app.processEvents()
 
-    assert_window_shortcut(first_window.close_window_shortcut, 'Ctrl+W')
+    assert_action_shortcut(first_window.close_window_action, 'Ctrl+W')
     assert_window_shortcut(second_window.disable_quit_shortcut, 'Ctrl+Q')
 
     # Give the target focus before sending a real key event so the assertion

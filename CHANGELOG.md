@@ -17,9 +17,10 @@
 
 - Changed
 
-  - `Ctrl+W`/`Cmd+W` now closes only the active EasyLoupe window, Windows
-    `Alt+F4` follows the same close-window path, and `Ctrl+Q`/`Cmd+Q` now does
-    nothing while an EasyLoupe window is active.
+  - `File > Close Window` now closes only the active EasyLoupe window with
+    `Ctrl+W`/`Cmd+W`, `File > Close App` closes all EasyLoupe windows without a
+    shortcut, Windows `Alt+F4` follows the close-window path, and
+    `Ctrl+Q`/`Cmd+Q` now does nothing while an EasyLoupe window is active.
   - The top bar now places `Filter` before `Organize`.
 
 - Fixed

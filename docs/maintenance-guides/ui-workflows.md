@@ -439,6 +439,11 @@ implementation.
 EasyLoupe window is active: it must not close a window, close the app, or be
 wired to application quit.
 
+`File > Close Window` owns the `Ctrl+W`/`Cmd+W` shortcut and follows the same
+per-window close path as the window control. `File > Close App` is an explicit
+menu-only command with no shortcut; it asks `WindowManager` to close every
+retained EasyLoupe window through the same deferred-close paths.
+
 Window close while scene detection or organizer/undo work is active must hide
 the visible window immediately, request best-effort worker shutdown, and defer
 the actual Qt teardown until the relevant `QThread.finished` cleanup clears the
@@ -451,17 +456,18 @@ deferred invisibly.
 `WindowManager` owns event-loop lifetime for these hidden-close paths: the app
 disables implicit last-visible-window quit and exits only after the manager has
 forgotten every destroyed window. Native application quit events are ignored
-while windows are retained, so preserve the explicit close-window paths and the
-last-window teardown boundary that keep `QThread` child objects alive until
-worker code has stopped running.
+while windows are retained, so preserve the explicit Close App and close-window
+paths plus the last-window teardown boundary that keep `QThread` child objects
+alive until worker code has stopped running.
 
 ## 7. Verification Pointers
 
 - For shutdown fixes involving `QThread` cleanup, verify both source runs and
-  the packaged app by closing windows with the window control and
-  `Ctrl+W`/`Cmd+W` while scene detection, organizer/undo work, standalone EXIF
-  refresh, prefetch, or folder hydration is active. On Windows, verify `Alt+F4`
-  follows the same close-window path.
+  the packaged app by closing windows with the window control,
+  `File > Close Window`, `Ctrl+W`/`Cmd+W`, and `File > Close App` while scene
+  detection, organizer/undo work, standalone EXIF refresh, prefetch, or folder
+  hydration is active. On Windows, verify `Alt+F4` follows the same
+  close-window path.
 - If scene detection changes, test grouping behavior, not just helper
   functions, and preserve ordering assumptions based on capture time.
 - If progress reporting changes, verify both legacy progress tuples and the

@@ -85,6 +85,7 @@ class _WindowSignal(Protocol):
 class _ManagedWindow(Protocol):
     """Top-level EasyLoupe window retained until its ``destroyed`` signal."""
 
+    close_app_requested: _WindowSignal
     destroyed: _WindowSignal
 
     def close(self) -> None:
@@ -159,6 +160,7 @@ class WindowManager:
         self._culling_window_factory = culling_window_factory
         self._photo_window_factory = photo_window_factory
         self._app = app
+        self._close_all_requested = False
         self._windows: list[_ManagedWindow] = []
         if self._app is not None:
             # Qt otherwise quits when the last visible window closes. Hidden
@@ -207,6 +209,10 @@ class WindowManager:
         """Retain and show an EasyLoupe window."""
         window.setAttribute(Qt.WA_DeleteOnClose, True)
         self._windows.append(window)
+        # Route explicit Close App menu requests through the manager because
+        # individual windows do not know which other windows are retained or
+        # still waiting on deferred worker cleanup.
+        window.close_app_requested.connect(self.close_all_windows)
         window.destroyed.connect(
             lambda _object=None, managed_window=window: self._remove_window(
                 managed_window
@@ -218,6 +224,18 @@ class WindowManager:
             window.move(target_geometry.topLeft())
 
         window.showMaximized()
+
+    def close_all_windows(self) -> None:
+        """Close every retained EasyLoupe window through normal close paths."""
+        # Treat Close App as a one-shot close sweep so a hidden deferred-close
+        # window does not receive repeated close events while its worker slots
+        # are still draining.
+        if self._close_all_requested or not self._windows:
+            return
+
+        self._close_all_requested = True
+        for window in list(self._windows):
+            window.close()
 
     def _handle_culling_request(
             self,

@@ -259,6 +259,7 @@ class _FakeCullingWindow:
     def __init__(self, launch_request: object = None) -> None:
         self.launch_request = launch_request
         self.attributes: list[tuple[object, bool]] = []
+        self.close_app_requested = _FakeSignal()
         self.destroyed = _FakeSignal()
         self.geometry_calls: list[object] = []
         self.move_calls: list[object] = []
@@ -309,6 +310,7 @@ class _FakePhotoWindow:
     def __init__(self, startup_file: object = None) -> None:
         self.startup_file = startup_file
         self.attributes: list[tuple[object, bool]] = []
+        self.close_app_requested = _FakeSignal()
         self.destroyed = _FakeSignal()
         self.culling_requested = _FakeSignal()
         self.screen: object | None = None
@@ -441,6 +443,66 @@ def test_window_manager_quit_request_ignores_retained_windows() -> None:
     assert second.close_calls == 0
     assert manager.windows() == [first, second]
     assert app.quit_calls == 0
+
+
+def test_window_manager_close_all_windows_closes_retained_windows() -> None:
+    """
+    Close App should close every retained window through normal close paths.
+
+    The app-close command is explicit menu behavior, so it closes all live
+    windows even though native quit events remain disabled for accidental
+    Ctrl/Cmd+Q delivery.
+    """
+    app = _FakeApplication()
+    manager = app_module.WindowManager(
+        culling_window_factory=_FakeCullingWindow,
+        photo_window_factory=_FakePhotoWindow,
+        app=app,
+    )
+    first = manager.open_culling_window()
+    second = manager.open_photo_window(Path('IMG_1000.JPG'))
+
+    manager.close_all_windows()
+
+    assert first.close_calls == 1
+    assert second.close_calls == 1
+    assert manager.windows() == []
+    assert app.quit_calls == 1
+
+
+def test_window_manager_close_app_signal_closes_all_windows_once() -> None:
+    """
+    Route retained window Close App signals through the manager once.
+
+    A deferred-close window remains retained while worker cleanup drains, so a
+    second Close App request must not send another close to that hidden window.
+    """
+    app = _FakeApplication()
+    manager = app_module.WindowManager(
+        culling_window_factory=_DeferredCloseCullingWindow,
+        photo_window_factory=_FakePhotoWindow,
+        app=app,
+    )
+    first = manager.open_culling_window()
+    second = manager.open_photo_window(Path('IMG_1000.JPG'))
+
+    second.close_app_requested.emit()
+
+    assert first.close_calls == 1
+    assert second.close_calls == 1
+    assert manager.windows() == [first]
+    assert app.quit_calls == 0
+
+    first.close_app_requested.emit()
+
+    assert first.close_calls == 1
+    assert manager.windows() == [first]
+    assert app.quit_calls == 0
+
+    first.finish_close()
+
+    assert manager.windows() == []
+    assert app.quit_calls == 1
 
 
 def test_window_manager_quit_request_ignores_deferred_close_window() -> None:

@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from PySide6.QtCore import QPoint, QSettings, Qt
-from PySide6.QtGui import QKeySequence
+from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QMessageBox
 
@@ -71,6 +71,11 @@ def _trigger_viewer_shortcut(window: PhotoViewerWindow, key_text: str) -> None:
 def _assert_window_shortcut(shortcut: Any, key_text: str) -> None:
     assert shortcut.key().toString(QKeySequence.PortableText) == key_text
     assert shortcut.context() == Qt.WindowShortcut
+
+
+def _assert_action_shortcut(action: Any, key_text: str) -> None:
+    assert action.shortcut().toString(QKeySequence.PortableText) == key_text
+    assert action.shortcutContext() == Qt.WindowShortcut
 
 
 def _assert_close_tuple(
@@ -390,11 +395,29 @@ def test_photo_viewer_shortcut_help_toggles_and_esc_closes_first(
 
     The viewer already uses Esc to dismiss transient messages, so this guards
     the new shortcut-help overlay from being skipped by that older behavior.
+    It also checks the viewer's File-menu lifecycle actions because standalone
+    viewer windows used to expose only Help-menu actions.
     """
     create_jpeg(tmp_path / 'A.JPG', 'green')
     create_jpeg(tmp_path / 'B.JPG', 'blue')
     app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+    close_app_requests: list[str] = []
+    window.close_app_requested.connect(
+        lambda: close_app_requests.append('requested')
+    )
 
+    assert window.file_menu.title() == '&File'
+    assert [
+        action.text()
+        for action in window.file_menu.actions()
+        if not action.isSeparator()
+    ] == ['Close Window', 'Close App']
+    assert window.close_window_action.menuRole() == QAction.NoRole
+    _assert_action_shortcut(window.close_window_action, 'Ctrl+W')
+    assert window.close_app_action.menuRole() == QAction.NoRole
+    assert window.close_app_action.shortcut().isEmpty() is True
+    window.close_app_action.trigger()
+    assert close_app_requests == ['requested']
     assert window.help_menu.title() == '&Help'
     assert window.shortcut_help_action.text() == 'Keyboard Shortcuts'
     assert (
@@ -462,7 +485,7 @@ def test_photo_viewer_ctrl_w_closes_only_that_window(
         tmp_path, monkeypatch, startup_name='B.JPG'
     )
 
-    _assert_window_shortcut(first_window.close_window_shortcut, 'Ctrl+W')
+    _assert_action_shortcut(first_window.close_window_action, 'Ctrl+W')
     _assert_window_shortcut(second_window.disable_quit_shortcut, 'Ctrl+Q')
 
     # Give the target focus before sending a real key event so the assertion

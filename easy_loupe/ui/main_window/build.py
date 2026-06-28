@@ -373,35 +373,7 @@ class MainWindowBuildMixin:
     def _build_menu(self: MainWindow) -> None:
         menu_bar = self.menuBar()
 
-        file_menu = menu_bar.addMenu('&File')
-        self.open_action = QAction('Open Folder', self)
-        self.open_action.setShortcut(QKeySequence('Ctrl+O'))
-        self.open_action.setShortcutContext(Qt.WindowShortcut)
-        self.open_action.triggered.connect(
-            lambda *_: self._run_workspace_action(self.choose_folder)
-        )
-        self.addAction(self.open_action)
-        file_menu.addAction(self.open_action)
-
-        self.detect_action = QAction('Detect Scenes', self)
-        self.detect_action.setShortcut(QKeySequence('Ctrl+D'))
-        self.detect_action.setShortcutContext(Qt.WindowShortcut)
-        self.detect_action.setEnabled(False)
-        self.detect_action.triggered.connect(
-            lambda *_: self._run_workspace_action(self.detect_scenes)
-        )
-        self.addAction(self.detect_action)
-        file_menu.addAction(self.detect_action)
-
-        self.organize_action = QAction('Organize Photos...', self)
-        self.organize_action.setShortcut(QKeySequence('Ctrl+Shift+E'))
-        self.organize_action.setShortcutContext(Qt.WindowShortcut)
-        self.organize_action.setEnabled(False)
-        self.organize_action.triggered.connect(
-            lambda *_: self._run_workspace_action(self.open_organizer_dialog)
-        )
-        self.addAction(self.organize_action)
-        file_menu.addAction(self.organize_action)
+        self._build_file_menu(menu_bar)
 
         self.history_menu = menu_bar.addMenu('&History')
         self.undo_metadata_action = QAction('Undo', self)
@@ -527,6 +499,58 @@ class MainWindowBuildMixin:
         }
 
         self._build_help_menu(menu_bar)
+
+    def _build_file_menu(self: MainWindow, menu_bar: QMenuBar) -> None:
+        """Build File menu actions, including window lifecycle controls."""
+        self.file_menu = menu_bar.addMenu('&File')
+        self.open_action = QAction('Open Folder', self)
+        self.open_action.setShortcut(QKeySequence('Ctrl+O'))
+        self.open_action.setShortcutContext(Qt.WindowShortcut)
+        self.open_action.triggered.connect(
+            lambda *_: self._run_workspace_action(self.choose_folder)
+        )
+        self.addAction(self.open_action)
+        self.file_menu.addAction(self.open_action)
+
+        self.detect_action = QAction('Detect Scenes', self)
+        self.detect_action.setShortcut(QKeySequence('Ctrl+D'))
+        self.detect_action.setShortcutContext(Qt.WindowShortcut)
+        self.detect_action.setEnabled(False)
+        self.detect_action.triggered.connect(
+            lambda *_: self._run_workspace_action(self.detect_scenes)
+        )
+        self.addAction(self.detect_action)
+        self.file_menu.addAction(self.detect_action)
+
+        self.organize_action = QAction('Organize Photos...', self)
+        self.organize_action.setShortcut(QKeySequence('Ctrl+Shift+E'))
+        self.organize_action.setShortcutContext(Qt.WindowShortcut)
+        self.organize_action.setEnabled(False)
+        self.organize_action.triggered.connect(
+            lambda *_: self._run_workspace_action(self.open_organizer_dialog)
+        )
+        self.addAction(self.organize_action)
+        self.file_menu.addAction(self.organize_action)
+
+        self.file_menu.addSeparator()
+        # Keep lifecycle actions in EasyLoupe's File menu instead of letting
+        # Qt reinterpret them as native app-menu roles; the native Quit item is
+        # still intercepted separately to avoid accidental Ctrl/Cmd+Q exits.
+        self.close_window_action = QAction('Close Window', self)
+        self.close_window_action.setMenuRole(QAction.NoRole)
+        self.close_window_action.setShortcut(QKeySequence('Ctrl+W'))
+        self.close_window_action.setShortcutContext(Qt.WindowShortcut)
+        self.close_window_action.triggered.connect(lambda *_: self.close())
+        self.addAction(self.close_window_action)
+        self.file_menu.addAction(self.close_window_action)
+
+        self.close_app_action = QAction('Close App', self)
+        self.close_app_action.setMenuRole(QAction.NoRole)
+        self.close_app_action.triggered.connect(
+            lambda *_: self.close_app_requested.emit()
+        )
+        self.addAction(self.close_app_action)
+        self.file_menu.addAction(self.close_app_action)
 
     def _build_help_menu(self: MainWindow, menu_bar: QMenuBar) -> None:
         self.help_menu = menu_bar.addMenu('&Help')
@@ -935,11 +959,9 @@ class MainWindowBuildMixin:
         )
 
     def _build_shortcuts(self: MainWindow) -> None:
-        # Lifecycle shortcuts bypass normal UI shortcut blocking so close
-        # requests and the Ctrl/Cmd+Q no-op still work while overlays are up.
-        self.close_window_shortcut = make_lifecycle_shortcut(
-            self, 'Ctrl+W', self.close
-        )
+        # Lifecycle shortcuts bypass normal UI shortcut blocking so Ctrl/Cmd+Q
+        # is still consumed and Windows Alt+F4 still closes while overlays are
+        # up. Close Window itself is owned by the File-menu QAction.
         self.disable_quit_shortcut = make_lifecycle_shortcut(
             self, 'Ctrl+Q', ignore_quit_shortcut
         )
