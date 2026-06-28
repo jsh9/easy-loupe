@@ -16,6 +16,9 @@
     be missed by design.
   - Uncached clipping-warning overlays now render off the UI thread so
     first-time navigation and large compare grids remain responsive.
+  - Clipping-warning overlay work now skips stale rapid-navigation requests
+    before entering the thread pool, and cached overlay decoding runs off the
+    UI thread.
 
 ## [1.3.0] - 2026-06-22
 

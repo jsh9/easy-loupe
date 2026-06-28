@@ -287,11 +287,27 @@ def clipping_overlay_pixmap_from_payload(
         payload: ClippingOverlayPayload,
 ) -> QPixmap:
     """Convert cached GUI-safe overlay bytes into a Qt pixmap."""
-    qimage = QImage()
-    if not qimage.loadFromData(payload.png_data, 'PNG'):
+    qimage = clipping_overlay_qimage_from_payload(payload)
+    if qimage.isNull():
         return QPixmap()
 
     return QPixmap.fromImage(qimage)
+
+
+def clipping_overlay_qimage_from_payload(
+        payload: ClippingOverlayPayload,
+) -> QImage:
+    """
+    Decode cached overlay bytes into a worker-safe Qt image.
+
+    Workers can decode into ``QImage`` without touching GUI-only pixmap
+    resources, leaving ``QPixmap`` creation to the viewer thread.
+    """
+    qimage = QImage()
+    if not qimage.loadFromData(payload.png_data, 'PNG'):
+        return QImage()
+
+    return qimage
 
 
 def build_clipping_overlay_image(

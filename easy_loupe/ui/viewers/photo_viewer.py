@@ -13,11 +13,13 @@ from PySide6.QtCore import (
     QSize,
     Qt,
     QThreadPool,
+    QTimer,
     Signal,
 )
 from PySide6.QtGui import (
     QBrush,
     QColor,
+    QImage,
     QMouseEvent,
     QPen,
     QPixmap,
@@ -35,11 +37,9 @@ from PySide6.QtWidgets import (
 from easy_loupe.ui.theme import THEMES, ThemePalette
 from easy_loupe.ui.viewers.clipping import (
     ClippingOverlayCacheKey,
-    ClippingOverlayPayload,
     clipping_overlay_cache_key,
     clipping_overlay_payload_for_key,
-    clipping_overlay_pixmap_from_payload,
-    get_cached_clipping_overlay_payload,
+    clipping_overlay_qimage_from_payload,
 )
 
 MAX_ZOOM_FACTOR = 10.0
@@ -67,6 +67,7 @@ photo bounds, and a tight cap would silently clip the zoom level.
 FOCUS_POINT_MARKER_SIZE = 28.0
 FOCUS_POINT_MARKER_PEN_WIDTH = 2
 FOCUS_POINT_MARKER_COLOR = '#ff3b30'
+CLIPPING_OVERLAY_JOB_START_DELAY_MS = 40
 
 if TYPE_CHECKING:
     from PySide6.QtGui import QResizeEvent
@@ -79,8 +80,17 @@ class _ClippingOverlaySignals(QObject):
     failed = Signal(int, object)
 
 
+@dataclass(frozen=True, slots=True)
+class _ClippingOverlayResult:
+    """Decoded clipping overlay image ready for GUI-thread pixmap creation."""
+
+    width: int
+    height: int
+    image: QImage
+
+
 class _ClippingOverlayRunnable(QRunnable):
-    """Build one clipping overlay payload outside the GUI thread."""
+    """Build and decode one clipping overlay outside the GUI thread."""
 
     def __init__(
             self,
@@ -93,14 +103,25 @@ class _ClippingOverlayRunnable(QRunnable):
         self.signals = _ClippingOverlaySignals()
 
     def run(self) -> None:
-        """Generate a GUI-safe overlay payload and report completion."""
+        """Generate decoded overlay data without touching GUI pixmap state."""
         try:
             payload = clipping_overlay_payload_for_key(self.cache_key)
         except Exception:  # noqa: BLE001 - keep worker failures off the UI.
             self.signals.failed.emit(self.request_id, self.cache_key)
             return
 
-        self.signals.finished.emit(self.request_id, self.cache_key, payload)
+        # Decode PNG bytes here because QImage is safe for background image
+        # work; the GUI slot only performs the QPixmap conversion Qt requires.
+        image = clipping_overlay_qimage_from_payload(payload)
+        if image.isNull():
+            self.signals.failed.emit(self.request_id, self.cache_key)
+            return
+
+        self.signals.finished.emit(
+            self.request_id,
+            self.cache_key,
+            _ClippingOverlayResult(payload.width, payload.height, image),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1053,12 +1074,28 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
 
         self._clipping_overlay_key = cache_key
         request_id = self._next_clipping_overlay_request_id()
-        payload = get_cached_clipping_overlay_payload(cache_key)
-        if payload is not None:
-            self._apply_clipping_overlay_payload(payload)
+        self._clear_clipping_overlay()
+        # Delay enqueueing so rapid navigation or a disabled overlay can
+        # invalidate stale requests before they consume a thread-pool slot.
+        QTimer.singleShot(
+            CLIPPING_OVERLAY_JOB_START_DELAY_MS,
+            lambda: self._start_clipping_overlay_job(request_id, cache_key),
+        )
+
+    def _start_clipping_overlay_job(
+            self,
+            request_id: int,
+            cache_key: ClippingOverlayCacheKey,
+    ) -> None:
+        """
+        Start delayed clipping work only while its request is current.
+
+        The timer can fire after navigation or preference changes, so this
+        mirrors result freshness before using a thread-pool slot.
+        """
+        if not self._clipping_overlay_result_current(request_id, cache_key):
             return
 
-        self._clear_clipping_overlay()
         job = _ClippingOverlayRunnable(request_id, cache_key)
         job.signals.finished.connect(self._handle_clipping_overlay_finished)
         job.signals.failed.connect(self._handle_clipping_overlay_failed)
@@ -1079,13 +1116,13 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
             self,
             request_id: int,
             cache_key: ClippingOverlayCacheKey,
-            payload: ClippingOverlayPayload,
+            result: _ClippingOverlayResult,
     ) -> None:
         self._clipping_overlay_jobs.pop(request_id, None)
         if not self._clipping_overlay_result_current(request_id, cache_key):
             return
 
-        self._apply_clipping_overlay_payload(payload)
+        self._apply_clipping_overlay_result(result)
 
     def _handle_clipping_overlay_failed(
             self,
@@ -1108,18 +1145,18 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
             and cache_key == self._clipping_overlay_key
         )
 
-    def _apply_clipping_overlay_payload(
-            self, payload: ClippingOverlayPayload
+    def _apply_clipping_overlay_result(
+            self, result: _ClippingOverlayResult
     ) -> None:
-        overlay = clipping_overlay_pixmap_from_payload(payload)
-        if overlay.isNull() or payload.width <= 0 or payload.height <= 0:
+        overlay = QPixmap.fromImage(result.image)
+        if overlay.isNull() or result.width <= 0 or result.height <= 0:
             self._clear_clipping_overlay()
             return
 
         # Cached clipping pixmaps can be smaller than the photo pixmap, so
         # scale the item in scene coordinates to keep warnings aligned.
-        scale_x = self._image_size.width() / payload.width
-        scale_y = self._image_size.height() / payload.height
+        scale_x = self._image_size.width() / result.width
+        scale_y = self._image_size.height() / result.height
         self._clipping_overlay_item.setPixmap(overlay)
         self._clipping_overlay_item.setTransform(
             QTransform.fromScale(scale_x, scale_y)

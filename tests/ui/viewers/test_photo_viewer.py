@@ -230,7 +230,9 @@ def test_photo_viewer_clipping_warning_tracks_loaded_photo(
 
     viewer.set_photo(tmp_path / 'IMG_7016.JPG', (0.5, 0.5))
 
-    # The first load populated the cache, so revisiting the photo is immediate.
+    # The first load populated the cache, so revisiting reuses cached payload
+    # data while still decoding the overlay image off the UI thread.
+    process_events_until(app, overlay.isVisible)
     assert overlay.isVisible() is True
 
     viewer.close()
@@ -290,8 +292,8 @@ def test_photo_viewer_clipping_cache_miss_starts_background_job(
     """
     Verify uncached clipping overlays do not block ``set_photo``.
 
-    Cache misses should schedule background generation and leave the overlay
-    hidden until the worker result is delivered.
+    Cache misses should defer background generation briefly, enqueue one
+    current job, and leave the overlay hidden until the worker result arrives.
     """
     create_jpeg(tmp_path / 'IMG_7025.JPG', 'white')
     started_jobs = []
@@ -316,24 +318,34 @@ def test_photo_viewer_clipping_cache_miss_starts_background_job(
     viewer.set_clipping_warning_visible(enabled=True)
     viewer.set_photo(tmp_path / 'IMG_7025.JPG', (0.5, 0.5))
 
+    assert started_jobs == []
+    process_events_until(app, lambda: len(started_jobs) == 1)
     assert len(started_jobs) == 1
     assert viewer._clipping_overlay_item.isVisible() is False
     viewer.close()
 
 
-def test_photo_viewer_clipping_cache_hit_applies_immediately(
+def test_photo_viewer_clipping_cache_hit_applies_asynchronously(
         tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
-    Verify cached clipping payloads still appear without background delay.
+    Verify cached clipping payloads appear without rebuilding analysis data.
 
-    This keeps the async cache-miss path from regressing repeat navigation,
-    where users expect already-generated warnings to follow the photo at once.
+    Cache hits still decode off the UI thread, so repeat navigation should
+    reuse the payload cache while keeping display work asynchronous.
     """
     image_path = tmp_path / 'IMG_7026.JPG'
     create_jpeg(image_path, 'white')
     cache_key = clipping_module.clipping_overlay_cache_key(image_path)
     clipping_module.clipping_overlay_payload_for_key(cache_key)
+
+    def fail_build(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError('cached overlay should not rebuild payload')
+
+    monkeypatch.setattr(
+        clipping_module, '_build_clipping_overlay_payload', fail_build
+    )
 
     app = QApplication.instance() or QApplication([])
     viewer = photo_viewer_module.PhotoViewer()
@@ -344,6 +356,7 @@ def test_photo_viewer_clipping_cache_hit_applies_immediately(
     viewer.set_clipping_warning_visible(enabled=True)
     viewer.set_photo(image_path, (0.5, 0.5))
 
+    process_events_until(app, viewer._clipping_overlay_item.isVisible)
     assert viewer._clipping_overlay_item.isVisible() is True
     viewer.close()
 
@@ -353,10 +366,10 @@ def test_photo_viewer_ignores_stale_clipping_worker_result(
         monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
-    Verify late clipping results cannot repaint a previous photo's overlay.
+    Verify stale clipping requests are dropped before worker enqueue.
 
-    The worker result is delivered after the viewer has moved on, so the
-    request-id/key gate must protect the current photo from stale UI state.
+    Rapid navigation should replace photo A with photo B before the delayed
+    start fires, so only the current photo reaches the global thread pool.
     """
     first_path = tmp_path / 'IMG_7027.JPG'
     second_path = tmp_path / 'IMG_7028.JPG'
@@ -385,24 +398,23 @@ def test_photo_viewer_ignores_stale_clipping_worker_result(
     viewer.set_photo(first_path, (0.5, 0.5))
     viewer.set_photo(second_path, (0.5, 0.5))
 
-    assert len(started_jobs) == 2
-    stale_job = started_jobs[0]
-    stale_payload = clipping_module.clipping_overlay_payload_for_key(
-        stale_job.cache_key
-    )
-    stale_job.signals.finished.emit(
-        stale_job.request_id, stale_job.cache_key, stale_payload
-    )
-    app.processEvents()
-
-    assert viewer._clipping_overlay_item.isVisible() is False
-
-    current_job = started_jobs[1]
+    process_events_until(app, lambda: len(started_jobs) == 1)
+    assert len(started_jobs) == 1
+    current_job = started_jobs[0]
+    assert current_job.cache_key.image_path == str(second_path)
     current_payload = clipping_module.clipping_overlay_payload_for_key(
         current_job.cache_key
     )
+    current_image = clipping_module.clipping_overlay_qimage_from_payload(
+        current_payload
+    )
+    current_result = photo_viewer_module._ClippingOverlayResult(
+        current_payload.width,
+        current_payload.height,
+        current_image,
+    )
     current_job.signals.finished.emit(
-        current_job.request_id, current_job.cache_key, current_payload
+        current_job.request_id, current_job.cache_key, current_result
     )
     app.processEvents()
 
@@ -415,10 +427,10 @@ def test_photo_viewer_ignores_disabled_clipping_worker_result(
         monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
-    Verify disabling clipping before completion keeps the overlay hidden.
+    Verify disabling clipping before delayed start prevents worker enqueue.
 
-    This covers the same async race as fast navigation, but with the user's
-    overlay preference changing while a background request is still pending.
+    This covers the same async race as fast navigation, but with the overlay
+    preference invalidating the pending request before it reaches the pool.
     """
     image_path = tmp_path / 'IMG_7029.JPG'
     create_jpeg(image_path, 'white')
@@ -445,11 +457,11 @@ def test_photo_viewer_ignores_disabled_clipping_worker_result(
     viewer.set_photo(image_path, (0.5, 0.5))
     viewer.set_clipping_warning_visible(enabled=False)
 
-    job = started_jobs[0]
-    payload = clipping_module.clipping_overlay_payload_for_key(job.cache_key)
-    job.signals.finished.emit(job.request_id, job.cache_key, payload)
+    app.processEvents()
+    QTest.qWait(photo_viewer_module.CLIPPING_OVERLAY_JOB_START_DELAY_MS * 2)
     app.processEvents()
 
+    assert started_jobs == []
     assert viewer._clipping_overlay_item.isVisible() is False
     viewer.close()
 

@@ -7,6 +7,7 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
+import easy_loupe.ui.viewers.clipping as clipping_module
 import easy_loupe.ui.viewers.photo_viewer as photo_viewer_module
 from easy_loupe.ui.theme import THEMES
 from easy_loupe.ui.viewers.compare_photo_viewer import (
@@ -139,6 +140,9 @@ def test_compare_photo_viewer_clipping_warning_applies_to_all_panes(
     viewer.show_active_photo()
 
     assert viewer.selected_viewer._clipping_warning_enabled is True
+    process_events_until(
+        app, viewer.selected_viewer._clipping_overlay_item.isVisible
+    )
     assert viewer.selected_viewer._clipping_overlay_item.isVisible() is True
 
     viewer.set_clipping_warning_visible(enabled=False)
@@ -159,7 +163,8 @@ def test_compare_photo_viewer_twenty_pane_clipping_uses_background_jobs(
     Verify max-size compare grids do not generate clipping overlays inline.
 
     A 20-photo compare grid exceeds one screenful of overlay work, so pane
-    construction should only enqueue background jobs on cache misses.
+    construction should leave panes hidden and enqueue background jobs only
+    after the delayed freshness check runs.
     """
     photos = []
     for index in range(20):
@@ -186,11 +191,63 @@ def test_compare_photo_viewer_twenty_pane_clipping_uses_background_jobs(
     viewer.set_photos(photos)
 
     assert len(viewer._viewers) == 20
+    process_events_until(app, lambda: len(started_jobs) == 20)
     assert len(started_jobs) == 20
     assert all(pane._clipping_warning_enabled for pane in viewer._viewers)
     assert all(
         not pane._clipping_overlay_item.isVisible() for pane in viewer._viewers
     )
+    _close_viewer(viewer, app)
+
+
+def test_compare_photo_viewer_cached_clipping_still_uses_background_jobs(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify cached compare overlays still decode away from pane construction.
+
+    Payload cache hits should avoid analysis rebuilds, but compare should still
+    enqueue the decode work so a full grid cannot synchronously decode many
+    large overlay PNGs on the UI thread.
+    """
+    photos = []
+    for index in range(20):
+        image_path = tmp_path / f'CACHED_{index:04d}.JPG'
+        create_jpeg(image_path, 'white')
+        key = clipping_module.clipping_overlay_cache_key(image_path)
+        clipping_module.clipping_overlay_payload_for_key(key)
+        photos.append(ComparePhoto(str(index), image_path, (0.5, 0.5)))
+
+    def fail_build(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError('cached compare overlays should not rebuild')
+
+    started_jobs = []
+
+    class FakeThreadPool:
+        @staticmethod
+        def start(job: object) -> None:
+            started_jobs.append(job)
+
+    monkeypatch.setattr(
+        clipping_module, '_build_clipping_overlay_payload', fail_build
+    )
+    monkeypatch.setattr(
+        photo_viewer_module.QThreadPool,
+        'globalInstance',
+        staticmethod(FakeThreadPool),
+    )
+
+    app = QApplication.instance() or QApplication([])
+    viewer = ComparePhotoViewer(photo_limit=20)
+    viewer.set_clipping_warning_visible(enabled=True)
+    viewer.set_photos(photos)
+
+    assert all(
+        not pane._clipping_overlay_item.isVisible() for pane in viewer._viewers
+    )
+    process_events_until(app, lambda: len(started_jobs) == 20)
+    assert len(started_jobs) == 20
     _close_viewer(viewer, app)
 
 

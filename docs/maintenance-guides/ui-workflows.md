@@ -280,10 +280,11 @@ Major logic:
   3000-pixel long edge, then scales the resulting overlay back over the full
   viewer scene. Highlights use any RGB channel at or above the high threshold,
   shadows use any RGB channel at or below the low threshold, and highlight
-  paint wins when both masks hit the same pixel. First-time uncached overlays
-  are generated off the UI thread and may appear shortly after the photo. This
-  speed-first analysis can miss tiny clipped specks after downsampling. Browse
-  thumbnails do not show clipping warnings.
+  paint wins when both masks hit the same pixel. Overlay generation and cached
+  PNG decoding run off the UI thread and may appear shortly after the photo;
+  stale requests are checked before entering the thread pool during rapid
+  navigation. This speed-first analysis can miss tiny clipped specks after
+  downsampling. Browse thumbnails do not show clipping warnings.
 
 ## 4. Selection And Browse Behavior
 
