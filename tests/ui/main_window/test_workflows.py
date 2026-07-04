@@ -3775,6 +3775,60 @@ def test_main_window_move_frozen_state_blocks_workspace_actions(
     del app
 
 
+def test_main_window_move_frozen_state_blocks_scene_edits(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify frozen workspaces block direct scene mutation helpers.
+
+    Scene edit helpers can be called by actions, context menus, and tests. They
+    need their own frozen-state guard so future entry points cannot edit saved
+    scene metadata while loaded photo records may point at moved paths.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_9262', 'dimgray'),
+            ('IMG_9263', 'navy'),
+            ('IMG_9264', 'green'),
+            ('IMG_9265', 'white'),
+        ],
+        scene_groups=[
+            ['IMG_9262', 'IMG_9263'],
+            ['IMG_9264'],
+            ['IMG_9265'],
+        ],
+    )
+    _select_list_rows(window.thumbnail_list, [1, 2])
+    original_groups = window.library.scene_group_photo_ids()
+    confirmation_calls: list[str] = []
+    save_calls: list[str] = []
+    monkeypatch.setattr(
+        window,
+        '_confirm_break_scene',
+        lambda: confirmation_calls.append('break') or True,
+    )
+    monkeypatch.setattr(
+        window.library,
+        'save_metadata',
+        lambda: save_calls.append('save'),
+    )
+
+    window._set_main_view_frozen_after_move_organize(frozen=True)
+    window._break_scene_into_singletons(window.library.scenes[0].scene_id)
+    window._merge_selected_photos_into_scene()
+    app.processEvents()
+
+    assert window.library.scene_group_photo_ids() == original_groups
+    assert confirmation_calls == []
+    assert save_calls == []
+    assert window._metadata_undo_stack == []
+
+    window.close()
+    del app
+
+
 def test_main_window_open_folder_success_clears_move_frozen_state(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -4093,6 +4147,13 @@ def test_main_window_undo_reload_failure_keeps_move_frozen_state(
     assert window._main_view_frozen_after_move_organize is True
     assert window.move_organize_frozen_overlay.isVisible() is True
     assert window.thumbnail_list.isEnabled() is False
+    assert all(
+        action.isEnabled() is False for action in window._assignment_actions
+    )
+    assert all(
+        shortcut.isEnabled() is False
+        for shortcut in window._assignment_shortcuts
+    )
     assert window._busy is False
     assert window._operation_kind is None
     assert errors == [

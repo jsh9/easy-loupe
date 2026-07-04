@@ -1061,7 +1061,12 @@ class MainWindowWorkflowMixin:
         return scene
 
     def _break_scene_into_singletons(self: MainWindow, scene_id: str) -> None:
-        if self._busy or self._compare_mode or self._photo_filter_active():
+        if (
+            self._busy
+            or self._main_view_frozen_after_move_organize
+            or self._compare_mode
+            or self._photo_filter_active()
+        ):
             return
 
         scene = self._scene_by_id.get(scene_id)
@@ -1123,7 +1128,12 @@ class MainWindowWorkflowMixin:
         return dialog.clickedButton() is break_button
 
     def _merge_selected_photos_into_scene(self: MainWindow) -> None:
-        if self._busy or self._compare_mode or self._photo_filter_active():
+        if (
+            self._busy
+            or self._main_view_frozen_after_move_organize
+            or self._compare_mode
+            or self._photo_filter_active()
+        ):
             return
 
         photo_ids = self._mergeable_scene_photo_ids()
@@ -1448,10 +1458,10 @@ class MainWindowWorkflowMixin:
         )
 
         for action in self._assignment_actions:
-            action.setEnabled(enabled)
+            action.setEnabled(workspace_enabled)
 
         for shortcut in self._assignment_shortcuts:
-            shortcut.setEnabled(enabled)
+            shortcut.setEnabled(workspace_enabled)
 
         self._refresh_metadata_history_actions()
 
