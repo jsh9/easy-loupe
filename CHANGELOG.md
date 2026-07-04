@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Added
+
+  - `Organize Photos` can optionally split JPG/JPEG and RAW outputs into
+    separate child folders inside each metadata bucket.
+
 - Changed
 
   - Clarified the picked/rejected two-folder organizer options as `Not picked`

@@ -36,6 +36,10 @@ Picked/rejected organization can route `Picked`, `Rejected`, `Untagged`, and
 `Others` buckets. Color-label and rating organization can optionally include
 untagged photos.
 
+If the folder contains both JPG/JPEG and RAW files, `JPG & raw` can split
+organized files into `jpg` and `raw` folders inside each metadata bucket.
+Shared XMP sidecars for RAW-backed photos are placed with the RAW output.
+
 When photos came from subfolders, EasyLoupe preserves source subfolder paths
 inside each output bucket so same-named files do not collide.
 

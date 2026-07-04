@@ -129,6 +129,10 @@ Major logic:
   labels the two-folder `Others` variants as `Not picked` and `Not rejected`.
   Color-label and rating organization each expose their own optional `Untagged`
   checkbox.
+- Reorganize mode can optionally split JPG/JPEG and RAW outputs when both
+  formats exist in the loaded folder. The split keeps metadata buckets first,
+  then writes files under `jpg` or `raw` child folders. Shared XMP sidecars for
+  RAW-backed photos follow the RAW output.
 - New organizer UI code should prefer criterion-specific option types; the
   legacy `OrganizeFilesOptions(...)` constructor remains for direct callers.
 - Write XMP mode supports merge policies `preserve` and `replace`.
@@ -190,6 +194,8 @@ Major logic:
   changes.
 - Verify undo restores files and existing sidecars correctly and remains
   single-use.
+- Verify optional JPG/RAW splitting keeps buckets first, preserves source
+  subfolder paths, and places shared XMP sidecars with RAW output.
 - Verify move-based organization and XMP completion do not reload the folder.
 - Verify busy-state disabling and finished/error dialog titles still match the
   workflow being run.
