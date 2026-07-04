@@ -339,11 +339,11 @@ class OrganizerDialog(QDialog):
                 'picked_rejected',
             ),
             (
-                '2 Folders: Picked / Others (including rejected and untagged)',
+                '2 Folders: Picked / Not picked',
                 'picked_others',
             ),
             (
-                '2 Folders: Rejected / Others (including picked and untagged)',
+                '2 Folders: Rejected / Not rejected',
                 'rejected_others',
             ),
             (
