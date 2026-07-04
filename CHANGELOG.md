@@ -5,7 +5,8 @@
 - Added
 
   - `Organize Photos` can optionally split JPG/JPEG and RAW outputs into
-    separate child folders inside each metadata bucket.
+    separate child folders inside each metadata bucket, with shared XMP
+    sidecars kept with RAW output.
 
 - Changed
 
