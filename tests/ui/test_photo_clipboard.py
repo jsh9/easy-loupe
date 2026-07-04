@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
+import pytest
 from PIL import Image
 from PySide6.QtWidgets import QApplication
 
@@ -76,131 +77,125 @@ def _assert_close_rgb(
         assert abs(actual_value - expected_value) <= 3
 
 
-def test_copy_photo_pixels_uses_original_jpeg_without_rendering(
-        tmp_path: Path,
-) -> None:
-    """
-    Verify JPEG-backed records copy source pixels without cache rendering.
-
-    This guards the user-facing contract that a folder JPEG is copied directly
-    instead of EasyLoupe's re-encoded viewer preview.
-    """
-    app = QApplication.instance() or QApplication([])
-    jpeg_path = tmp_path / 'JPEG_ONLY.JPG'
-    expected_color = (12, 34, 56)
-    _create_color_jpeg(jpeg_path, expected_color)
-    library = FakeLibrary({
-        'JPEG_ONLY': _photo_record(
+@pytest.mark.parametrize(
+    (
+        'photo_id',
+        'source_name',
+        'source_color',
+        'metadata_name',
+        'has_jpeg',
+        'has_raw',
+        'has_heif',
+        'preview_color',
+        'expected_preview_calls',
+    ),
+    [
+        pytest.param(
             'JPEG_ONLY',
-            preview_source=jpeg_path,
-            has_jpeg=True,
-            has_raw=False,
-        )
-    })
-
-    assert copy_photo_pixels_to_clipboard(cast('Any', library), 'JPEG_ONLY')
-
-    assert library.preview_calls == []
-    _assert_close_rgb(_clipboard_pixel(), expected_color)
-    del app
-
-
-def test_copy_photo_pixels_prefers_jpeg_companion_over_raw_preview(
-        tmp_path: Path,
-) -> None:
-    """
-    Verify JPEG+RAW pairs still copy the original JPEG companion.
-
-    The RAW file is the metadata source in paired records, so this prevents the
-    clipboard path from drifting from the user-visible JPEG source.
-    """
-    app = QApplication.instance() or QApplication([])
-    jpeg_path = tmp_path / 'PAIR.JPG'
-    raw_path = tmp_path / 'PAIR.CR3'
-    raw_path.write_bytes(b'raw')
-    expected_color = (80, 20, 140)
-    _create_color_jpeg(jpeg_path, expected_color)
-    library = FakeLibrary({
-        'PAIR': _photo_record(
+            'JPEG_ONLY.JPG',
+            (12, 34, 56),
+            None,
+            True,
+            False,
+            False,
+            None,
+            [],
+            id='jpeg-only',
+        ),
+        pytest.param(
             'PAIR',
-            preview_source=jpeg_path,
-            metadata_source=raw_path,
-            has_jpeg=True,
-            has_raw=True,
-        )
-    })
-
-    assert copy_photo_pixels_to_clipboard(cast('Any', library), 'PAIR')
-
-    assert library.preview_calls == []
-    _assert_close_rgb(_clipboard_pixel(), expected_color)
-    del app
-
-
-def test_copy_photo_pixels_uses_viewer_preview_without_jpeg(
+            'PAIR.JPG',
+            (80, 20, 140),
+            'PAIR.CR3',
+            True,
+            True,
+            False,
+            None,
+            [],
+            id='jpeg-raw-pair',
+        ),
+        pytest.param(
+            'RAW_ONLY',
+            'RAW_ONLY.CR3',
+            None,
+            None,
+            False,
+            True,
+            False,
+            (20, 130, 90),
+            [('RAW_ONLY', 'viewer')],
+            id='raw-only',
+        ),
+        pytest.param(
+            'HEIC_ONLY',
+            'HEIC_ONLY.HEIC',
+            None,
+            None,
+            False,
+            False,
+            True,
+            (140, 90, 20),
+            [('HEIC_ONLY', 'viewer')],
+            id='heic-only',
+        ),
+    ],
+)
+def test_copy_photo_pixels_selects_clipboard_source(
         tmp_path: Path,
+        photo_id: str,
+        source_name: str,
+        source_color: tuple[int, int, int] | None,
+        metadata_name: str | None,
+        has_jpeg: bool,
+        has_raw: bool,
+        has_heif: bool,
+        preview_color: tuple[int, int, int] | None,
+        expected_preview_calls: list[tuple[str, str]],
 ) -> None:
     """
-    Verify RAW-only records copy the rendered viewer preview pixels.
+    Verify each record shape uses the expected clipboard image source.
 
-    RAW files are not suitable clipboard images by themselves, so the helper
-    must request the same rendered preview path used by the viewer.
+    JPEG-backed records should copy their original JPEG pixels, while RAW-only
+    and HEIC-only records should copy the pasteable rendered viewer preview.
     """
     app = QApplication.instance() or QApplication([])
-    raw_path = tmp_path / 'RAW_ONLY.CR3'
-    preview_path = tmp_path / 'preview.jpg'
-    raw_path.write_bytes(b'raw')
-    expected_color = (20, 130, 90)
-    _create_color_jpeg(preview_path, expected_color)
+    source_path = tmp_path / source_name
+    if source_color is None:
+        source_path.write_bytes(source_name.lower().encode())
+    else:
+        _create_color_jpeg(source_path, source_color)
+
+    metadata_path = None
+    if metadata_name is not None:
+        metadata_path = tmp_path / metadata_name
+        metadata_path.write_bytes(b'raw')
+
+    preview_paths = {}
+    if preview_color is not None:
+        preview_path = tmp_path / f'{photo_id}-preview.jpg'
+        _create_color_jpeg(preview_path, preview_color)
+        preview_paths[photo_id] = preview_path
+
     library = FakeLibrary(
         {
-            'RAW_ONLY': _photo_record(
-                'RAW_ONLY',
-                preview_source=raw_path,
-                has_jpeg=False,
-                has_raw=True,
+            photo_id: _photo_record(
+                photo_id,
+                preview_source=source_path,
+                metadata_source=metadata_path,
+                has_jpeg=has_jpeg,
+                has_raw=has_raw,
+                has_heif=has_heif,
             )
         },
-        {'RAW_ONLY': preview_path},
+        preview_paths,
     )
-
-    assert copy_photo_pixels_to_clipboard(cast('Any', library), 'RAW_ONLY')
-
-    assert library.preview_calls == [('RAW_ONLY', 'viewer')]
-    _assert_close_rgb(_clipboard_pixel(), expected_color)
-    del app
-
-
-def test_copy_photo_pixels_uses_viewer_preview_for_heic_only(
-        tmp_path: Path,
-) -> None:
-    """
-    Verify HEIC-only records copy the rendered viewer preview pixels.
-
-    HEIC source files are raster photos, but the clipboard contract uses the
-    pasteable viewer render when no JPEG companion is available.
-    """
-    app = QApplication.instance() or QApplication([])
-    heic_path = tmp_path / 'HEIC_ONLY.HEIC'
-    preview_path = tmp_path / 'heic-preview.jpg'
-    heic_path.write_bytes(b'heic')
-    expected_color = (140, 90, 20)
-    _create_color_jpeg(preview_path, expected_color)
-    library = FakeLibrary(
-        {
-            'HEIC_ONLY': _photo_record(
-                'HEIC_ONLY',
-                preview_source=heic_path,
-                has_jpeg=False,
-                has_raw=False,
-                has_heif=True,
-            )
-        },
-        {'HEIC_ONLY': preview_path},
+    expected_color = (
+        source_color if source_color is not None else preview_color
     )
+    assert expected_color is not None
 
-    assert copy_photo_pixels_to_clipboard(cast('Any', library), 'HEIC_ONLY')
+    assert copy_photo_pixels_to_clipboard(cast('Any', library), photo_id)
 
-    assert library.preview_calls == [('HEIC_ONLY', 'viewer')]
+    assert library.preview_calls == expected_preview_calls
     _assert_close_rgb(_clipboard_pixel(), expected_color)
     del app
