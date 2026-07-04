@@ -49,6 +49,7 @@ def test_shortcut_help_catalog_covers_each_context() -> None:
         for row in group.rows
     ]
     assert any(row.shortcut == 'G / Enter' for row in photo_viewer_rows)
+    assert any(row.shortcut == 'Ctrl+C' for row in photo_viewer_rows)
     assert any(row.shortcut == 'J' for row in photo_viewer_rows)
 
     empty_rows = [
@@ -57,6 +58,7 @@ def test_shortcut_help_catalog_covers_each_context() -> None:
         for row in group.rows
     ]
     assert any(row.shortcut == 'Ctrl+O' for row in empty_rows)
+    assert not any(row.shortcut == 'Ctrl+C' for row in empty_rows)
 
     no_scene_rows = [
         row
@@ -66,6 +68,7 @@ def test_shortcut_help_catalog_covers_each_context() -> None:
         for row in group.rows
     ]
     assert any(row.shortcut == 'Ctrl+Shift+M' for row in no_scene_rows)
+    assert any(row.shortcut == 'Ctrl+C' for row in no_scene_rows)
     assert any(row.shortcut == 'J' for row in no_scene_rows)
     assert not any(row.shortcut == 'Left / Right' for row in no_scene_rows)
     assert not any(
@@ -87,6 +90,7 @@ def test_shortcut_help_catalog_covers_each_context() -> None:
         for row in group.rows
     ]
     assert any(row.shortcut == 'Left / Right' for row in culling_rows)
+    assert any(row.shortcut == 'Ctrl+C' for row in culling_rows)
     assert any(row.shortcut == 'J' for row in culling_rows)
     assert any(
         row.shortcut == 'Shift+Left / Shift+Right' for row in culling_rows
@@ -106,6 +110,7 @@ def test_shortcut_help_catalog_covers_each_context() -> None:
     assert any(row.shortcut == 'Ctrl+O' for row in browse_rows)
     assert any(row.shortcut == 'Ctrl+D' for row in browse_rows)
     assert any(row.shortcut == 'Ctrl+Shift+E' for row in browse_rows)
+    assert not any(row.shortcut == 'Ctrl+C' for row in browse_rows)
 
     compare_rows = [
         row
@@ -114,6 +119,7 @@ def test_shortcut_help_catalog_covers_each_context() -> None:
     ]
     assert any(row.shortcut == 'Arrow keys' for row in compare_rows)
     assert any(row.shortcut == 'J' for row in compare_rows)
+    assert not any(row.shortcut == 'Ctrl+C' for row in compare_rows)
     compare_esc_rows = [
         row.description for row in compare_rows if row.shortcut == 'Esc'
     ]
@@ -130,6 +136,7 @@ def test_shortcut_help_catalog_covers_each_context() -> None:
     ]
     assert any(row.shortcut == 'G' for row in selected_compare_rows)
     assert any(row.shortcut == 'J' for row in selected_compare_rows)
+    assert not any(row.shortcut == 'Ctrl+C' for row in selected_compare_rows)
     selected_compare_esc_rows = [
         row.description
         for row in selected_compare_rows
@@ -158,6 +165,7 @@ def test_shortcut_help_formats_modifier_labels_for_platform(
 
     assert shortcut_help_module.shortcut_modifier_label() == 'Cmd'
     assert shortcut_help_module.format_shortcut_label('Ctrl+O') == 'Cmd+O'
+    assert shortcut_help_module.format_shortcut_label('Ctrl+C') == 'Cmd+C'
     assert shortcut_help_module.format_shortcut_label('Ctrl+W') == 'Cmd+W'
     assert (
         shortcut_help_module.format_shortcut_label('Ctrl+Shift+F')
@@ -254,6 +262,7 @@ def test_shortcut_help_overlay_renders_mac_modifier_labels(
         for label in overlay.findChildren(QLabel, 'shortcutHelpShortcutLabel')
     }
     assert 'Cmd+O' in shortcut_texts
+    assert 'Cmd+C' in shortcut_texts
     assert 'Cmd+W' in shortcut_texts
     assert 'Cmd+Shift+F' in shortcut_texts
     assert 'Cmd+Shift+M' in shortcut_texts

@@ -47,6 +47,7 @@ from easy_loupe.ui.defaults import (
     DEFAULT_SHOW_CLIPPING,
 )
 from easy_loupe.ui.identity import APP_NAME, APP_VERSION
+from easy_loupe.ui.photo_clipboard import copy_photo_pixels_to_clipboard
 from easy_loupe.ui.progress_overlay import (
     ProgressOverlayController,
     build_progress_overlay,
@@ -1020,6 +1021,9 @@ class MainWindowBuildMixin:
         self.info_overlay_shortcut = self._make_shortcut(
             'I', self._toggle_info_overlay
         )
+        self.copy_photo_shortcut = self._make_shortcut(
+            'Ctrl+C', self._copy_current_photo_to_clipboard
+        )
         self.compare_mode_shortcut = self._make_shortcut(
             'C', self._enter_compare_mode
         )
@@ -1152,6 +1156,11 @@ class MainWindowBuildMixin:
         )
         self.info_overlay_shortcut.setEnabled(
             workspace_shortcuts_enabled and bool(self.library.photos)
+        )
+        self.copy_photo_shortcut.setEnabled(
+            normal_view_shortcuts_enabled
+            and bool(self.library.photos)
+            and self.current_photo_id is not None
         )
         self.exit_compare_shortcut.setEnabled(
             self._compare_mode
@@ -1371,6 +1380,22 @@ class MainWindowBuildMixin:
         self._update_info_overlay_geometry()
         self.exif_overlay.show()
         self.exif_overlay.raise_()
+
+    def _copy_current_photo_to_clipboard(self: MainWindow) -> None:
+        """Copy the current normal-view photo to the system clipboard."""
+        if (
+            self.current_photo_id is None
+            or not self.library.photos
+            or self._browse_mode
+            or self._compare_mode
+        ):
+            return
+
+        if copy_photo_pixels_to_clipboard(self.library, self.current_photo_id):
+            self._show_transient_message('Copied image to clipboard')
+            return
+
+        self._show_transient_message('Could not copy image to clipboard')
 
     def _info_overlay_geometry_ready(self: MainWindow) -> bool:
         """Return whether the viewer stack is large enough for the overlay."""

@@ -18,6 +18,7 @@ from easy_loupe.ui.photo_viewer.window import PhotoViewerWindow
 from easy_loupe.ui.photo_viewer.workers import PhotoViewerExifResult
 from tests.ui._helpers import (
     create_jpeg,
+    image_pixel_rgb,
     process_events_until,
     set_qt_active_window,
     stub_read_exif,
@@ -517,6 +518,42 @@ def test_photo_viewer_ctrl_w_closes_only_that_window(
     first_window.deleteLater()
     second_window.deleteLater()
     app.processEvents()
+
+
+def test_photo_viewer_ctrl_c_copies_current_photo_pixels(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify real key dispatch copies the standalone-viewer photo pixels.
+
+    The clipboard must receive an image payload suitable for paste targets, not
+    text and not a filesystem path.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'blue')
+    app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+    QApplication.clipboard().clear()
+
+    _assert_window_shortcut(window.copy_photo_shortcut, 'Ctrl+C')
+
+    # Route through a real focused WindowShortcut event so this covers Qt key
+    # dispatch, not just the shortcut's connected slot.
+    set_qt_active_window(window)
+    app.processEvents()
+    QTest.keyClick(window, Qt.Key_C, Qt.ControlModifier)
+    app.processEvents()
+
+    clipboard_image = QApplication.clipboard().image()
+    assert not clipboard_image.isNull()
+    red, green, blue = image_pixel_rgb(clipboard_image, 0, 0)
+    assert blue > red
+    assert blue > green
+    assert window.transient_message_label.text() == (
+        'Copied image to clipboard'
+    )
+
+    window.close()
+    del app
 
 
 def test_photo_viewer_registers_windows_alt_f4_close_shortcut(

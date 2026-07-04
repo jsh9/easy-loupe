@@ -418,6 +418,8 @@ Current shortcut coverage in code includes:
   exists
 - `Ctrl+Shift+F`: reset remembered manual zoom centers to AF points or image
   centers while preserving remembered zoom levels
+- `Ctrl+C`: copy the current single-photo viewer image to the system clipboard
+  as pixels; this appears as `Cmd+C` on macOS
 - `I`: toggle the normal-view EXIF and RGB histogram overlay
 - `J`: toggle the `Show Clipping` red/blue highlight and shadow clipping
   overlay in viewer panes
@@ -460,6 +462,13 @@ wired to application quit.
 per-window close path as the window control. `File > Close App` is an explicit
 menu-only command with no shortcut; it asks `WindowManager` to close every
 retained EasyLoupe window through the same deferred-close paths.
+
+`Ctrl+C`/`Cmd+C` copies the whole underlying photo image in standalone
+photo-viewer mode and the culling workspace's normal single/split main viewer.
+It does not copy a file path, zoom crop, or overlay pixels. JPEG-backed records
+copy the original JPEG source; RAW-only and HEIC/HEIF-only records copy the
+rendered `"viewer"` preview. Browse and compare views do not expose this
+shortcut because multiple photos may be visible.
 
 Window close while scene detection or organizer/undo work is active must hide
 the visible window immediately, request best-effort worker shutdown, and defer

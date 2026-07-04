@@ -614,6 +614,7 @@ def _photo_viewer_groups() -> tuple[ShortcutHelpGroup, ...]:
                 ShortcutHelpRow('\\', 'Toggle split view'),
                 ShortcutHelpRow('- / = / +', 'Zoom out or in'),
                 ShortcutHelpRow('W / A / S / D', 'Pan the zoomed view'),
+                ShortcutHelpRow('Ctrl+C', 'Copy the image to the clipboard'),
             ),
         ),
         ShortcutHelpGroup(
@@ -860,6 +861,7 @@ def _inspection_group() -> ShortcutHelpGroup:
         (
             ShortcutHelpRow('- / = / +', 'Zoom out or in'),
             ShortcutHelpRow('W / A / S / D', 'Pan the zoomed view'),
+            ShortcutHelpRow('Ctrl+C', 'Copy the image to the clipboard'),
             ShortcutHelpRow('F', 'Toggle the AF point marker'),
             ShortcutHelpRow(
                 'Shift+F',

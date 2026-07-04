@@ -27,6 +27,7 @@ from easy_loupe.ui.viewers.exif_overlay import HISTOGRAM_HEIGHT
 from tests.ui._helpers import (
     create_jpeg,
     create_main_window_with_library,
+    image_pixel_rgb,
     set_qt_active_window,
     stub_read_exif,
 )
@@ -1932,6 +1933,86 @@ def test_main_window_ctrl_w_closes_only_that_window() -> None:
     first_window.deleteLater()
     second_window.deleteLater()
     app.processEvents()
+
+
+def test_main_window_ctrl_c_copies_current_photo_pixels(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify real key dispatch copies the normal-view photo as image pixels.
+
+    Ctrl/Cmd+C is intended for paste targets such as slide decks, so this test
+    checks the clipboard image payload rather than a path or text value.
+    """
+    _theme_module, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_COPY', 'red')],
+    )
+    QApplication.clipboard().clear()
+
+    assert_window_shortcut(window.copy_photo_shortcut, 'Ctrl+C')
+
+    # Route through a real focused WindowShortcut event so this covers Qt key
+    # dispatch, not just the shortcut's connected slot.
+    set_qt_active_window(window)
+    app.processEvents()
+    QTest.keyClick(window, Qt.Key_C, Qt.ControlModifier)
+    app.processEvents()
+
+    clipboard_image = QApplication.clipboard().image()
+    assert not clipboard_image.isNull()
+    red, green, blue = image_pixel_rgb(clipboard_image, 0, 0)
+    assert red > green
+    assert red > blue
+    assert window.transient_message_label.text() == (
+        'Copied image to clipboard'
+    )
+
+    window.close()
+    del app
+
+
+def test_main_window_copy_shortcut_is_single_photo_view_only(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify browse and compare modes do not expose image copy.
+
+    Those modes can show multiple photos at once, so the shortcut should stay
+    unavailable instead of choosing an ambiguous clipboard target.
+    """
+    _theme_module, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_COPY_A', 'red'), ('IMG_COPY_B', 'blue')],
+    )
+
+    assert window.copy_photo_shortcut.isEnabled() is True
+
+    window.browse_mode_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._browse_mode is True
+    assert window.copy_photo_shortcut.isEnabled() is False
+
+    window.space_shortcut.activated.emit()
+    app.processEvents()
+    _select_photo_ids(
+        window.thumbnail_list,
+        ['IMG_COPY_A', 'IMG_COPY_B'],
+        set_current=True,
+    )
+    window.compare_mode_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window._compare_mode is True
+    assert window.copy_photo_shortcut.isEnabled() is False
+
+    window.close()
+    del app
 
 
 def test_main_window_registers_windows_alt_f4_close_shortcut(
