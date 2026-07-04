@@ -121,6 +121,7 @@ class MainWindowWorkflowMixin:
         )
         self._clear_metadata_history()
         self._hide_progress()
+        self._set_main_view_frozen_after_move_organize(frozen=False)
         self.open_button.setEnabled(True)
         self._refresh_ui()
         self._restore_active_navigation_focus(defer=True)
@@ -177,6 +178,7 @@ class MainWindowWorkflowMixin:
         self._initial_folder_prompt_timer.stop()
         self._rebuild_loaded_views(preserve_current_photo=True)
         self._clear_metadata_history()
+        self._set_main_view_frozen_after_move_organize(frozen=False)
         if request.enter_browse and self.library.photos:
             self._enter_browse_mode()
 
@@ -186,6 +188,7 @@ class MainWindowWorkflowMixin:
         """Start asynchronous scene detection for the loaded photo set."""
         if (
             self._busy
+            or self._main_view_frozen_after_move_organize
             or not self.library.photos
             or self._background_task_active()
         ):
@@ -238,7 +241,11 @@ class MainWindowWorkflowMixin:
 
     def open_organizer_dialog(self: MainWindow) -> None:
         """Prompt for organizer options and start the selected workflow."""
-        if self._busy or not self.library.photos:
+        if (
+            self._busy
+            or self._main_view_frozen_after_move_organize
+            or not self.library.photos
+        ):
             return
 
         dialog = OrganizerDialog(
@@ -252,7 +259,11 @@ class MainWindowWorkflowMixin:
     def _start_organizer_request(
             self: MainWindow, request: OrganizerDialogResult
     ) -> None:
-        if self._busy or self.library.current_folder is None:
+        if (
+            self._busy
+            or self._main_view_frozen_after_move_organize
+            or self.library.current_folder is None
+        ):
             return
 
         self._operation_kind = 'run'
@@ -494,8 +505,15 @@ class MainWindowWorkflowMixin:
 
         assert isinstance(summary, OperationSummary)
         request = self._organizer_request
+        should_freeze_after_move = self._organizer_request_moves_files(request)
 
         self._hide_progress()
+        if should_freeze_after_move:
+            # Move organization can invalidate the loaded photo paths. Freeze
+            # before showing the finished dialog so dismissing it cannot return
+            # focus to now-stale navigation or tagging controls.
+            self._set_main_view_frozen_after_move_organize(frozen=True)
+
         self._refresh_ui()
         should_undo = self._show_operation_finished_dialog(summary, request)
         self._organizer_request = None
@@ -504,7 +522,20 @@ class MainWindowWorkflowMixin:
             self._start_undo_operation(summary.undo_plan)
             return
 
-        self._restore_active_navigation_focus(defer=True)
+        if not self._main_view_frozen_after_move_organize:
+            self._restore_active_navigation_focus(defer=True)
+
+    @staticmethod
+    def _organizer_request_moves_files(
+            request: OrganizerDialogResult | None,
+    ) -> bool:
+        """Return whether the organizer request moved source files."""
+        return (
+            request is not None
+            and request.mode == 'reorganize'
+            and request.organize_options is not None
+            and request.organize_options.action == 'move'
+        )
 
     def _handle_operation_failed(self: MainWindow, error: str) -> None:
         if self._closing:
@@ -609,6 +640,7 @@ class MainWindowWorkflowMixin:
             return
 
         self._hide_progress()
+        self._set_main_view_frozen_after_move_organize(frozen=False)
         self._refresh_ui()
         self._operation_kind = None
         QMessageBox.information(
@@ -827,7 +859,10 @@ class MainWindowWorkflowMixin:
     def _apply_metadata_to_selection(
             self: MainWindow, field: str, value: Any
     ) -> None:
-        if self.current_photo_id is None:
+        if (
+            self._main_view_frozen_after_move_organize
+            or self.current_photo_id is None
+        ):
             return
 
         if not hasattr(self.library, 'get_photo'):
@@ -862,7 +897,11 @@ class MainWindowWorkflowMixin:
         self._refresh_metadata_history_actions()
 
     def _undo_metadata_edit(self: MainWindow) -> None:
-        if self._busy or not self._metadata_undo_stack:
+        if (
+            self._busy
+            or self._main_view_frozen_after_move_organize
+            or not self._metadata_undo_stack
+        ):
             return
 
         edit = self._metadata_undo_stack.pop()
@@ -881,7 +920,11 @@ class MainWindowWorkflowMixin:
         self._refresh_metadata_history_actions()
 
     def _redo_metadata_edit(self: MainWindow) -> None:
-        if self._busy or not self._metadata_redo_stack:
+        if (
+            self._busy
+            or self._main_view_frozen_after_move_organize
+            or not self._metadata_redo_stack
+        ):
             return
 
         edit = self._metadata_redo_stack.pop()
@@ -1258,6 +1301,7 @@ class MainWindowWorkflowMixin:
     def _refresh_metadata_history_actions(self: MainWindow) -> None:
         enabled = (
             not self._busy
+            and not self._main_view_frozen_after_move_organize
             and self.menuBar().isEnabled()
             and not self._shortcut_help_modal_active()
         )
@@ -1361,8 +1405,14 @@ class MainWindowWorkflowMixin:
         )
 
     def _set_interaction_enabled(self: MainWindow, *, enabled: bool) -> None:
+        # ``enabled`` tracks temporary modal work. ``workspace_enabled`` also
+        # honors the persistent post-move freeze so worker cleanup cannot
+        # accidentally re-enable controls that point at moved file paths.
+        workspace_enabled = (
+            enabled and not self._main_view_frozen_after_move_organize
+        )
         photo_actions_enabled = (
-            enabled
+            workspace_enabled
             and not self._background_task_active()
             and bool(self.library.photos)
         )
@@ -1370,20 +1420,23 @@ class MainWindowWorkflowMixin:
         self.detect_button.setEnabled(photo_actions_enabled)
         self.organize_button.setEnabled(photo_actions_enabled)
         self.filter_button.setEnabled(
-            enabled and bool(self.library.photos) and not self._compare_mode
+            workspace_enabled
+            and bool(self.library.photos)
+            and not self._compare_mode
         )
         self.theme_toggle.setEnabled(enabled)
-        self.show_af_point_toggle.setEnabled(enabled)
-        self.show_clipping_toggle.setEnabled(enabled)
-        self.photo_load_recursively_checkbox.setEnabled(enabled)
+        self.show_af_point_toggle.setEnabled(workspace_enabled)
+        self.show_clipping_toggle.setEnabled(workspace_enabled)
+        self.photo_load_recursively_checkbox.setEnabled(workspace_enabled)
         for button in self.photo_sort_buttons.values():
-            button.setEnabled(enabled)
+            button.setEnabled(workspace_enabled)
 
-        self.photo_sort_reverse_checkbox.setEnabled(enabled)
-        self.thumbnail_list.setEnabled(enabled)
-        self.browse_list.setEnabled(enabled)
-        self.scene_list.setEnabled(enabled)
-        self.compare_viewer.setEnabled(enabled)
+        self.photo_sort_reverse_checkbox.setEnabled(workspace_enabled)
+        self.thumbnail_list.setEnabled(workspace_enabled)
+        self.browse_list.setEnabled(workspace_enabled)
+        self.scene_list.setEnabled(workspace_enabled)
+        self.viewer.setEnabled(workspace_enabled)
+        self.compare_viewer.setEnabled(workspace_enabled)
         self.menuBar().setEnabled(enabled)
         self._refresh_file_actions(
             open_enabled=enabled,

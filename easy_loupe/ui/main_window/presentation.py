@@ -109,6 +109,7 @@ class MainWindowPresentationMixin:
     def _show_photo_filter_menu(self: MainWindow) -> None:
         if (
             self._busy
+            or self._main_view_frozen_after_move_organize
             or self._compare_mode
             or self._shortcut_help_modal_active()
             or not self.library.photos
@@ -124,7 +125,11 @@ class MainWindowPresentationMixin:
     def _apply_photo_filter(
             self: MainWindow, selection: PhotoFilterSelection
     ) -> None:
-        if self._busy or self._compare_mode:
+        if (
+            self._busy
+            or self._main_view_frozen_after_move_organize
+            or self._compare_mode
+        ):
             return
 
         if selection == self._photo_filter_selection:
@@ -159,6 +164,7 @@ class MainWindowPresentationMixin:
 
         self.filter_button.setEnabled(
             not self._busy
+            and not self._main_view_frozen_after_move_organize
             and not self._compare_mode
             and not self._shortcut_help_modal_active()
             and total_count > 0
@@ -828,31 +834,8 @@ class MainWindowPresentationMixin:
             }}
             """
         )
-        self.transient_message_overlay.setStyleSheet(
-            """
-            QWidget#transientMessageOverlay {
-                background-color: rgba(20, 24, 29, 90);
-            }
-            """
-        )
-        self.transient_message_label.setStyleSheet(
-            f"""
-            QLabel {{
-                color: {ttc};
-                font-size: {TRANSIENT_MESSAGE_FONT_SIZE_PX}px;
-                font-weight: {TRANSIENT_MESSAGE_FONT_WEIGHT};
-            }}
-            """
-        )
-        self.transient_message_panel.setStyleSheet(
-            f"""
-            QFrame#transientMessagePanel {{
-                background-color: {self.current_theme.viewer_background};
-                border: 1px solid {self.current_theme.button_border};
-                border-radius: 12px;
-            }}
-            """
-        )
+        self._apply_transient_message_overlay_theme(ttc)
+        self._apply_move_organize_frozen_overlay_theme(ttc)
         self.theme_toggle.setStyleSheet(
             f"""
             QCheckBox {{
@@ -882,6 +865,75 @@ class MainWindowPresentationMixin:
         self._refresh_item_styles(self.browse_list)
         self._refresh_item_styles(self.scene_list)
         self._refresh_strip_items()
+
+    def _apply_transient_message_overlay_theme(
+            self: MainWindow, text_color: str
+    ) -> None:
+        self.transient_message_overlay.setStyleSheet(
+            """
+            QWidget#transientMessageOverlay {
+                background-color: rgba(20, 24, 29, 90);
+            }
+            """
+        )
+        self.transient_message_label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: {text_color};
+                font-size: {TRANSIENT_MESSAGE_FONT_SIZE_PX}px;
+                font-weight: {TRANSIENT_MESSAGE_FONT_WEIGHT};
+            }}
+            """
+        )
+        self.transient_message_panel.setStyleSheet(
+            f"""
+            QFrame#transientMessagePanel {{
+                background-color: {self.current_theme.viewer_background};
+                border: 1px solid {self.current_theme.button_border};
+                border-radius: 12px;
+            }}
+            """
+        )
+
+    def _apply_move_organize_frozen_overlay_theme(
+            self: MainWindow, text_color: str
+    ) -> None:
+        self.move_organize_frozen_overlay.setStyleSheet(
+            """
+            QWidget#moveOrganizeFrozenOverlay {
+                background-color: rgba(20, 24, 29, 125);
+            }
+            """
+        )
+        self.move_organize_frozen_panel.setStyleSheet(
+            f"""
+            QFrame#moveOrganizeFrozenPanel {{
+                background-color: {self.current_theme.viewer_background};
+                border: 1px solid {self.current_theme.button_border};
+                border-radius: 12px;
+            }}
+            """
+        )
+        self.move_organize_frozen_title_label.setStyleSheet(
+            f"""
+            QLabel#moveOrganizeFrozenTitle {{
+                color: {text_color};
+                font-size: 18px;
+                font-weight: 700;
+                background: transparent;
+            }}
+            """
+        )
+        self.move_organize_frozen_detail_label.setStyleSheet(
+            f"""
+            QLabel#moveOrganizeFrozenDetail {{
+                color: {text_color};
+                font-size: 14px;
+                font-weight: 500;
+                background: transparent;
+            }}
+            """
+        )
 
     def _is_item_selected(
             self: MainWindow, list_widget: QListWidget, photo_id: str | None
@@ -1262,8 +1314,10 @@ class MainWindowPresentationMixin:
             widget.set_visible_region_overlay(overlay)
 
     def _refresh_ui(self: MainWindow) -> None:
-        photo_actions_enabled = not self._background_task_active() and bool(
-            self.library.photos
+        photo_actions_enabled = (
+            not self._background_task_active()
+            and bool(self.library.photos)
+            and not self._main_view_frozen_after_move_organize
         )
         folder_text = (
             str(self.library.current_folder)
@@ -1279,6 +1333,7 @@ class MainWindowPresentationMixin:
         if hasattr(self, 'compare_mode_shortcut'):
             self._update_mode_shortcuts()
 
+        self._refresh_move_organize_frozen_overlay()
         if self.current_photo_id is None or not self.library.photos:
             self._refresh_strip_items()
             if not self._browse_mode:

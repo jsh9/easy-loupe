@@ -140,8 +140,13 @@ Major logic:
   as scene detection.
 - While the overlay is active, interaction, assignment actions, and organizer
   entry points are disabled.
-- Successful move-based reorganization and XMP writing do not reload the
-  current folder before the finished dialog is shown.
+- Successful move-based reorganization does not reload the current folder, but
+  it freezes the main photo workspace with a visible message because loaded
+  photo paths may now point at moved files. The frozen state blocks navigation,
+  tagging, filtering, sorting, scene detection, and organizer entry until the
+  user opens another folder or immediately undoes the move.
+- Successful copy-based reorganization and XMP writing keep the current folder
+  loaded and interactive because source photo paths remain valid.
 - Completed organizer/XMP runs show a summary dialog with an immediate `Undo`
   action when an undo plan is available.
 

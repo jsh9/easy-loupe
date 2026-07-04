@@ -13,7 +13,8 @@
   - Clarified the picked/rejected two-folder organizer options and matching
     output folders as `Not picked` and `Not rejected`.
   - Move-based photo organization no longer re-imports the current folder after
-    completion.
+    completion. After files are moved, the main photo workspace freezes with a
+    message until the user opens another folder or immediately undoes the move.
 
 ## [1.4.1] - 2026-07-04
 
