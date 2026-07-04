@@ -6,6 +6,8 @@
 
   - Clarified the picked/rejected two-folder organizer options as `Not picked`
     and `Not rejected` in the `Organize Photos` dialog.
+  - Move-based photo organization no longer re-imports the current folder after
+    completion.
 
 ## [1.4.1] - 2026-07-04
 

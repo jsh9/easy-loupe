@@ -137,9 +137,8 @@ Major logic:
   as scene detection.
 - While the overlay is active, interaction, assignment actions, and organizer
   entry points are disabled.
-- Successful move-based reorganization reloads the current folder before the
-  finished dialog is shown. Successful XMP writing does not reload the current
-  folder.
+- Successful move-based reorganization and XMP writing do not reload the
+  current folder before the finished dialog is shown.
 - Completed organizer/XMP runs show a summary dialog with an immediate `Undo`
   action when an undo plan is available.
 
@@ -191,7 +190,6 @@ Major logic:
   changes.
 - Verify undo restores files and existing sidecars correctly and remains
   single-use.
-- Verify move-based completion reloads the folder while XMP completion does
-  not.
+- Verify move-based organization and XMP completion do not reload the folder.
 - Verify busy-state disabling and finished/error dialog titles still match the
   workflow being run.

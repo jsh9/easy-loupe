@@ -494,24 +494,6 @@ class MainWindowWorkflowMixin:
 
         assert isinstance(summary, OperationSummary)
         request = self._organizer_request
-        try:
-            if (
-                request is not None
-                and request.mode == 'reorganize'
-                and request.organize_options is not None
-                and request.organize_options.action == 'move'
-            ):
-                self._reload_current_folder_after_move()
-        except Exception as exc:  # noqa: BLE001 - surface unexpected reload errors in the UI
-            self._hide_progress()
-            self._organizer_request = None
-            QMessageBox.critical(
-                self,
-                'Folder Reload Failed',
-                'File organization completed, but the folder could not be'
-                f' reloaded:\n{exc}',
-            )
-            return
 
         self._hide_progress()
         self._refresh_ui()
@@ -635,19 +617,6 @@ class MainWindowWorkflowMixin:
             'The last photo organization operation was undone.',
         )
         self._restore_active_navigation_focus(defer=True)
-
-    def _reload_current_folder_after_move(self: MainWindow) -> None:
-        current_folder = self.library.current_folder
-        if current_folder is None:
-            return
-
-        reporter = self._folder_load_progress_reporter()
-        self.library.load_folder(current_folder, progress_reporter=reporter)
-        self._reset_photo_filter_selection()
-        self._rebuild_loaded_views(
-            show_progress=True, progress_reporter=reporter
-        )
-        self._clear_metadata_history()
 
     def _reload_current_folder_after_undo(self: MainWindow) -> None:
         current_folder = self.library.current_folder

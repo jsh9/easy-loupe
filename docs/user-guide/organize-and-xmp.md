@@ -55,5 +55,6 @@ shown. Interaction and metadata assignment are paused until the operation
 finishes.
 
 When an operation can be undone, the finished dialog offers an immediate undo
-action. Move-based organization reloads the current folder after completion or
-undo so the visible folder state matches the filesystem.
+action. Move-based organization does not reload the current folder after
+completion; undo reloads after restoring the moved files so the visible folder
+state matches the filesystem again.

@@ -2368,23 +2368,14 @@ def test_main_window_choose_folder_progress_reports_all_load_stages(
     del app
 
 
-@pytest.mark.parametrize(
-    'reload_method_name',
-    [
-        pytest.param('_reload_current_folder_after_move', id='after-move'),
-        pytest.param('_reload_current_folder_after_undo', id='after-undo'),
-    ],
-)
-def test_main_window_post_operation_reload_progress_reports_all_load_stages(
+def test_main_window_undo_reload_progress_reports_all_load_stages(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
-        reload_method_name: str,
 ) -> None:
     """
-    Verify post-operation folder reloads keep structured progress wired.
+    Verify post-undo folder reloads keep structured progress wired.
 
-    Move and undo completion reload the current folder through separate helper
-    methods. They should reuse the same multi-stage load/list reporter as a
+    Undo completion should reuse the same multi-stage load/list reporter as a
     manual folder open instead of falling back to stale scalar operation text.
     """
     _, app, window = create_main_window_with_library(
@@ -2414,7 +2405,7 @@ def test_main_window_post_operation_reload_progress_reports_all_load_stages(
     window.library.set_load_recursively(False)
     window._show_progress('Operation complete', 50)
 
-    getattr(window, reload_method_name)()
+    window._reload_current_folder_after_undo()
     app.processEvents()
 
     rows = window.progress_stage_list._rows
@@ -3499,7 +3490,7 @@ def test_main_window_finished_dialog_uses_expected_title_and_undo_button(
     del app
 
 
-def test_main_window_operation_finished_after_move_reloads_folder_and_shows_dialog(
+def test_main_window_operation_finished_after_move_skips_reload_and_shows_dialog(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _, app, window = create_main_window_with_library(
@@ -3512,9 +3503,9 @@ def test_main_window_operation_finished_after_move_reloads_folder_and_shows_dial
         tuple[OperationSummary, OrganizerDialogResult | None]
     ] = []
     monkeypatch.setattr(
-        window,
-        '_reload_current_folder_after_move',
-        lambda: reload_calls.append('reload'),
+        window.library,
+        'load_folder',
+        lambda *_args, **_kwargs: reload_calls.append('reload'),
     )
     monkeypatch.setattr(
         window,
@@ -3544,7 +3535,7 @@ def test_main_window_operation_finished_after_move_reloads_folder_and_shows_dial
         )
     )
 
-    assert reload_calls == ['reload']
+    assert reload_calls == []
     assert window._busy is False
     assert window._operation_kind is None
     assert len(dialog_calls) == 1
@@ -3569,9 +3560,9 @@ def test_main_window_xmp_operation_finished_shows_dialog_without_reload(
         tuple[OperationSummary, OrganizerDialogResult | None]
     ] = []
     monkeypatch.setattr(
-        window,
-        '_reload_current_folder_after_move',
-        lambda: reload_calls.append('reload'),
+        window.library,
+        'load_folder',
+        lambda *_args, **_kwargs: reload_calls.append('reload'),
     )
     monkeypatch.setattr(
         window,
