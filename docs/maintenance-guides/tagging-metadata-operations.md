@@ -125,10 +125,9 @@ Major logic:
   `Reorganize Files` and `Write XMP`.
 - Reorganize mode supports criterion, action, output parent selection, and
   conflict policy. Picked/rejected organization exposes explicit child folder
-  modes for `Picked`, `Rejected`, `Untagged`, and `Others` buckets. The dialog
-  labels the two-folder `Others` variants as `Not picked` and `Not rejected`.
-  Color-label and rating organization each expose their own optional `Untagged`
-  checkbox.
+  modes for `Picked`, `Rejected`, `Untagged`, `Not picked`, and `Not rejected`
+  buckets. Color-label and rating organization each expose their own optional
+  `Untagged` checkbox.
 - Reorganize mode can optionally split JPG/JPEG and RAW outputs when both
   formats exist in the loaded folder. The split keeps metadata buckets first,
   then writes files under `jpg` or `raw` child folders. Shared XMP sidecars for

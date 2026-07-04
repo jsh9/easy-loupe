@@ -953,7 +953,7 @@ def _expected_flag_bucket_files(
     if flag_folder_mode == 'picked_others':
         return {
             'Picked': {'IMG_A.JPG'},
-            'Others': {
+            'Not picked': {
                 'IMG_B.CR3',
                 'IMG_B.XMP',
                 'IMG_C.CR3',
@@ -965,7 +965,7 @@ def _expected_flag_bucket_files(
     if flag_folder_mode == 'rejected_others':
         return {
             'Rejected': {'IMG_B.CR3', 'IMG_B.XMP'},
-            'Others': {
+            'Not rejected': {
                 'IMG_A.JPG',
                 'IMG_C.CR3',
                 'IMG_C.JPG',

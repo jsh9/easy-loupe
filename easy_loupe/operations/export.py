@@ -452,10 +452,10 @@ def _target_flag_folder_name(
         return None
 
     if flag_folder_mode == 'picked_others':
-        return 'Picked' if photo.flag == 'picked' else 'Others'
+        return 'Picked' if photo.flag == 'picked' else 'Not picked'
 
     if flag_folder_mode == 'rejected_others':
-        return 'Rejected' if photo.flag == 'rejected' else 'Others'
+        return 'Rejected' if photo.flag == 'rejected' else 'Not rejected'
 
     if flag_folder_mode == 'picked_only':
         return 'Picked' if photo.flag == 'picked' else None
