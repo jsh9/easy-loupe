@@ -125,8 +125,10 @@ Major logic:
   `Reorganize Files` and `Write XMP`.
 - Reorganize mode supports criterion, action, output parent selection, and
   conflict policy. Picked/rejected organization exposes explicit child folder
-  modes for `Picked`, `Rejected`, `Untagged`, and `Others` buckets. Color-label
-  and rating organization each expose their own optional `Untagged` checkbox.
+  modes for `Picked`, `Rejected`, `Untagged`, and `Others` buckets. The dialog
+  labels the two-folder `Others` variants as `Not picked` and `Not rejected`.
+  Color-label and rating organization each expose their own optional `Untagged`
+  checkbox.
 - New organizer UI code should prefer criterion-specific option types; the
   legacy `OrganizeFilesOptions(...)` constructor remains for direct callers.
 - Write XMP mode supports merge policies `preserve` and `replace`.

@@ -60,16 +60,14 @@ def test_organizer_dialog_defaults_and_mode_switch(tmp_path: Path) -> None:
             dialog.flag_folder_mode_group,
             'picked_others',
         ).text()
-        == '2 Folders: Picked / Others '
-        '(including rejected and untagged)'
+        == '2 Folders: Picked / Not picked'
     )
     assert (
         dialog._button_with_value(
             dialog.flag_folder_mode_group,
             'rejected_others',
         ).text()
-        == '2 Folders: Rejected / Others '
-        '(including picked and untagged)'
+        == '2 Folders: Rejected / Not rejected'
     )
     assert (
         dialog._button_with_value(

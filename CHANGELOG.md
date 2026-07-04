@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Changed
+
+  - Clarified the picked/rejected two-folder organizer options as `Not picked`
+    and `Not rejected` in the `Organize Photos` dialog.
+
 ## [1.4.1] - 2026-07-04
 
 - Added
