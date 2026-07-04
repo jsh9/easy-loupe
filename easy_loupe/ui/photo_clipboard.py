@@ -32,14 +32,20 @@ def copy_photo_pixels_to_clipboard(
 
 
 def _clipboard_image_path(library: PhotoLibrary, photo_id: str) -> Path:
+    """Return the source path that matches the clipboard copy contract."""
     photo = library.get_photo(photo_id)
+    # JPEG-backed records should copy the original file pixels, not a cached
+    # viewer render, so paste targets receive the folder's JPEG image.
     if photo.has_jpeg:
         return photo.preview_source
 
+    # RAW and HEIC/HEIF-only records need EasyLoupe's rendered viewer preview
+    # because their original files are not generally pasteable raster images.
     return library.get_preview_path(photo_id, 'viewer')
 
 
 def _qimage_for_path(image_path: Path) -> QImage:
+    """Return a detached, EXIF-oriented image for clipboard ownership."""
     with Image.open(image_path) as opened:
         image = ImageOps.exif_transpose(opened).convert('RGBA')
 
@@ -53,6 +59,8 @@ def _qimage_for_path(image_path: Path) -> QImage:
             width * 4,
             QImage.Format.Format_RGBA8888,
         )
+        # ``QImage`` wraps ``data`` above, so detach it before the local
+        # buffer and PIL image go out of scope.
         return qimage.copy()
     finally:
         image.close()

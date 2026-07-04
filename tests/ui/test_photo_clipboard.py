@@ -108,7 +108,12 @@ def test_copy_photo_pixels_uses_original_jpeg_without_rendering(
 def test_copy_photo_pixels_prefers_jpeg_companion_over_raw_preview(
         tmp_path: Path,
 ) -> None:
-    """Verify JPEG+RAW pairs still copy the original JPEG companion."""
+    """
+    Verify JPEG+RAW pairs still copy the original JPEG companion.
+
+    The RAW file is the metadata source in paired records, so this prevents the
+    clipboard path from drifting from the user-visible JPEG source.
+    """
     app = QApplication.instance() or QApplication([])
     jpeg_path = tmp_path / 'PAIR.JPG'
     raw_path = tmp_path / 'PAIR.CR3'
@@ -135,7 +140,12 @@ def test_copy_photo_pixels_prefers_jpeg_companion_over_raw_preview(
 def test_copy_photo_pixels_uses_viewer_preview_without_jpeg(
         tmp_path: Path,
 ) -> None:
-    """Verify RAW-only records copy the rendered viewer preview pixels."""
+    """
+    Verify RAW-only records copy the rendered viewer preview pixels.
+
+    RAW files are not suitable clipboard images by themselves, so the helper
+    must request the same rendered preview path used by the viewer.
+    """
     app = QApplication.instance() or QApplication([])
     raw_path = tmp_path / 'RAW_ONLY.CR3'
     preview_path = tmp_path / 'preview.jpg'

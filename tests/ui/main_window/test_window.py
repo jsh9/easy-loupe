@@ -1954,6 +1954,8 @@ def test_main_window_ctrl_c_copies_current_photo_pixels(
 
     assert_window_shortcut(window.copy_photo_shortcut, 'Ctrl+C')
 
+    # Route through a real focused WindowShortcut event so this covers Qt key
+    # dispatch, not just the shortcut's connected slot.
     set_qt_active_window(window)
     app.processEvents()
     QTest.keyClick(window, Qt.Key_C, Qt.ControlModifier)
@@ -1976,7 +1978,12 @@ def test_main_window_copy_shortcut_is_single_photo_view_only(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify browse and compare modes do not expose image copy."""
+    """
+    Verify browse and compare modes do not expose image copy.
+
+    Those modes can show multiple photos at once, so the shortcut should stay
+    unavailable instead of choosing an ambiguous clipboard target.
+    """
     _theme_module, app, window = create_main_window_with_library(
         tmp_path,
         monkeypatch,

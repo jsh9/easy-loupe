@@ -536,6 +536,8 @@ def test_photo_viewer_ctrl_c_copies_current_photo_pixels(
 
     _assert_window_shortcut(window.copy_photo_shortcut, 'Ctrl+C')
 
+    # Route through a real focused WindowShortcut event so this covers Qt key
+    # dispatch, not just the shortcut's connected slot.
     set_qt_active_window(window)
     app.processEvents()
     QTest.keyClick(window, Qt.Key_C, Qt.ControlModifier)
