@@ -169,3 +169,38 @@ def test_copy_photo_pixels_uses_viewer_preview_without_jpeg(
     assert library.preview_calls == [('RAW_ONLY', 'viewer')]
     _assert_close_rgb(_clipboard_pixel(), expected_color)
     del app
+
+
+def test_copy_photo_pixels_uses_viewer_preview_for_heic_only(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify HEIC-only records copy the rendered viewer preview pixels.
+
+    HEIC source files are raster photos, but the clipboard contract uses the
+    pasteable viewer render when no JPEG companion is available.
+    """
+    app = QApplication.instance() or QApplication([])
+    heic_path = tmp_path / 'HEIC_ONLY.HEIC'
+    preview_path = tmp_path / 'heic-preview.jpg'
+    heic_path.write_bytes(b'heic')
+    expected_color = (140, 90, 20)
+    _create_color_jpeg(preview_path, expected_color)
+    library = FakeLibrary(
+        {
+            'HEIC_ONLY': _photo_record(
+                'HEIC_ONLY',
+                preview_source=heic_path,
+                has_jpeg=False,
+                has_raw=False,
+                has_heif=True,
+            )
+        },
+        {'HEIC_ONLY': preview_path},
+    )
+
+    assert copy_photo_pixels_to_clipboard(cast('Any', library), 'HEIC_ONLY')
+
+    assert library.preview_calls == [('HEIC_ONLY', 'viewer')]
+    _assert_close_rgb(_clipboard_pixel(), expected_color)
+    del app
