@@ -2,10 +2,14 @@
 
 ## [Unreleased]
 
+- Added
+
+  - `Ctrl+C`/`Cmd+C` in the standalone photo viewer and main culling view now
+    copies the viewed photo's pixels to the system clipboard.
+
 - Changed
 
-  - Replaced the packaged EasyLoupe app icon with the new NYC skyline and
-    magnifying-glass artwork.
+  - Changed the app icon
 
 ## [1.4.0] - 2026-06-28
 

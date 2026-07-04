@@ -54,6 +54,7 @@ from easy_loupe.ui.main_window.build import (
     PHOTO_LOAD_RECURSIVELY_SETTINGS_KEY,
     TRANSIENT_MESSAGE_TIMEOUT_MS,
 )
+from easy_loupe.ui.photo_clipboard import copy_photo_pixels_to_clipboard
 from easy_loupe.ui.photo_viewer.workers import (
     FolderHydrationWorker,
     PhotoViewerExifResult,
@@ -480,6 +481,9 @@ class PhotoViewerWindow(QMainWindow):
         self.info_overlay_shortcut = self._make_shortcut(
             'I', self._toggle_info_overlay
         )
+        self.copy_photo_shortcut = self._make_shortcut(
+            'Ctrl+C', self._copy_current_photo_to_clipboard
+        )
         self.dismiss_message_shortcut = self._make_shortcut(
             Qt.Key_Escape,
             self._handle_escape_shortcut,
@@ -829,6 +833,17 @@ class PhotoViewerWindow(QMainWindow):
         """Toggle the EXIF and histogram overlay."""
         self._info_overlay_enabled = not self._info_overlay_enabled
         self._refresh_info_overlay()
+
+    def _copy_current_photo_to_clipboard(self) -> None:
+        """Copy the current standalone-viewer photo to the clipboard."""
+        if self.current_photo_id is None or not self.library.photos:
+            return
+
+        if copy_photo_pixels_to_clipboard(self.library, self.current_photo_id):
+            self._show_transient_message('Copied image to clipboard')
+            return
+
+        self._show_transient_message('Could not copy image to clipboard')
 
     def _refresh_info_overlay(self, *, allow_defer: bool = True) -> None:
         """Show or hide the EXIF/histogram pane for the active photo."""

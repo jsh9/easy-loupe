@@ -33,6 +33,7 @@ Use:
 - `-` to zoom out.
 - `=` or `+` to zoom in.
 - `W`, `A`, `S`, and `D` to pan.
+- `Ctrl+C`/`Cmd+C` to copy the whole viewed image to the clipboard.
 
 In fit view, click and hold on the photo to temporarily inspect that point at
 100 percent.

@@ -29,6 +29,7 @@ a photo workflow.
 - Detect and edit scene groups so burst or sequence photos stay together.
 - Inspect focus and exposure with zoom, split view, AF point, EXIF/histogram,
   and clipping-warning overlays.
+- Copy viewed photo pixels to the clipboard for pasting into other apps.
 - Reorganize photos by metadata or write shared XMP sidecars for other photo
   apps.
 
