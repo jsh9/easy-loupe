@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-07-04
+
 - Added
 
   - `Ctrl+C`/`Cmd+C` in the standalone photo viewer and main culling view now
@@ -9,7 +11,8 @@
 
 - Changed
 
-  - Changed the app icon
+  - Replaced the packaged EasyLoupe app icon with the new NYC skyline and
+    magnifying-glass artwork.
 
 ## [1.4.0] - 2026-06-28
 
