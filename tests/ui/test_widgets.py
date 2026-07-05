@@ -51,7 +51,7 @@ def _wheel_event(*, pixel_delta: int = 0, angle_delta: int = 0) -> QWheelEvent:
     )
 
 
-def test_thumbnail_list_wheel_event_scrolls_at_half_speed() -> None:
+def test_thumbnail_list_wheel_event_scrolls_at_reduced_speed() -> None:
     """
     Verify wheel input scrolls the left thumbnail strip at reduced speed.
 
@@ -76,17 +76,18 @@ def test_thumbnail_list_wheel_event_scrolls_at_half_speed() -> None:
     full_speed_delta = (
         QApplication.wheelScrollLines() * scroll_bar.singleStep()
     )
+    scroll_speed = widgets_module.ThumbnailListWidget._WHEEL_SCROLL_SPEED
     widget.wheelEvent(_wheel_event(angle_delta=-120))
 
-    assert scroll_bar.value() == int(full_speed_delta / 2)
+    assert scroll_bar.value() == int(full_speed_delta * scroll_speed)
 
     scroll_bar.setValue(0)
     widget.wheelEvent(_wheel_event(pixel_delta=-7))
     first_pixel_scroll = scroll_bar.value()
     widget.wheelEvent(_wheel_event(pixel_delta=-7))
 
-    assert first_pixel_scroll == 3
-    assert scroll_bar.value() == 7
+    assert first_pixel_scroll == int(7 * scroll_speed)
+    assert scroll_bar.value() == int(14 * scroll_speed)
 
     widget.close()
 
