@@ -84,6 +84,7 @@ class MainWindowNavigationMixin:
             (require_active_window and not self.isActiveWindow())
             or self._busy
             or self._background_task_active()
+            or self._main_view_frozen_after_move_organize
             or self._shortcut_help_modal_active()
             or not self.library.photos
         ):
@@ -125,6 +126,7 @@ class MainWindowNavigationMixin:
             not self.isActiveWindow()
             or self._busy
             or self._background_task_active()
+            or self._main_view_frozen_after_move_organize
             or self._shortcut_help_modal_active()
             or self._compare_mode
             or self._browse_mode
@@ -141,7 +143,7 @@ class MainWindowNavigationMixin:
 
     def _list_selection_changed(self: MainWindow) -> None:
         """Refresh selection-dependent presentation for multi-selection."""
-        if self._busy:
+        if self._busy or self._main_view_frozen_after_move_organize:
             return
 
         sender = self.sender()
@@ -188,7 +190,7 @@ class MainWindowNavigationMixin:
         if current is None:
             return
 
-        if self._busy:
+        if self._busy or self._main_view_frozen_after_move_organize:
             return
 
         photo_id = current.data(PHOTO_ID_ROLE)
@@ -244,7 +246,7 @@ class MainWindowNavigationMixin:
         if current is None:
             return
 
-        if self._busy:
+        if self._busy or self._main_view_frozen_after_move_organize:
             return
 
         photo_id = current.data(PHOTO_ID_ROLE)
@@ -272,7 +274,7 @@ class MainWindowNavigationMixin:
     def _browse_item_double_clicked(
             self: MainWindow, item: QListWidgetItem
     ) -> None:
-        if self._busy:
+        if self._busy or self._main_view_frozen_after_move_organize:
             return
 
         photo_id = item.data(PHOTO_ID_ROLE)
@@ -290,7 +292,7 @@ class MainWindowNavigationMixin:
         if current is None:
             return
 
-        if self._busy:
+        if self._busy or self._main_view_frozen_after_move_organize:
             return
 
         photo_id = current.data(PHOTO_ID_ROLE)
@@ -502,6 +504,9 @@ class MainWindowNavigationMixin:
         self.browse_list.viewport().update()
 
     def _enter_browse_mode(self: MainWindow) -> None:
+        if self._main_view_frozen_after_move_organize:
+            return
+
         if self._compare_mode:
             self._enter_browse_mode_from_compare()
             return
@@ -545,6 +550,9 @@ class MainWindowNavigationMixin:
     def _exit_browse_mode(
             self: MainWindow, *, force_fit_photo: bool = False
     ) -> None:
+        if self._main_view_frozen_after_move_organize:
+            return
+
         if not self._browse_mode:
             return
 

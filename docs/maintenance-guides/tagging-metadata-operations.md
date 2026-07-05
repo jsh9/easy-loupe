@@ -125,10 +125,13 @@ Major logic:
   `Reorganize Files` and `Write XMP`.
 - Reorganize mode supports criterion, action, output parent selection, and
   conflict policy. Picked/rejected organization exposes explicit child folder
-  modes for `Picked`, `Rejected`, `Untagged`, and `Others` buckets. The dialog
-  labels the two-folder `Others` variants as `Not picked` and `Not rejected`.
-  Color-label and rating organization each expose their own optional `Untagged`
-  checkbox.
+  modes for `Picked`, `Rejected`, `Untagged`, `Not picked`, and `Not rejected`
+  buckets. Color-label and rating organization each expose their own optional
+  `Untagged` checkbox.
+- Reorganize mode can optionally split JPG/JPEG and RAW outputs when both
+  formats exist in the loaded folder. The split keeps metadata buckets first,
+  then writes files under `jpg` or `raw` child folders. Shared XMP sidecars for
+  RAW-backed photos follow the RAW output.
 - New organizer UI code should prefer criterion-specific option types; the
   legacy `OrganizeFilesOptions(...)` constructor remains for direct callers.
 - Write XMP mode supports merge policies `preserve` and `replace`.
@@ -137,9 +140,13 @@ Major logic:
   as scene detection.
 - While the overlay is active, interaction, assignment actions, and organizer
   entry points are disabled.
-- Successful move-based reorganization reloads the current folder before the
-  finished dialog is shown. Successful XMP writing does not reload the current
-  folder.
+- Successful move-based reorganization does not reload the current folder, but
+  it freezes the main photo workspace with a visible message because loaded
+  photo paths may now point at moved files. The frozen state blocks navigation,
+  tagging, filtering, sorting, scene detection, and organizer entry until the
+  user opens another folder or immediately undoes the move.
+- Successful copy-based reorganization and XMP writing keep the current folder
+  loaded and interactive because source photo paths remain valid.
 - Completed organizer/XMP runs show a summary dialog with an immediate `Undo`
   action when an undo plan is available.
 
@@ -191,7 +198,8 @@ Major logic:
   changes.
 - Verify undo restores files and existing sidecars correctly and remains
   single-use.
-- Verify move-based completion reloads the folder while XMP completion does
-  not.
+- Verify optional JPG/RAW splitting keeps buckets first, preserves source
+  subfolder paths, and places shared XMP sidecars with RAW output.
+- Verify move-based organization and XMP completion do not reload the folder.
 - Verify busy-state disabling and finished/error dialog titles still match the
   workflow being run.

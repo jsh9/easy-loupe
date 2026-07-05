@@ -96,6 +96,10 @@ TRANSIENT_MESSAGE_FONT_SIZE_PX = 28
 TRANSIENT_MESSAGE_FONT_WEIGHT = 600
 TRANSIENT_MESSAGE_TIMEOUT_MS = 1600
 INITIAL_FOLDER_PROMPT_GRACE_MS = 250
+MOVE_ORGANIZE_FROZEN_TITLE = 'Photos moved'
+MOVE_ORGANIZE_FROZEN_DETAIL = 'Open another folder to continue.'
+MOVE_ORGANIZE_FROZEN_PANEL_MIN_WIDTH = 340
+MOVE_ORGANIZE_FROZEN_PANEL_MAX_WIDTH = 520
 
 
 class MainWindowBuildMixin:
@@ -119,9 +123,11 @@ class MainWindowBuildMixin:
         self._build_view_mode_ui(root)
         self._build_progress_overlay()
         self._build_transient_message_overlay()
+        self._build_move_organize_frozen_overlay()
         self._build_shortcut_help_overlay()
         self._update_progress_overlay_geometry()
         self._update_transient_message_overlay_geometry()
+        self._update_move_organize_frozen_overlay_geometry()
         self._update_shortcut_help_overlay_geometry()
         self._apply_theme()
 
@@ -391,6 +397,48 @@ class MainWindowBuildMixin:
             self._hide_transient_message
         )
 
+    def _build_move_organize_frozen_overlay(self: MainWindow) -> None:
+        overlay = QWidget(self.central_widget)
+        overlay.setObjectName('moveOrganizeFrozenOverlay')
+        overlay.hide()
+
+        layout = QVBoxLayout(overlay)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.addStretch(1)
+
+        panel = QFrame(overlay)
+        panel.setObjectName('moveOrganizeFrozenPanel')
+        # QLabel word-wrap can make an unconstrained panel choose a narrow
+        # width and then compress height, clipping the body text. Keep the
+        # panel wide enough for the short body line while still capping it for
+        # large windows.
+        panel.setMinimumWidth(MOVE_ORGANIZE_FROZEN_PANEL_MIN_WIDTH)
+        panel.setMaximumWidth(MOVE_ORGANIZE_FROZEN_PANEL_MAX_WIDTH)
+        panel.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(24, 18, 24, 18)
+        panel_layout.setSpacing(6)
+
+        title_label = QLabel(MOVE_ORGANIZE_FROZEN_TITLE, panel)
+        title_label.setObjectName('moveOrganizeFrozenTitle')
+        title_label.setAlignment(Qt.AlignCenter)
+        title_label.setWordWrap(False)
+        panel_layout.addWidget(title_label)
+
+        detail_label = QLabel(MOVE_ORGANIZE_FROZEN_DETAIL, panel)
+        detail_label.setObjectName('moveOrganizeFrozenDetail')
+        detail_label.setAlignment(Qt.AlignCenter)
+        detail_label.setWordWrap(True)
+        panel_layout.addWidget(detail_label)
+
+        layout.addWidget(panel, 0, Qt.AlignCenter)
+        layout.addStretch(1)
+
+        self.move_organize_frozen_overlay = overlay
+        self.move_organize_frozen_panel = panel
+        self.move_organize_frozen_title_label = title_label
+        self.move_organize_frozen_detail_label = detail_label
+
     def _build_shortcut_help_overlay(self: MainWindow) -> None:
         self.shortcut_help_overlay = ShortcutHelpOverlay(self.central_widget)
 
@@ -530,8 +578,12 @@ class MainWindowBuildMixin:
         self.open_action = QAction('Open Folder', self)
         self.open_action.setShortcut(QKeySequence('Ctrl+O'))
         self.open_action.setShortcutContext(Qt.WindowShortcut)
+        # Open Folder is the recovery path from the post-move freeze, so it
+        # must bypass only that guard while still respecting busy/help state.
         self.open_action.triggered.connect(
-            lambda *_: self._run_workspace_action(self.choose_folder)
+            lambda *_: self._run_workspace_action(
+                self.choose_folder, block_by_frozen=False
+            )
         )
         self.addAction(self.open_action)
         self.file_menu.addAction(self.open_action)
@@ -732,7 +784,11 @@ class MainWindowBuildMixin:
     ) -> None:
         normalized = normalize_load_recursively(load_recursively)
         previous = self.library.load_recursively
-        if persist and (self._busy or self._background_task_active()):
+        if persist and (
+            self._busy
+            or self._background_task_active()
+            or self._main_view_frozen_after_move_organize
+        ):
             self._check_photo_load_recursively_control(previous)
             return
 
@@ -821,7 +877,11 @@ class MainWindowBuildMixin:
     ) -> None:
         normalized_sort_mode = normalize_sort_mode(sort_mode)
         normalized_sort_reversed = normalize_sort_reversed(sort_reversed)
-        if persist and (self._busy or self._background_task_active()):
+        if persist and (
+            self._busy
+            or self._background_task_active()
+            or self._main_view_frozen_after_move_organize
+        ):
             self._check_photo_sort_control(self.library.sort_mode)
             self._check_photo_sort_reverse_control(self.library.sort_reversed)
             return
@@ -1081,7 +1141,7 @@ class MainWindowBuildMixin:
             key,
             callback,
             blocked=lambda: self._shortcut_blocked(
-                block_by_shortcut_help=block_by_shortcut_help
+                block_by_shortcut_help=block_by_shortcut_help,
             ),
         )
 
@@ -1095,20 +1155,27 @@ class MainWindowBuildMixin:
             self: MainWindow,
             *,
             block_by_shortcut_help: bool = True,
+            block_by_frozen: bool = True,
     ) -> bool:
         """
         Return whether a workspace shortcut should ignore activation.
 
         The help overlay is visually modal but is not a Qt dialog, so normal
-        shortcuts must explicitly wait while it is visible.
+        shortcuts must explicitly wait while it is visible. The post-move
+        freeze uses the same gate to stop QAction and QShortcut paths from
+        reaching stale moved-file records.
         """
-        return self._busy or (
-            block_by_shortcut_help and self._shortcut_help_modal_active()
+        return (
+            self._busy
+            or (block_by_frozen and self._main_view_frozen_after_move_organize)
+            or (block_by_shortcut_help and self._shortcut_help_modal_active())
         )
 
     def _run_workspace_action(
             self: MainWindow,
             callback: Callable[[], None],
+            *,
+            block_by_frozen: bool = True,
     ) -> bool:
         """
         Run a menu action only when the shortcut gates allow it.
@@ -1118,7 +1185,7 @@ class MainWindowBuildMixin:
         The return value lets checkable actions restore UI state when the modal
         gate blocked their triggered slot.
         """
-        if self._shortcut_blocked():
+        if self._shortcut_blocked(block_by_frozen=block_by_frozen):
             return False
 
         callback()
@@ -1126,7 +1193,8 @@ class MainWindowBuildMixin:
 
     def _update_mode_shortcuts(self: MainWindow) -> None:
         shortcut_help_visible = self._shortcut_help_modal_active()
-        workspace_shortcuts_enabled = not shortcut_help_visible
+        frozen = self._main_view_frozen_after_move_organize
+        workspace_shortcuts_enabled = not shortcut_help_visible and not frozen
         normal_view_shortcuts_enabled = (
             workspace_shortcuts_enabled
             and not self._browse_mode
@@ -1163,9 +1231,12 @@ class MainWindowBuildMixin:
             and self.current_photo_id is not None
         )
         self.exit_compare_shortcut.setEnabled(
-            self._compare_mode
-            or self.transient_message_overlay.isVisible()
-            or shortcut_help_visible
+            not frozen
+            and (
+                self._compare_mode
+                or self.transient_message_overlay.isVisible()
+                or shortcut_help_visible
+            )
         )
         for shortcut in self._viewer_shortcuts:
             shortcut.setEnabled(viewer_shortcuts_enabled)
@@ -1327,8 +1398,11 @@ class MainWindowBuildMixin:
 
     def _toggle_shortcut_help(self: MainWindow) -> None:
         # Busy workflows remain modal. Allow closing already-visible help, but
-        # do not open a new help pane over worker/progress-driven UI state.
-        if self._busy and not self._shortcut_help_modal_active():
+        # do not open a new help pane over worker/progress-driven UI state or
+        # the frozen-workspace message that explains post-move recovery.
+        if (
+            self._busy or self._main_view_frozen_after_move_organize
+        ) and not self._shortcut_help_modal_active():
             return
 
         self.shortcut_help_overlay.toggle_context(
@@ -1350,6 +1424,7 @@ class MainWindowBuildMixin:
         if (
             not self._info_overlay_enabled
             or self._busy
+            or self._main_view_frozen_after_move_organize
             or self._browse_mode
             or self._compare_mode
             or self.current_photo_id is None
@@ -1450,7 +1525,11 @@ class MainWindowBuildMixin:
 
     def _refresh_assignment_controls(self: MainWindow) -> None:
         """Enable assignment controls only in culling-capable modes."""
-        enabled = not self._busy and not self._shortcut_help_modal_active()
+        enabled = (
+            not self._busy
+            and not self._main_view_frozen_after_move_organize
+            and not self._shortcut_help_modal_active()
+        )
         for action in self._assignment_actions:
             action.setEnabled(enabled)
 
@@ -1465,7 +1544,11 @@ class MainWindowBuildMixin:
         changes, so disabling them keeps the visible menu state aligned with
         the modal shortcut-help guard.
         """
-        enabled = not self._busy and not self._shortcut_help_modal_active()
+        enabled = (
+            not self._busy
+            and not self._main_view_frozen_after_move_organize
+            and not self._shortcut_help_modal_active()
+        )
         for action in self.compare_limit_actions.values():
             action.setEnabled(enabled)
 
@@ -1491,6 +1574,12 @@ class MainWindowBuildMixin:
             photo_actions_enabled = (
                 bool(self.library.photos)
                 and not self._background_task_active()
+                and not self._main_view_frozen_after_move_organize
+            )
+        else:
+            photo_actions_enabled = (
+                photo_actions_enabled
+                and not self._main_view_frozen_after_move_organize
             )
 
         menu_actions_enabled = (
@@ -1532,6 +1621,12 @@ class MainWindowBuildMixin:
             photo_actions_enabled = (
                 bool(self.library.photos)
                 and not self._background_task_active()
+                and not self._main_view_frozen_after_move_organize
+            )
+        else:
+            photo_actions_enabled = (
+                photo_actions_enabled
+                and not self._main_view_frozen_after_move_organize
             )
 
         enabled = (
@@ -1551,6 +1646,56 @@ class MainWindowBuildMixin:
     def _update_transient_message_overlay_geometry(self: MainWindow) -> None:
         """Match the transient message overlay to the central widget bounds."""
         self.transient_message_overlay.setGeometry(self.central_widget.rect())
+
+    def _update_move_organize_frozen_overlay_geometry(
+            self: MainWindow,
+    ) -> None:
+        """Match the frozen overlay to the main workspace below the top bar."""
+        # Keep the top bar outside the overlay because Open Folder remains
+        # usable while the photo workspace is frozen after moving source files.
+        top = (
+            self.content_splitter.geometry().top()
+            if hasattr(self, 'content_splitter')
+            else 0
+        )
+        rect = self.central_widget.rect()
+        self.move_organize_frozen_overlay.setGeometry(
+            0,
+            top,
+            rect.width(),
+            max(0, rect.height() - top),
+        )
+
+    def _refresh_move_organize_frozen_overlay(self: MainWindow) -> None:
+        """Show or hide the overlay from the persistent post-move flag."""
+        if not hasattr(self, 'move_organize_frozen_overlay'):
+            return
+
+        if self._main_view_frozen_after_move_organize:
+            self._update_move_organize_frozen_overlay_geometry()
+            self.move_organize_frozen_overlay.show()
+            self.move_organize_frozen_overlay.raise_()
+            return
+
+        self.move_organize_frozen_overlay.hide()
+
+    def _set_main_view_frozen_after_move_organize(
+            self: MainWindow, *, frozen: bool
+    ) -> None:
+        """
+        Toggle the frozen workspace state after move-based organization.
+
+        The flag is separate from ``_busy`` because no worker is running; the
+        app still needs Open Folder and immediate Undo to remain available.
+        """
+        if self._main_view_frozen_after_move_organize == frozen:
+            self._refresh_move_organize_frozen_overlay()
+            return
+
+        self._main_view_frozen_after_move_organize = frozen
+        self._refresh_move_organize_frozen_overlay()
+        self._set_interaction_enabled(enabled=not self._busy)
+        self._refresh_ui()
 
     def _update_shortcut_help_overlay_geometry(self: MainWindow) -> None:
         """Match the shortcut-help overlay to the central widget bounds."""
@@ -1584,6 +1729,9 @@ class MainWindowBuildMixin:
 
         if hasattr(self, 'transient_message_overlay'):
             self._update_transient_message_overlay_geometry()
+
+        if hasattr(self, 'move_organize_frozen_overlay'):
+            self._update_move_organize_frozen_overlay_geometry()
 
         if hasattr(self, 'shortcut_help_overlay'):
             self._update_shortcut_help_overlay_geometry()

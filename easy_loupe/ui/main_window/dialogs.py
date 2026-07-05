@@ -115,6 +115,7 @@ class OrganizerDialog(QDialog):
                 'ConflictPolicy',
                 self._selected_value(self.conflict_policy_group),
             )
+            split_jpg_raw = self.split_jpg_raw_checkbox.isChecked()
             # Build the criterion-specific options here so disabled child
             # controls cannot leak stale, irrelevant values into the request.
             if criterion == 'flag':
@@ -130,6 +131,7 @@ class OrganizerDialog(QDialog):
                         ),
                         conflict_policy=conflict_policy,
                         include_sidecars=True,
+                        split_jpg_raw=split_jpg_raw,
                     ),
                 )
 
@@ -142,6 +144,7 @@ class OrganizerDialog(QDialog):
                     include_untagged=self._include_untagged_for(criterion),
                     conflict_policy=conflict_policy,
                     include_sidecars=True,
+                    split_jpg_raw=split_jpg_raw,
                 ),
             )
 
@@ -209,6 +212,17 @@ class OrganizerDialog(QDialog):
             orientation='horizontal',
         )
         box_layout.addWidget(action_box)
+
+        split_box = QGroupBox('JPG and raw', self.reorganize_box)
+        split_box_layout = QVBoxLayout(split_box)
+        split_box_layout.setContentsMargins(12, 12, 12, 12)
+        split_box_layout.setSpacing(8)
+        self.split_jpg_raw_checkbox = QCheckBox(
+            'When applicable, put JPG and raw into separate folders',
+            split_box,
+        )
+        split_box_layout.addWidget(self.split_jpg_raw_checkbox)
+        box_layout.addWidget(split_box)
 
         output_parent_row = QWidget(self.reorganize_box)
         output_parent_layout = QHBoxLayout(output_parent_row)

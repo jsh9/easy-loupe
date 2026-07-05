@@ -14,11 +14,13 @@ import easy_loupe.ui.main_window.window as main_window_module
 import easy_loupe.ui.main_window.workflows as workflows_module
 import easy_loupe.ui.theme as theme_module
 from easy_loupe.core import exif as core_exif_module
+from easy_loupe.core.folder_loading import PHOTO_SORT_MODE_CAPTURE_TIME
 from easy_loupe.core.records import METADATA_FILENAME
 from easy_loupe.operations.common import OperationSummary, UndoPlan
 from easy_loupe.operations.export import FlagOrganizeFilesOptions
 from easy_loupe.operations.xmp import WriteXmpOptions
 from easy_loupe.ui.main_window.dialogs import OrganizerDialogResult
+from easy_loupe.ui.main_window.filters import PhotoFilterSelection
 from tests.ui._helpers import (
     assert_choose_folder_idle,
     create_jpeg,
@@ -2368,23 +2370,14 @@ def test_main_window_choose_folder_progress_reports_all_load_stages(
     del app
 
 
-@pytest.mark.parametrize(
-    'reload_method_name',
-    [
-        pytest.param('_reload_current_folder_after_move', id='after-move'),
-        pytest.param('_reload_current_folder_after_undo', id='after-undo'),
-    ],
-)
-def test_main_window_post_operation_reload_progress_reports_all_load_stages(
+def test_main_window_undo_reload_progress_reports_all_load_stages(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
-        reload_method_name: str,
 ) -> None:
     """
-    Verify post-operation folder reloads keep structured progress wired.
+    Verify post-undo folder reloads keep structured progress wired.
 
-    Move and undo completion reload the current folder through separate helper
-    methods. They should reuse the same multi-stage load/list reporter as a
+    Undo completion should reuse the same multi-stage load/list reporter as a
     manual folder open instead of falling back to stale scalar operation text.
     """
     _, app, window = create_main_window_with_library(
@@ -2414,7 +2407,7 @@ def test_main_window_post_operation_reload_progress_reports_all_load_stages(
     window.library.set_load_recursively(False)
     window._show_progress('Operation complete', 50)
 
-    getattr(window, reload_method_name)()
+    window._reload_current_folder_after_undo()
     app.processEvents()
 
     rows = window.progress_stage_list._rows
@@ -3499,22 +3492,29 @@ def test_main_window_finished_dialog_uses_expected_title_and_undo_button(
     del app
 
 
-def test_main_window_operation_finished_after_move_reloads_folder_and_shows_dialog(
+def test_main_window_operation_finished_after_move_skips_reload_and_shows_dialog(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """
+    Verify move completion freezes the workspace without reloading.
+
+    This guards the subtle post-move state where loaded records may point at
+    old paths: the finished dialog still appears, but navigation and tagging
+    must remain blocked until Open Folder or immediate Undo recovers the UI.
+    """
     _, app, window = create_main_window_with_library(
         tmp_path,
         monkeypatch,
-        photo_specs=[('IMG_9200', 'dimgray')],
+        photo_specs=[('IMG_9200', 'dimgray'), ('IMG_9201', 'navy')],
     )
     reload_calls: list[str] = []
     dialog_calls: list[
         tuple[OperationSummary, OrganizerDialogResult | None]
     ] = []
     monkeypatch.setattr(
-        window,
-        '_reload_current_folder_after_move',
-        lambda: reload_calls.append('reload'),
+        window.library,
+        'load_folder',
+        lambda *_args, **_kwargs: reload_calls.append('reload'),
     )
     monkeypatch.setattr(
         window,
@@ -3535,6 +3535,7 @@ def test_main_window_operation_finished_after_move_reloads_folder_and_shows_dial
         ),
     )
     window._show_progress('Organizing', 50)
+    assert window.current_photo_id == 'IMG_9200'
 
     window._handle_operation_finished(
         OperationSummary(
@@ -3544,7 +3545,42 @@ def test_main_window_operation_finished_after_move_reloads_folder_and_shows_dial
         )
     )
 
-    assert reload_calls == ['reload']
+    assert reload_calls == []
+    assert window.current_photo_id == 'IMG_9200'
+    assert window._main_view_frozen_after_move_organize is True
+    assert window.move_organize_frozen_overlay.isVisible() is True
+    assert window.move_organize_frozen_title_label.text() == 'Photos moved'
+    assert window.move_organize_frozen_detail_label.text() == (
+        'Open another folder to continue.'
+    )
+    assert window.open_button.isEnabled() is True
+    assert window.open_action.isEnabled() is True
+    assert window.theme_toggle.isEnabled() is True
+    assert window.menuBar().isEnabled() is True
+    assert window.detect_button.isEnabled() is False
+    assert window.organize_button.isEnabled() is False
+    assert window.organize_action.isEnabled() is False
+    assert window.filter_button.isEnabled() is False
+    assert window.photo_load_recursively_checkbox.isEnabled() is False
+    assert window.photo_sort_reverse_checkbox.isEnabled() is False
+    assert all(
+        button.isEnabled() is False
+        for button in window.photo_sort_buttons.values()
+    )
+    assert window.thumbnail_list.isEnabled() is False
+    assert window.browse_list.isEnabled() is False
+    assert window.scene_list.isEnabled() is False
+    assert window.viewer.isEnabled() is False
+    assert window.compare_viewer.isEnabled() is False
+    assert window.browse_mode_shortcut.isEnabled() is False
+    assert window.compare_mode_shortcut.isEnabled() is False
+    assert all(
+        action.isEnabled() is False for action in window._assignment_actions
+    )
+    assert all(
+        shortcut.isEnabled() is False
+        for shortcut in window._assignment_shortcuts
+    )
     assert window._busy is False
     assert window._operation_kind is None
     assert len(dialog_calls) == 1
@@ -3556,9 +3592,395 @@ def test_main_window_operation_finished_after_move_reloads_folder_and_shows_dial
     del app
 
 
+def test_main_window_move_frozen_overlay_panel_fits_message(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify the post-move frozen overlay message is not clipped.
+
+    The frozen overlay explains why navigation and tagging are disabled, so
+    this regression test checks the label geometry directly instead of only
+    asserting that the overlay is visible.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_9230', 'dimgray')],
+    )
+    window.resize(640, 360)
+    app.processEvents()
+
+    window._set_main_view_frozen_after_move_organize(frozen=True)
+    app.processEvents()
+
+    panel = window.move_organize_frozen_panel
+    title = window.move_organize_frozen_title_label
+    detail = window.move_organize_frozen_detail_label
+    margins = panel.layout().contentsMargins()
+    # Word-wrapped QLabel height depends on the final resolved width.
+    # heightForWidth() catches the clipped two-line body that caused the
+    # frozen overlay to regress visually.
+    expected_min_height = (
+        margins.top()
+        + title.sizeHint().height()
+        + panel.layout().spacing()
+        + detail.heightForWidth(detail.width())
+        + margins.bottom()
+    )
+
+    assert panel.width() <= build_module.MOVE_ORGANIZE_FROZEN_PANEL_MAX_WIDTH
+    assert panel.height() >= expected_min_height
+    assert panel.rect().contains(title.geometry())
+    assert panel.rect().contains(detail.geometry())
+    assert title.height() >= title.sizeHint().height()
+    assert detail.height() >= detail.heightForWidth(detail.width())
+
+    window.close()
+    del app
+
+
+def test_main_window_operation_finished_after_copy_keeps_view_interactive(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify copy completion leaves the existing workspace interactive.
+
+    Copies do not invalidate source photo paths, so this prevents the move-only
+    freeze from leaking into the safe organizer path.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_9250', 'dimgray')],
+    )
+    reload_calls: list[str] = []
+    dialog_calls: list[
+        tuple[OperationSummary, OrganizerDialogResult | None]
+    ] = []
+    monkeypatch.setattr(
+        window.library,
+        'load_folder',
+        lambda *_args, **_kwargs: reload_calls.append('reload'),
+    )
+    monkeypatch.setattr(
+        window,
+        '_show_operation_finished_dialog',
+        lambda summary, request: (
+            dialog_calls.append((summary, request)) or False
+        ),
+    )
+    window._operation_kind = 'run'
+    window._organizer_request = OrganizerDialogResult(
+        mode='reorganize',
+        organize_options=FlagOrganizeFilesOptions(
+            criterion='flag',
+            action='copy',
+            output_parent=tmp_path,
+            flag_folder_mode='picked_rejected',
+            conflict_policy='fail',
+        ),
+    )
+    window._show_progress('Organizing', 50)
+
+    window._handle_operation_finished(
+        OperationSummary(
+            processed_photos=1,
+            copied_files=2,
+            undo_plan=UndoPlan(),
+        )
+    )
+
+    assert reload_calls == []
+    assert window._main_view_frozen_after_move_organize is False
+    assert window.move_organize_frozen_overlay.isHidden() is True
+    assert window.current_photo_id == 'IMG_9250'
+    assert window.open_button.isEnabled() is True
+    assert window.organize_button.isEnabled() is True
+    assert window.filter_button.isEnabled() is True
+    assert window.thumbnail_list.isEnabled() is True
+    assert window.viewer.isEnabled() is True
+    assert all(
+        action.isEnabled() is True for action in window._assignment_actions
+    )
+    assert len(dialog_calls) == 1
+    assert dialog_calls[0][0].copied_files == 2
+    assert dialog_calls[0][1] is not None
+    assert dialog_calls[0][1].mode == 'reorganize'
+
+    window.close()
+    del app
+
+
+def test_main_window_move_frozen_state_blocks_workspace_actions(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify frozen workspaces block direct and UI-routed photo actions.
+
+    Disabled widgets alone do not protect programmatic QAction, shortcut, or
+    helper calls, so this regression test exercises the central guard paths.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_9260', 'dimgray'), ('IMG_9261', 'navy')],
+    )
+    _select_list_rows(window.thumbnail_list, [0, 1])
+    progress_calls: list[str] = []
+    organizer_calls: list[str] = []
+    monkeypatch.setattr(
+        window,
+        '_show_progress',
+        lambda message, *_args, **_kwargs: progress_calls.append(message),
+    )
+    monkeypatch.setattr(
+        window,
+        '_start_organizer_request',
+        lambda _request: organizer_calls.append('organize'),
+    )
+    photo = window.library.get_photo('IMG_9260')
+    previous_sort_mode = window.library.sort_mode
+    previous_recursive = window.library.load_recursively
+
+    window._set_main_view_frozen_after_move_organize(frozen=True)
+    window.rating_actions[5].trigger()
+    window.color_label_actions['purple'].trigger()
+    window.flag_actions['picked'].trigger()
+    window._assignment_shortcuts[0].activated.emit()
+    window._apply_photo_filter(
+        PhotoFilterSelection(allowed_flags=frozenset({'picked'}))
+    )
+    window._set_photo_sort_mode(PHOTO_SORT_MODE_CAPTURE_TIME, persist=True)
+    window._set_photo_load_recursively(not previous_recursive, persist=True)
+    window.detect_scenes()
+    window.open_organizer_dialog()
+    window._enter_browse_mode()
+    window._enter_compare_mode()
+    window.thumbnail_list.setCurrentRow(1)
+    app.processEvents()
+
+    assert photo.rating is None
+    assert photo.color_label is None
+    assert photo.flag is None
+    assert window._photo_filter_selection == PhotoFilterSelection.default()
+    assert window.library.sort_mode == previous_sort_mode
+    assert window.library.load_recursively is previous_recursive
+    assert progress_calls == []
+    assert organizer_calls == []
+    assert window._browse_mode is False
+    assert window._compare_mode is False
+    assert window.current_photo_id == 'IMG_9260'
+
+    window.close()
+    del app
+
+
+def test_main_window_move_frozen_state_blocks_shortcut_help(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify frozen workspaces do not open shortcut help.
+
+    The post-move overlay is the recovery explanation for stale source paths.
+    Opening shortcut help above it would advertise Esc dismissal while frozen
+    shortcuts are disabled, so the help action must wait for recovery.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_9266', 'dimgray')],
+    )
+    window._set_main_view_frozen_after_move_organize(frozen=True)
+
+    window.shortcut_help_action.trigger()
+    app.processEvents()
+
+    assert window.shortcut_help_overlay.isHidden() is True
+    assert window.move_organize_frozen_overlay.isVisible() is True
+
+    window.close()
+    del app
+
+
+def test_main_window_move_frozen_state_blocks_scene_edits(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify frozen workspaces block direct scene mutation helpers.
+
+    Scene edit helpers can be called by actions, context menus, and tests. They
+    need their own frozen-state guard so future entry points cannot edit saved
+    scene metadata while loaded photo records may point at moved paths.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_9262', 'dimgray'),
+            ('IMG_9263', 'navy'),
+            ('IMG_9264', 'green'),
+            ('IMG_9265', 'white'),
+        ],
+        scene_groups=[
+            ['IMG_9262', 'IMG_9263'],
+            ['IMG_9264'],
+            ['IMG_9265'],
+        ],
+    )
+    _select_list_rows(window.thumbnail_list, [1, 2])
+    original_groups = window.library.scene_group_photo_ids()
+    confirmation_calls: list[str] = []
+    save_calls: list[str] = []
+    monkeypatch.setattr(
+        window,
+        '_confirm_break_scene',
+        lambda: confirmation_calls.append('break') or True,
+    )
+    monkeypatch.setattr(
+        window.library,
+        'save_metadata',
+        lambda: save_calls.append('save'),
+    )
+
+    window._set_main_view_frozen_after_move_organize(frozen=True)
+    window._break_scene_into_singletons(window.library.scenes[0].scene_id)
+    window._merge_selected_photos_into_scene()
+    app.processEvents()
+
+    assert window.library.scene_group_photo_ids() == original_groups
+    assert confirmation_calls == []
+    assert save_calls == []
+    assert window._metadata_undo_stack == []
+
+    window.close()
+    del app
+
+
+def test_main_window_open_folder_success_clears_move_frozen_state(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify a successful folder open unfreezes the post-move workspace.
+
+    Open Folder is the intentional recovery path from moved source files, so it
+    must remain available while frozen and restore normal controls after load.
+    """
+    initial_folder = tmp_path / 'initial'
+    next_folder = tmp_path / 'next'
+    initial_folder.mkdir()
+    next_folder.mkdir()
+    create_jpeg(initial_folder / 'IMG_9270.JPG', 'dimgray')
+    create_jpeg(next_folder / 'IMG_9271.JPG', 'navy')
+    _, app, window = create_main_window_with_library(
+        initial_folder,
+        monkeypatch,
+        photo_specs=[],
+    )
+    monkeypatch.setattr(
+        QFileDialog,
+        'getExistingDirectory',
+        lambda *_args, **_kwargs: str(next_folder),
+    )
+    window._set_main_view_frozen_after_move_organize(frozen=True)
+
+    window.choose_folder()
+
+    assert window._main_view_frozen_after_move_organize is False
+    assert window.move_organize_frozen_overlay.isHidden() is True
+    assert window.library.current_folder == next_folder
+    assert window.current_photo_id == 'IMG_9271'
+    assert window.thumbnail_list.isEnabled() is True
+    assert window.organize_button.isEnabled() is True
+
+    window.close()
+    del app
+
+
+def test_main_window_open_folder_cancel_keeps_move_frozen_state(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify cancelling Open Folder leaves the workspace frozen.
+
+    A cancelled picker does not replace stale moved-file records, so the UI
+    must keep blocking navigation and tagging after the dialog closes.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_9272', 'dimgray')],
+    )
+    monkeypatch.setattr(
+        QFileDialog,
+        'getExistingDirectory',
+        lambda *_args, **_kwargs: '',
+    )
+    window._set_main_view_frozen_after_move_organize(frozen=True)
+
+    window.choose_folder()
+
+    assert window._main_view_frozen_after_move_organize is True
+    assert window.move_organize_frozen_overlay.isVisible() is True
+    assert window.thumbnail_list.isEnabled() is False
+    assert window.open_button.isEnabled() is True
+
+    window.close()
+    del app
+
+
+def test_main_window_open_folder_failure_keeps_move_frozen_state(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify a failed folder open leaves the workspace frozen.
+
+    Failed recovery still leaves the old moved-file records loaded, so controls
+    must stay blocked even after the error dialog restores normal busy state.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_9273', 'dimgray')],
+    )
+    errors: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        QFileDialog,
+        'getExistingDirectory',
+        lambda *_args, **_kwargs: str(tmp_path),
+    )
+    monkeypatch.setattr(
+        window.library,
+        'load_folder',
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError('boom')),
+    )
+    monkeypatch.setattr(
+        QMessageBox,
+        'critical',
+        lambda _parent, title, text: errors.append((title, text)),
+    )
+    window._set_main_view_frozen_after_move_organize(frozen=True)
+
+    window.choose_folder()
+
+    assert errors == [('Failed to Open Folder', 'boom')]
+    assert window._main_view_frozen_after_move_organize is True
+    assert window.move_organize_frozen_overlay.isVisible() is True
+    assert window.thumbnail_list.isEnabled() is False
+    assert window.open_button.isEnabled() is True
+
+    window.close()
+    del app
+
+
 def test_main_window_xmp_operation_finished_shows_dialog_without_reload(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """
+    Verify XMP completion skips reload and keeps the workspace interactive.
+
+    XMP writes update sidecars rather than photo paths, so this protects the
+    move-only freeze boundary from metadata-sidecar workflows.
+    """
     _, app, window = create_main_window_with_library(
         tmp_path,
         monkeypatch,
@@ -3569,9 +3991,9 @@ def test_main_window_xmp_operation_finished_shows_dialog_without_reload(
         tuple[OperationSummary, OrganizerDialogResult | None]
     ] = []
     monkeypatch.setattr(
-        window,
-        '_reload_current_folder_after_move',
-        lambda: reload_calls.append('reload'),
+        window.library,
+        'load_folder',
+        lambda *_args, **_kwargs: reload_calls.append('reload'),
     )
     monkeypatch.setattr(
         window,
@@ -3596,6 +4018,13 @@ def test_main_window_xmp_operation_finished_shows_dialog_without_reload(
     )
 
     assert reload_calls == []
+    assert window._main_view_frozen_after_move_organize is False
+    assert window.move_organize_frozen_overlay.isHidden() is True
+    assert window.current_photo_id == 'IMG_9300'
+    assert window.organize_button.isEnabled() is True
+    assert window.filter_button.isEnabled() is True
+    assert window.thumbnail_list.isEnabled() is True
+    assert window.viewer.isEnabled() is True
     assert window._busy is False
     assert len(dialog_calls) == 1
     assert dialog_calls[0][0].written_sidecars == 1
@@ -3665,6 +4094,12 @@ def test_main_window_operation_finished_with_undo_starts_worker_immediately(
 def test_main_window_undo_finished_reloads_folder_and_shows_confirmation(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """
+    Verify successful organizer undo clears the post-move frozen state.
+
+    Undo reloads the folder after restoring moved files, so the old stale path
+    risk is gone and the normal workspace controls should be re-enabled.
+    """
     _, app, window = create_main_window_with_library(
         tmp_path,
         monkeypatch,
@@ -3682,18 +4117,79 @@ def test_main_window_undo_finished_reloads_folder_and_shows_confirmation(
         'information',
         lambda _parent, title, text: info_calls.append((title, text)),
     )
+    window._set_main_view_frozen_after_move_organize(frozen=True)
     window._operation_kind = 'undo'
     window._show_progress('Undoing', 50)
 
     window._handle_operation_finished(None)
 
     assert reload_calls == ['reload']
+    assert window._main_view_frozen_after_move_organize is False
+    assert window.move_organize_frozen_overlay.isHidden() is True
+    assert window.thumbnail_list.isEnabled() is True
     assert window._busy is False
     assert window._operation_kind is None
     assert info_calls == [
         (
             'Undo Complete',
             'The last photo organization operation was undone.',
+        )
+    ]
+
+    window.close()
+    del app
+
+
+def test_main_window_undo_reload_failure_keeps_move_frozen_state(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify undo reload failure preserves the frozen post-move workspace.
+
+    The file operation may have undone, but a failed reload means the visible
+    UI may still reference stale records, so controls must remain blocked.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_9321', 'dimgray')],
+    )
+    errors: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        window,
+        '_reload_current_folder_after_undo',
+        lambda: (_ for _ in ()).throw(RuntimeError('reload boom')),
+    )
+    monkeypatch.setattr(
+        QMessageBox,
+        'critical',
+        lambda _parent, title, text: errors.append((title, text)),
+    )
+    window._set_main_view_frozen_after_move_organize(frozen=True)
+    window._operation_kind = 'undo'
+    window._show_progress('Undoing', 50)
+
+    window._handle_operation_finished(None)
+
+    assert window._main_view_frozen_after_move_organize is True
+    assert window.move_organize_frozen_overlay.isVisible() is True
+    assert window.thumbnail_list.isEnabled() is False
+    assert all(
+        action.isEnabled() is False for action in window._assignment_actions
+    )
+    assert all(
+        shortcut.isEnabled() is False
+        for shortcut in window._assignment_shortcuts
+    )
+    assert window._busy is False
+    assert window._operation_kind is None
+    assert errors == [
+        (
+            'Folder Reload Failed',
+            (
+                'Undo completed, but the folder could not be reloaded:\n'
+                'reload boom'
+            ),
         )
     ]
 

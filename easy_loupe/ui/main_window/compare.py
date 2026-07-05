@@ -31,7 +31,12 @@ class MainWindowCompareMixin:
         self._refresh_selection_labels()
 
     def _enter_compare_mode(self: MainWindow) -> None:
-        if self._compare_mode or self._busy or not self.library.photos:
+        if (
+            self._compare_mode
+            or self._busy
+            or self._main_view_frozen_after_move_organize
+            or not self.library.photos
+        ):
             return
 
         restore_photo_ids = self._resolved_selection_photo_ids()

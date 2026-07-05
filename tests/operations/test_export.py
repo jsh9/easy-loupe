@@ -233,6 +233,90 @@ def test_organize_photos_flag_folder_modes_route_files(
     _assert_bucket_files(output_parent, expected_bucket_files)
 
 
+@pytest.mark.parametrize('action', ['copy', 'move'])
+def test_organize_photos_can_split_jpg_and_raw_outputs(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        action: str,
+) -> None:
+    """
+    Verify optional JPG/RAW splitting nests format folders inside buckets.
+
+    The split is destination-only: counts, sidecar handling, and source
+    copy/move behavior should stay aligned with normal organization.
+    """
+    source_folder, library = _make_library(tmp_path, monkeypatch)
+    output_parent = tmp_path / 'organized'
+
+    summary = organize_photos(
+        source_folder,
+        library.get_photos(),
+        FlagOrganizeFilesOptions(
+            criterion='flag',
+            action=action,  # type: ignore[arg-type]
+            output_parent=output_parent,
+            flag_folder_mode='picked_rejected_untagged',
+            conflict_policy='fail',
+            split_jpg_raw=True,
+        ),
+    )
+
+    assert summary.processed_photos == 3
+    if action == 'copy':
+        assert summary.copied_files == 6
+        assert summary.moved_files == 0
+        _assert_sources_present(source_folder, list(ALL_SOURCE_FILENAMES))
+    else:
+        assert summary.copied_files == 0
+        assert summary.moved_files == 6
+        _assert_sources_absent(source_folder, list(ALL_SOURCE_FILENAMES))
+
+    assert (output_parent / 'Picked' / 'jpg' / 'IMG_A.JPG').exists()
+    assert (output_parent / 'Rejected' / 'raw' / 'IMG_B.CR3').exists()
+    assert (output_parent / 'Rejected' / 'raw' / 'IMG_B.XMP').exists()
+    assert (output_parent / 'Untagged' / 'jpg' / 'IMG_C.JPG').exists()
+    assert (output_parent / 'Untagged' / 'raw' / 'IMG_C.CR3').exists()
+    assert (output_parent / 'Untagged' / 'raw' / 'IMG_C.XMP').exists()
+
+
+def test_organize_photos_split_jpg_raw_requires_both_formats(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify split requests keep the old layout when only one format exists.
+
+    The checkbox is intentionally "when applicable"; JPG-only folders should
+    not gain a redundant ``jpg`` subfolder.
+    """
+    source_folder = tmp_path / 'source'
+    source_folder.mkdir()
+    create_jpeg(source_folder / 'IMG_A.JPG', 'red')
+    create_jpeg(source_folder / 'IMG_B.JPG', 'blue')
+    stub_read_exif(monkeypatch, {})
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache-jpg-only')
+    library.load_folder(source_folder)
+    library.update_metadata('IMG_A', flag='picked', fields={'flag'})
+
+    output_parent = tmp_path / 'organized'
+    summary = organize_photos(
+        source_folder,
+        library.get_photos(),
+        FlagOrganizeFilesOptions(
+            criterion='flag',
+            action='copy',
+            output_parent=output_parent,
+            flag_folder_mode='picked_rejected',
+            conflict_policy='fail',
+            split_jpg_raw=True,
+        ),
+    )
+
+    assert summary.copied_files == 1
+    assert (output_parent / 'Picked' / 'IMG_A.JPG').exists()
+    assert (output_parent / 'Picked' / 'jpg').exists() is False
+
+
 @pytest.mark.parametrize('flag_folder_mode', FLAG_FOLDER_MODES)
 def test_organize_photos_flag_folder_modes_preflight_conflicts(
         tmp_path: Path,
@@ -579,6 +663,58 @@ def test_organize_photos_preserves_relative_subfolder_paths(
     assert (source_folder / 'Picked').exists() is False
 
 
+def test_organize_photos_split_jpg_raw_preserves_relative_subfolder_paths(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify split JPG/RAW output still preserves recursive source subfolders.
+
+    The format folder is inserted under the metadata bucket, but the original
+    folder-relative path must remain below it to avoid filename collisions.
+    """
+    source_folder = tmp_path / 'source'
+    nested = source_folder / 'subfolder_1'
+    nested.mkdir(parents=True)
+    create_jpeg(nested / 'IMG_A.JPG', 'red')
+    (nested / 'IMG_A.CR3').write_bytes(b'raw-a')
+    (nested / 'IMG_A.XMP').write_text('<xmp/>', encoding='utf-8')
+    stub_read_exif(monkeypatch, {})
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache-recursive-split')
+    library.load_folder(source_folder)
+    library.update_metadata(
+        'subfolder_1/IMG_A',
+        flag='picked',
+        fields={'flag'},
+    )
+
+    output_parent = tmp_path / 'organized'
+    summary = organize_photos(
+        source_folder,
+        library.get_photos(),
+        FlagOrganizeFilesOptions(
+            criterion='flag',
+            action='copy',
+            output_parent=output_parent,
+            flag_folder_mode='picked_rejected',
+            conflict_policy='fail',
+            include_sidecars=True,
+            split_jpg_raw=True,
+        ),
+    )
+
+    assert summary.copied_files == 3
+    assert (
+        output_parent / 'Picked' / 'jpg' / 'subfolder_1' / 'IMG_A.JPG'
+    ).exists()
+    assert (
+        output_parent / 'Picked' / 'raw' / 'subfolder_1' / 'IMG_A.CR3'
+    ).exists()
+    assert (
+        output_parent / 'Picked' / 'raw' / 'subfolder_1' / 'IMG_A.XMP'
+    ).exists()
+    assert (source_folder / 'Picked').exists() is False
+
+
 def test_organize_and_undo_report_structured_progress(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -817,7 +953,7 @@ def _expected_flag_bucket_files(
     if flag_folder_mode == 'picked_others':
         return {
             'Picked': {'IMG_A.JPG'},
-            'Others': {
+            'Not picked': {
                 'IMG_B.CR3',
                 'IMG_B.XMP',
                 'IMG_C.CR3',
@@ -829,7 +965,7 @@ def _expected_flag_bucket_files(
     if flag_folder_mode == 'rejected_others':
         return {
             'Rejected': {'IMG_B.CR3', 'IMG_B.XMP'},
-            'Others': {
+            'Not rejected': {
                 'IMG_A.JPG',
                 'IMG_C.CR3',
                 'IMG_C.JPG',

@@ -1,11 +1,20 @@
 # Change Log
 
-## [Unreleased]
+## [1.4.2] - 2026-07-05
+
+- Added
+
+  - `Organize Photos` can optionally split JPG/JPEG and RAW outputs into
+    separate child folders inside each metadata bucket, with shared XMP
+    sidecars kept with RAW output.
 
 - Changed
 
-  - Clarified the picked/rejected two-folder organizer options as `Not picked`
-    and `Not rejected` in the `Organize Photos` dialog.
+  - Renamed the picked/rejected two-folder organizer options and output folders
+    from `Others` to `Not picked` and `Not rejected`.
+  - Move-based photo organization no longer re-imports the current folder after
+    completion. After files are moved, the main photo workspace freezes with a
+    message until the user opens another folder or immediately undoes the move.
 
 ## [1.4.1] - 2026-07-04
 

@@ -32,9 +32,13 @@ Choose:
 - The conflict policy: fail the whole run, skip conflicts, or overwrite
   conflicts.
 
-Picked/rejected organization can route `Picked`, `Rejected`, `Untagged`, and
-`Others` buckets. Color-label and rating organization can optionally include
-untagged photos.
+Picked/rejected organization can route `Picked`, `Rejected`, `Untagged`,
+`Not picked`, and `Not rejected` buckets. Color-label and rating organization
+can optionally include untagged photos.
+
+If the folder contains both JPG/JPEG and RAW files, `JPG & raw` can split
+organized files into `jpg` and `raw` folders inside each metadata bucket.
+Shared XMP sidecars for RAW-backed photos are placed with the RAW output.
 
 When photos came from subfolders, EasyLoupe preserves source subfolder paths
 inside each output bucket so same-named files do not collide.
@@ -55,5 +59,6 @@ shown. Interaction and metadata assignment are paused until the operation
 finishes.
 
 When an operation can be undone, the finished dialog offers an immediate undo
-action. Move-based organization reloads the current folder after completion or
-undo so the visible folder state matches the filesystem.
+action. Move-based organization does not reload the current folder after
+completion; undo reloads after restoring the moved files so the visible folder
+state matches the filesystem again.

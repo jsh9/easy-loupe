@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from easy_loupe.core.records import JPEG_EXTENSIONS, RAW_EXTENSIONS
 from easy_loupe.core.recursive_loading import (
     normalize_relative_file_path,
     resolve_relative_path,
@@ -64,6 +65,7 @@ class FlagOrganizeFilesOptions:
     flag_folder_mode: FlagFolderMode
     conflict_policy: ConflictPolicy
     include_sidecars: bool = True
+    split_jpg_raw: bool = False
 
 
 @dataclass(slots=True, frozen=True)
@@ -83,6 +85,7 @@ class MetadataOrganizeFilesOptions:
     include_untagged: bool
     conflict_policy: ConflictPolicy
     include_sidecars: bool = True
+    split_jpg_raw: bool = False
 
 
 @dataclass(slots=True, frozen=True)
@@ -105,6 +108,7 @@ class OrganizeFilesOptions:
     include_untagged: bool
     conflict_policy: ConflictPolicy
     include_sidecars: bool = True
+    split_jpg_raw: bool = False
 
 
 type OrganizeFilesRequest = (
@@ -230,6 +234,12 @@ def _build_jobs(
         options: OrganizeFilesRequest,
 ) -> list[_OrganizeJob]:
     jobs: list[_OrganizeJob] = []
+    # Treat split output as a whole-run layout choice. If the loaded set lacks
+    # either side of the JPG/RAW pair, keep the old flat bucket layout so the
+    # optional checkbox does not create redundant format folders.
+    split_jpg_raw = options.split_jpg_raw and _photos_include_jpg_and_raw(
+        photos
+    )
     for photo in photos:
         folder_name = _target_folder_name(photo, options)
         if folder_name is None:
@@ -237,9 +247,14 @@ def _build_jobs(
 
         sources = list(_source_paths_for_photo(current_folder, photo, options))
         destinations = tuple(
-            options.output_parent.expanduser().resolve()
-            / folder_name
-            / _relative_output_path(current_folder, path)
+            _destination_path_for_source(
+                current_folder,
+                photo,
+                path,
+                options.output_parent.expanduser().resolve(),
+                folder_name,
+                split_jpg_raw=split_jpg_raw,
+            )
             for path in sources
         )
         jobs.append(
@@ -268,6 +283,62 @@ def _source_paths_for_photo(
             sources.append(sidecar_path)
 
     return tuple(sources)
+
+
+def _photos_include_jpg_and_raw(photos: list[PhotoRecord]) -> bool:
+    return any(photo.has_jpeg for photo in photos) and any(
+        photo.has_raw for photo in photos
+    )
+
+
+def _destination_path_for_source(
+        current_folder: Path,
+        photo: PhotoRecord,
+        source: Path,
+        output_parent: Path,
+        folder_name: str,
+        *,
+        split_jpg_raw: bool,
+) -> Path:
+    relative_path = _relative_output_path(current_folder, source)
+    format_folder = _format_folder_for_source(
+        current_folder,
+        photo,
+        source,
+        split_jpg_raw=split_jpg_raw,
+    )
+    if format_folder is None:
+        return output_parent / folder_name / relative_path
+
+    return output_parent / folder_name / format_folder / relative_path
+
+
+def _format_folder_for_source(
+        current_folder: Path,
+        photo: PhotoRecord,
+        source: Path,
+        *,
+        split_jpg_raw: bool,
+) -> str | None:
+    if not split_jpg_raw:
+        return None
+
+    suffix = source.suffix.lower()
+    if suffix in JPEG_EXTENSIONS:
+        return 'jpg'
+
+    if suffix in RAW_EXTENSIONS:
+        return 'raw'
+
+    # Shared XMP sidecars describe the grouped photo. Keep them beside RAW
+    # output when RAW exists so split runs avoid duplicate sidecars while still
+    # keeping external metadata with the RAW file most editors will ingest.
+    if photo.has_raw and source == sidecar_path_for_photo(
+        current_folder, photo
+    ):
+        return 'raw'
+
+    return None
 
 
 def _relative_output_path(current_folder: Path, source: Path) -> Path:
@@ -381,10 +452,10 @@ def _target_flag_folder_name(
         return None
 
     if flag_folder_mode == 'picked_others':
-        return 'Picked' if photo.flag == 'picked' else 'Others'
+        return 'Picked' if photo.flag == 'picked' else 'Not picked'
 
     if flag_folder_mode == 'rejected_others':
-        return 'Rejected' if photo.flag == 'rejected' else 'Others'
+        return 'Rejected' if photo.flag == 'rejected' else 'Not rejected'
 
     if flag_folder_mode == 'picked_only':
         return 'Picked' if photo.flag == 'picked' else None

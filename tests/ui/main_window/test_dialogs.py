@@ -20,7 +20,9 @@ def test_organizer_dialog_defaults_and_mode_switch(tmp_path: Path) -> None:
 
     The dialog is the only place that maps exact labels to backend option
     values, so this protects defaults, disabled child controls, and removal of
-    the old global untagged checkbox from drifting apart.
+    the old global untagged checkbox from drifting apart. It also locks the
+    JPG/RAW split checkbox off by default so existing organizer runs keep their
+    current output shape.
     """
     app = QApplication.instance() or QApplication([])
     dialog = OrganizerDialog(current_folder=tmp_path)
@@ -90,6 +92,10 @@ def test_organizer_dialog_defaults_and_mode_switch(tmp_path: Path) -> None:
     assert dialog.rating_include_untagged_checkbox.isEnabled() is False
     assert dialog.color_include_untagged_checkbox.isChecked() is False
     assert dialog.rating_include_untagged_checkbox.isChecked() is False
+    assert dialog.split_jpg_raw_checkbox.text() == (
+        'When applicable, put JPG and raw into separate folders'
+    )
+    assert dialog.split_jpg_raw_checkbox.isChecked() is False
     assert hasattr(dialog, 'include_untagged_checkbox') is False
     assert dialog.output_parent_edit.text() == str(tmp_path)
     assert dialog._selected_value(dialog.conflict_policy_group) == 'fail'
@@ -119,7 +125,9 @@ def test_organizer_dialog_selected_result_builds_typed_options(
 
     Rating/color results must omit flag folder modes, and flag results must
     omit untagged checkboxes, so callers cannot observe stale disabled-control
-    state from another criterion.
+    state from another criterion. The JPG/RAW split option applies to every
+    reorganize criterion, so this test verifies both typed request paths carry
+    the shared checkbox state.
     """
     app = QApplication.instance() or QApplication([])
     dialog = OrganizerDialog(current_folder=tmp_path)
@@ -128,6 +136,7 @@ def test_organizer_dialog_selected_result_builds_typed_options(
     )
     dialog._button_with_value(dialog.action_group, 'move').setChecked(True)
     dialog.rating_include_untagged_checkbox.setChecked(True)
+    dialog.split_jpg_raw_checkbox.setChecked(True)
     dialog._button_with_value(
         dialog.conflict_policy_group, 'overwrite'
     ).setChecked(True)
@@ -149,6 +158,7 @@ def test_organizer_dialog_selected_result_builds_typed_options(
     assert reorganize_result.organize_options.include_untagged is True
     assert reorganize_result.organize_options.conflict_policy == 'overwrite'
     assert reorganize_result.organize_options.output_parent == tmp_path
+    assert reorganize_result.organize_options.split_jpg_raw is True
 
     dialog._button_with_value(dialog.criterion_group, 'flag').setChecked(True)
     dialog._button_with_value(
@@ -163,6 +173,7 @@ def test_organizer_dialog_selected_result_builds_typed_options(
     )
     assert flag_result.organize_options.criterion == 'flag'
     assert flag_result.organize_options.flag_folder_mode == 'picked_others'
+    assert flag_result.organize_options.split_jpg_raw is True
     assert hasattr(flag_result.organize_options, 'include_untagged') is False
 
     dialog._button_with_value(dialog.mode_group, 'xmp').setChecked(True)
