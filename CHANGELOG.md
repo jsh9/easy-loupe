@@ -1,5 +1,12 @@
 # Change Log
 
+## [Unreleased]
+
+- Changed
+
+  - Reduced mouse wheel and trackpad scrolling speed in the main culling view's
+    left thumbnail strip.
+
 ## [1.4.2] - 2026-07-05
 
 - Added

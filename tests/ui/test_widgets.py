@@ -3,10 +3,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from PySide6.QtCore import QPoint, QSize, Qt
-from PySide6.QtGui import QColor, QPixmap
+from PySide6.QtCore import QPoint, QPointF, QSize, Qt
+from PySide6.QtGui import QColor, QPixmap, QWheelEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QAbstractItemView, QApplication
 
 import easy_loupe.ui.theme as theme_module
 import easy_loupe.ui.widgets as widgets_module
@@ -30,6 +30,66 @@ def _label_bottom(label: Any) -> int:
     parent = label.parentWidget()
     assert parent is not None
     return parent.y() + label.geometry().bottom()
+
+
+class _ThumbnailListOwner:
+    @staticmethod
+    def extend_thumbnail_selection(_direction: int) -> bool:
+        return False
+
+
+def _wheel_event(*, pixel_delta: int = 0, angle_delta: int = 0) -> QWheelEvent:
+    return QWheelEvent(
+        QPointF(10, 10),
+        QPointF(10, 10),
+        QPoint(0, pixel_delta),
+        QPoint(0, angle_delta),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.NoScrollPhase,
+        False,
+    )
+
+
+def test_thumbnail_list_wheel_event_scrolls_at_reduced_speed() -> None:
+    """
+    Verify wheel input scrolls the left thumbnail strip at reduced speed.
+
+    The main culling view uses ``ThumbnailListWidget`` for its vertical strip;
+    this keeps the UX tuning local to that widget and protects against falling
+    back to Qt's faster default wheel handling.
+    """
+    app = QApplication.instance() or QApplication([])
+    widget = widgets_module.ThumbnailListWidget(_ThumbnailListOwner())
+    widget.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+    widget.verticalScrollBar().setSingleStep(20)
+    widget.resize(160, 120)
+    for row in range(40):
+        widget.addItem(f'IMG_{row:04d}')
+
+    widget.show()
+    app.processEvents()
+
+    scroll_bar = widget.verticalScrollBar()
+    assert scroll_bar.maximum() > 0
+
+    full_speed_delta = (
+        QApplication.wheelScrollLines() * scroll_bar.singleStep()
+    )
+    scroll_speed = widgets_module.ThumbnailListWidget._WHEEL_SCROLL_SPEED
+    widget.wheelEvent(_wheel_event(angle_delta=-120))
+
+    assert scroll_bar.value() == int(full_speed_delta * scroll_speed)
+
+    scroll_bar.setValue(0)
+    widget.wheelEvent(_wheel_event(pixel_delta=-7))
+    first_pixel_scroll = scroll_bar.value()
+    widget.wheelEvent(_wheel_event(pixel_delta=-7))
+
+    assert first_pixel_scroll == int(7 * scroll_speed)
+    assert scroll_bar.value() == int(14 * scroll_speed)
+
+    widget.close()
 
 
 def test_thumbnail_preview_widget_masks_outside_visible_region_and_draws_red_edge() -> (

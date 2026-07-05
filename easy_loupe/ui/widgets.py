@@ -5,8 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QWheelEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QGraphicsColorizeEffect,
     QLabel,
@@ -532,9 +533,13 @@ class ThumbnailItemWidget(QWidget):
 class ThumbnailListWidget(QListWidget):
     """Vertical thumbnail list with app-owned Shift range selection."""
 
+    _WHEEL_DEGREES_PER_STEP = 120
+    _WHEEL_SCROLL_SPEED = 0.7
+
     def __init__(self, owner: _ThumbnailNavigator) -> None:
         super().__init__()
         self._owner = owner
+        self._wheel_scroll_remainder = 0.0
 
     def keyPressEvent(self, event: object) -> None:  # noqa: N802 - Qt API
         """Route Shift+Up/Down through MainWindow before Qt handles it."""
@@ -557,6 +562,53 @@ class ThumbnailListWidget(QListWidget):
                 return
 
         super().keyPressEvent(event)
+
+    def wheelEvent(self, event: object) -> None:  # noqa: N802 - Qt API
+        """Scroll the thumbnail strip more slowly than Qt's default."""
+        if not isinstance(event, QWheelEvent):
+            super().wheelEvent(event)  # type: ignore[arg-type]
+            return
+
+        scroll_delta = self._scroll_delta_from_wheel_event(event)
+        if not scroll_delta:
+            super().wheelEvent(event)
+            return
+
+        # Keep sub-pixel remainder so smooth trackpad deltas still accumulate
+        # after the slowdown instead of disappearing through integer rounding.
+        self._wheel_scroll_remainder += scroll_delta
+        scroll_pixels = int(self._wheel_scroll_remainder)
+        self._wheel_scroll_remainder -= scroll_pixels
+
+        if scroll_pixels:
+            scroll_bar = self.verticalScrollBar()
+            scroll_bar.setValue(scroll_bar.value() + scroll_pixels)
+
+        event.accept()
+
+    def _scroll_delta_from_wheel_event(self, event: QWheelEvent) -> float:
+        """Return the slowed vertical scrollbar delta for a wheel event."""
+        pixel_delta = event.pixelDelta().y()
+        if pixel_delta:
+            return -pixel_delta * self._WHEEL_SCROLL_SPEED
+
+        # Traditional wheels report eighths of a degree rather than pixels.
+        # Convert through Qt's line setting and the scrollbar's current step
+        # so the slowed strip still respects platform/application scroll
+        # preferences.
+        angle_delta = event.angleDelta().y()
+        if not angle_delta:
+            return 0.0
+
+        scroll_bar = self.verticalScrollBar()
+        step = scroll_bar.singleStep()
+        lines = QApplication.wheelScrollLines()
+        return (
+            -(angle_delta / self._WHEEL_DEGREES_PER_STEP)
+            * lines
+            * step
+            * self._WHEEL_SCROLL_SPEED
+        )
 
 
 class SceneListWidget(QListWidget):

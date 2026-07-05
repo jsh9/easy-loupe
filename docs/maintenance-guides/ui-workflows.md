@@ -89,6 +89,8 @@ Major logic:
   current batch count beside that row.
 - In normal non-scene view mode after a successful load, the left thumbnail
   strip should be ready to move on the first `Down` keypress.
+- The left thumbnail strip intentionally scales vertical wheel scrolling while
+  preserving normal keyboard navigation and scroll-to-current behavior.
 - Photos default to sorting by EXIF capture timestamp when available, then by
   display name.
 - Users can change the global sort preference from the top-bar `Sort by:`
