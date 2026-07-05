@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -1132,7 +1133,6 @@ class MainWindowWorkflowMixin:
             self._busy
             or self._main_view_frozen_after_move_organize
             or self._compare_mode
-            or self._photo_filter_active()
         ):
             return
 
@@ -1140,6 +1140,9 @@ class MainWindowWorkflowMixin:
         if len(photo_ids) < MIN_SCENE_MERGE_PHOTO_COUNT:
             return
 
+        # Reject partial scene-strip selections before expanding hidden
+        # filtered photos; otherwise the expansion could make a split-like
+        # selection look like a valid full-scene merge.
         if self._is_scene_strip_subset_merge():
             self._show_transient_message(
                 'Cannot split an existing scene group.\n'
@@ -1147,6 +1150,22 @@ class MainWindowWorkflowMixin:
                 timeout_ms=TRANSIENT_MESSAGE_TIMEOUT_MS,
             )
             return
+
+        if self._photo_filter_active():
+            # The visible lists omit filtered photos, while the library merge
+            # API edits exactly the IDs it receives. Fill only hidden gaps here
+            # so the later save/undo/rebuild path stays unchanged.
+            photo_ids, includes_hidden_photos = (
+                self._expand_filtered_merge_photo_ids(photo_ids)
+            )
+            if len(photo_ids) < MIN_SCENE_MERGE_PHOTO_COUNT:
+                return
+
+            if (
+                includes_hidden_photos
+                and not self._confirm_filtered_scene_merge()
+            ):
+                return
 
         thumbnail_anchor = self._capture_thumbnail_scroll_anchor(photo_ids[0])
         before_groups = self.library.scene_group_photo_ids()
@@ -1172,6 +1191,73 @@ class MainWindowWorkflowMixin:
             thumbnail_anchor=thumbnail_anchor,
         )
         self._refresh_metadata_history_actions()
+
+    def _expand_filtered_merge_photo_ids(
+            self: MainWindow, photo_ids: list[str]
+    ) -> tuple[list[str], bool]:
+        """
+        Include photos hidden by the active filter between selected endpoints.
+
+        Filtered lists contain only matching photos. When two selected visible
+        photos have hidden photos between them in the full library order, those
+        hidden photos must be passed to the exact-ID merge API explicitly.
+        """
+        selected = set(photo_ids)
+        full_photo_ids = [
+            photo.photo_id for photo in self.library.get_photos()
+        ]
+        ordered_selected = [
+            photo_id for photo_id in full_photo_ids if photo_id in selected
+        ]
+        if len(ordered_selected) < MIN_SCENE_MERGE_PHOTO_COUNT:
+            return ordered_selected, False
+
+        visible_photo_ids = {
+            photo.photo_id for photo in self._visible_photos()
+        }
+        index_by_photo_id = {
+            photo_id: index for index, photo_id in enumerate(full_photo_ids)
+        }
+        expanded = set(ordered_selected)
+        includes_hidden_photos = False
+        for previous_photo_id, next_photo_id in itertools.pairwise(
+            ordered_selected
+        ):
+            previous_index = index_by_photo_id[previous_photo_id]
+            next_index = index_by_photo_id[next_photo_id]
+            for photo_id in full_photo_ids[previous_index + 1 : next_index]:
+                if photo_id in visible_photo_ids:
+                    continue
+
+                expanded.add(photo_id)
+                includes_hidden_photos = True
+
+        return [
+            photo_id for photo_id in full_photo_ids if photo_id in expanded
+        ], includes_hidden_photos
+
+    def _confirm_filtered_scene_merge(self: MainWindow) -> bool:
+        """
+        Ask before a filtered merge includes currently hidden photos.
+
+        Hidden in-between photos are not visible in the selection UI, so this
+        confirmation makes the broader scene edit explicit before metadata is
+        saved and undo history is recorded.
+        """
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle('Merge Includes Hidden Photos')
+        dialog.setText(
+            'Some photos between your selected photos are hidden by the '
+            'current filter. If you continue, those hidden photos will be '
+            'included in the merged scene.'
+        )
+        merge_button = dialog.addButton(
+            'Merge Scene', QMessageBox.ButtonRole.AcceptRole
+        )
+        dialog.addButton(QMessageBox.StandardButton.Cancel)
+        dialog.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        dialog.exec()
+        return dialog.clickedButton() is merge_button
 
     def _mergeable_scene_photo_ids(self: MainWindow) -> list[str]:
         """

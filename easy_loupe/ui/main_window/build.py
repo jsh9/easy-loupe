@@ -1634,7 +1634,6 @@ class MainWindowBuildMixin:
             and self.menuBar().isEnabled()
             and not self._busy
             and not self._compare_mode
-            and not self._photo_filter_active()
             and not self._shortcut_help_modal_active()
         )
         self.merge_scene_action.setEnabled(enabled)
