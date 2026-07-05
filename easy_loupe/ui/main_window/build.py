@@ -1398,8 +1398,11 @@ class MainWindowBuildMixin:
 
     def _toggle_shortcut_help(self: MainWindow) -> None:
         # Busy workflows remain modal. Allow closing already-visible help, but
-        # do not open a new help pane over worker/progress-driven UI state.
-        if self._busy and not self._shortcut_help_modal_active():
+        # do not open a new help pane over worker/progress-driven UI state or
+        # the frozen-workspace message that explains post-move recovery.
+        if (
+            self._busy or self._main_view_frozen_after_move_organize
+        ) and not self._shortcut_help_modal_active():
             return
 
         self.shortcut_help_overlay.toggle_context(

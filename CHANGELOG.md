@@ -10,8 +10,8 @@
 
 - Changed
 
-  - Renamed the picked/rejected two-folder organizer options and output
-    folders from `Others` to `Not picked` and `Not rejected`.
+  - Renamed the picked/rejected two-folder organizer options and output folders
+    from `Others` to `Not picked` and `Not rejected`.
   - Move-based photo organization no longer re-imports the current folder after
     completion. After files are moved, the main photo workspace freezes with a
     message until the user opens another folder or immediately undoes the move.

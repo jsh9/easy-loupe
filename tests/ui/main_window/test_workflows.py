@@ -3775,6 +3775,33 @@ def test_main_window_move_frozen_state_blocks_workspace_actions(
     del app
 
 
+def test_main_window_move_frozen_state_blocks_shortcut_help(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify frozen workspaces do not open shortcut help.
+
+    The post-move overlay is the recovery explanation for stale source paths.
+    Opening shortcut help above it would advertise Esc dismissal while frozen
+    shortcuts are disabled, so the help action must wait for recovery.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_9266', 'dimgray')],
+    )
+    window._set_main_view_frozen_after_move_organize(frozen=True)
+
+    window.shortcut_help_action.trigger()
+    app.processEvents()
+
+    assert window.shortcut_help_overlay.isHidden() is True
+    assert window.move_organize_frozen_overlay.isVisible() is True
+
+    window.close()
+    del app
+
+
 def test_main_window_move_frozen_state_blocks_scene_edits(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
