@@ -930,7 +930,7 @@ def test_filtered_merge_warns_and_includes_hidden_photos(
     Verify filtered scene merges include hidden photos after confirmation.
 
     The visible selection can skip photos hidden by the active filter. The
-    merge must warn before passing those hidden in-between IDs to the exact-ID
+    merge must warn before passing those hidden range IDs to the exact-ID
     library merge API.
     """
     _, app, window = create_main_window_with_library(
@@ -964,10 +964,8 @@ def test_filtered_merge_warns_and_includes_hidden_photos(
     app.processEvents()
 
     assert captured['title'] == 'Merge Includes Hidden Photos'
-    assert captured['text'] == (
-        'Some photos between your selected photos are hidden by the '
-        'current filter. If you continue, those hidden photos will be '
-        'included in the merged scene.'
+    assert (
+        captured['text'] == workflows_module.FILTERED_SCENE_MERGE_WARNING_TEXT
     )
     assert captured['default_button'] == 'Cancel'
     buttons = captured['buttons']
@@ -984,6 +982,76 @@ def test_filtered_merge_warns_and_includes_hidden_photos(
         'groups': [
             ['IMG_7464', 'IMG_7465', 'IMG_7466'],
             ['IMG_7467'],
+        ],
+        'source': 'manual',
+    }
+
+    window.close()
+    del app
+
+
+def test_filtered_merge_expands_visible_stack_to_hidden_scene_range(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify filtered scene-stack merges keep hidden scene members together.
+
+    A visible scene stack can be only part of an underlying scene. Selecting
+    that visible stack must expand to the full original scene before computing
+    the merge range, otherwise hidden leading or trailing scene members can be
+    split away without appearing in the selection UI.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7478', 'dimgray'),
+            ('IMG_7479', 'blue'),
+            ('IMG_7480', 'green'),
+            ('IMG_7481', 'white'),
+            ('IMG_7482', 'purple'),
+        ],
+        scene_groups=[
+            ['IMG_7478', 'IMG_7479', 'IMG_7480', 'IMG_7481'],
+            ['IMG_7482'],
+        ],
+    )
+    window.library.get_photo('IMG_7478').flag = 'rejected'
+    window.library.get_photo('IMG_7479').flag = 'rejected'
+    window.library.get_photo('IMG_7480').flag = 'picked'
+    window.library.get_photo('IMG_7481').flag = 'rejected'
+    window.library.get_photo('IMG_7482').flag = 'picked'
+    window._apply_photo_filter(
+        PhotoFilterSelection(allowed_flags=frozenset({'picked'}))
+    )
+    app.processEvents()
+    _select_list_rows(window.thumbnail_list, [0, 1])
+    app.processEvents()
+    _confirm_next_filtered_scene_merge(monkeypatch, accept=True)
+
+    window.merge_scene_action.trigger()
+    app.processEvents()
+
+    assert [scene.photo_ids for scene in window.library.scenes] == [
+        [
+            'IMG_7478',
+            'IMG_7479',
+            'IMG_7480',
+            'IMG_7481',
+            'IMG_7482',
+        ],
+    ]
+    assert json.loads(
+        (tmp_path / METADATA_FILENAME).read_text(encoding='utf-8')
+    )['scenes'] == {
+        'groups': [
+            [
+                'IMG_7478',
+                'IMG_7479',
+                'IMG_7480',
+                'IMG_7481',
+                'IMG_7482',
+            ],
         ],
         'source': 'manual',
     }
@@ -1031,6 +1099,61 @@ def test_filtered_merge_cancel_keeps_scene_state(
     assert window.library.scene_group_photo_ids() == []
     assert window._metadata_undo_stack == []
     assert not (tmp_path / METADATA_FILENAME).exists()
+
+    window.close()
+    del app
+
+
+def test_merge_shortcut_with_too_few_visible_photos_shows_persistent_notice(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify insufficient filtered merge selections explain how to dismiss.
+
+    The menu and shortcut share one QAction, so real key dispatch should reach
+    the guarded merge handler and show a persistent Esc-dismissable overlay
+    instead of silently doing nothing.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7483', 'dimgray'),
+            ('IMG_7484', 'blue'),
+        ],
+    )
+    window.library.get_photo('IMG_7483').flag = 'picked'
+    window.library.get_photo('IMG_7484').flag = 'rejected'
+    window._apply_photo_filter(
+        PhotoFilterSelection(allowed_flags=frozenset({'picked'}))
+    )
+    app.processEvents()
+    original_groups = window.library.scene_group_photo_ids()
+    set_qt_active_window(window)
+    app.processEvents()
+
+    QTest.keyClick(
+        window,
+        Qt.Key_M,
+        Qt.ControlModifier | Qt.ShiftModifier,
+    )
+    app.processEvents()
+
+    assert window.library.scene_group_photo_ids() == original_groups
+    assert window._metadata_undo_stack == []
+    assert not (tmp_path / METADATA_FILENAME).exists()
+    assert window.transient_message_overlay.isVisible() is True
+    assert window.transient_message_label.text() == (
+        workflows_module.MERGE_REQUIRES_SELECTION_MESSAGE
+    )
+    assert window.transient_message_timer.isActive() is False
+    assert window.exit_compare_shortcut.isEnabled() is True
+
+    window.exit_compare_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.transient_message_overlay.isHidden() is True
+    assert window.exit_compare_shortcut.isEnabled() is False
 
     window.close()
     del app

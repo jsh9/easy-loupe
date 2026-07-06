@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import itertools
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -57,6 +56,15 @@ LOAD_WORKFLOW_PROGRESS_STAGES = (
     *FOLDER_LOAD_PROGRESS_STAGES,
     ProgressStageDefinition('thumbnails', 'Preparing thumbnails'),
     ProgressStageDefinition('browse', 'Preparing browse grid'),
+)
+FILTERED_SCENE_MERGE_WARNING_TEXT = (
+    'Some photos in the selected scene range are hidden by the current '
+    'filter. If you continue, those hidden photos will be included in the '
+    'merged scene.'
+)
+MERGE_REQUIRES_SELECTION_MESSAGE = (
+    'Select at least two visible photos or scene stacks to merge.\n'
+    'Press Esc to exit.'
 )
 
 
@@ -1138,6 +1146,10 @@ class MainWindowWorkflowMixin:
 
         photo_ids = self._mergeable_scene_photo_ids()
         if len(photo_ids) < MIN_SCENE_MERGE_PHOTO_COUNT:
+            self._show_transient_message(
+                MERGE_REQUIRES_SELECTION_MESSAGE,
+                timeout_ms=None,
+            )
             return
 
         # Reject partial scene-strip selections before expanding hidden
@@ -1153,8 +1165,8 @@ class MainWindowWorkflowMixin:
 
         if self._photo_filter_active():
             # The visible lists omit filtered photos, while the library merge
-            # API edits exactly the IDs it receives. Fill only hidden gaps here
-            # so the later save/undo/rebuild path stays unchanged.
+            # API edits exactly the IDs it receives. Expand selected scene
+            # rows to their full hidden-aware range before saving.
             photo_ids, includes_hidden_photos = (
                 self._expand_filtered_merge_photo_ids(photo_ids)
             )
@@ -1196,11 +1208,11 @@ class MainWindowWorkflowMixin:
             self: MainWindow, photo_ids: list[str]
     ) -> tuple[list[str], bool]:
         """
-        Include photos hidden by the active filter between selected endpoints.
+        Include hidden photos in the selected scene-aware merge range.
 
-        Filtered lists contain only matching photos. When two selected visible
-        photos have hidden photos between them in the full library order, those
-        hidden photos must be passed to the exact-ID merge API explicitly.
+        Filtered scene rows can represent only part of an underlying scene.
+        Expand selected photos to their full scene groups first, then merge the
+        contiguous library range spanned by those scene-aware endpoints.
         """
         selected = set(photo_ids)
         full_photo_ids = [
@@ -1218,23 +1230,39 @@ class MainWindowWorkflowMixin:
         index_by_photo_id = {
             photo_id: index for index, photo_id in enumerate(full_photo_ids)
         }
-        expanded = set(ordered_selected)
-        includes_hidden_photos = False
-        for previous_photo_id, next_photo_id in itertools.pairwise(
-            ordered_selected
-        ):
-            previous_index = index_by_photo_id[previous_photo_id]
-            next_index = index_by_photo_id[next_photo_id]
-            for photo_id in full_photo_ids[previous_index + 1 : next_index]:
-                if photo_id in visible_photo_ids:
-                    continue
+        expanded_selected = set(ordered_selected)
+        if self.library.scene_detection_done:
+            # Filtered scene rows may expose only one visible member of a full
+            # scene. Expand through the unfiltered groups so selecting that row
+            # still preserves the hidden scene members during the merge.
+            scene_photo_ids_by_photo_id: dict[str, list[str]] = {}
+            for scene in self.library.get_scene_groups():
+                for scene_photo_id in scene.photo_ids:
+                    scene_photo_ids_by_photo_id[scene_photo_id] = (
+                        scene.photo_ids
+                    )
 
-                expanded.add(photo_id)
-                includes_hidden_photos = True
+            for photo_id in ordered_selected:
+                expanded_selected.update(
+                    scene_photo_ids_by_photo_id.get(photo_id, [photo_id])
+                )
 
-        return [
-            photo_id for photo_id in full_photo_ids if photo_id in expanded
-        ], includes_hidden_photos
+        ordered_expanded = [
+            photo_id
+            for photo_id in full_photo_ids
+            if photo_id in expanded_selected
+        ]
+        if len(ordered_expanded) < MIN_SCENE_MERGE_PHOTO_COUNT:
+            return ordered_expanded, False
+
+        first_index = index_by_photo_id[ordered_expanded[0]]
+        last_index = index_by_photo_id[ordered_expanded[-1]]
+        expanded_range = full_photo_ids[first_index : last_index + 1]
+        includes_hidden_photos = any(
+            photo_id not in visible_photo_ids for photo_id in expanded_range
+        )
+
+        return expanded_range, includes_hidden_photos
 
     def _confirm_filtered_scene_merge(self: MainWindow) -> bool:
         """
@@ -1246,11 +1274,7 @@ class MainWindowWorkflowMixin:
         """
         dialog = QMessageBox(self)
         dialog.setWindowTitle('Merge Includes Hidden Photos')
-        dialog.setText(
-            'Some photos between your selected photos are hidden by the '
-            'current filter. If you continue, those hidden photos will be '
-            'included in the merged scene.'
-        )
+        dialog.setText(FILTERED_SCENE_MERGE_WARNING_TEXT)
         merge_button = dialog.addButton(
             'Merge Scene', QMessageBox.ButtonRole.AcceptRole
         )

@@ -10,7 +10,9 @@
 - Fixed
 
   - `Ctrl+Shift+M`/`Cmd+Shift+M` can now merge filtered culling selections
-    after warning when hidden in-between photos will be included.
+    after warning when hidden photos in the selected scene range will be
+    included, and insufficient filtered merge selections now show an
+    `Esc`-dismissable warning.
 
 ## [1.4.2] - 2026-07-05
 

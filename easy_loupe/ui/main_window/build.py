@@ -1704,13 +1704,19 @@ class MainWindowBuildMixin:
             self: MainWindow,
             message: str,
             *,
-            timeout_ms: int = TRANSIENT_MESSAGE_TIMEOUT_MS,
+            timeout_ms: int | None = TRANSIENT_MESSAGE_TIMEOUT_MS,
     ) -> None:
         self.transient_message_label.setText(message)
         self._update_transient_message_overlay_geometry()
         self.transient_message_overlay.show()
         self.transient_message_overlay.raise_()
-        self.transient_message_timer.start(timeout_ms)
+        if timeout_ms is None:
+            # Keep validation warnings visible until Esc because the message
+            # itself tells users that Esc is the recovery action.
+            self.transient_message_timer.stop()
+        else:
+            self.transient_message_timer.start(timeout_ms)
+
         if hasattr(self, 'exit_compare_shortcut'):
             self.exit_compare_shortcut.setEnabled(True)
 
