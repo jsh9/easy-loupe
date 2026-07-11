@@ -1332,6 +1332,16 @@ class MainWindowWorkflowMixin:
             if len(photo_ids) < MIN_SCENE_MERGE_PHOTO_COUNT:
                 return
 
+            # Expansion can turn one filtered stack back into the exact full
+            # scene it already represents. Catch that before confirmation so
+            # users are not asked to approve a merge the library must no-op.
+            if self._photo_ids_are_exact_existing_scene_group(photo_ids):
+                self._show_transient_message(
+                    MERGE_REQUIRES_SELECTION_MESSAGE,
+                    timeout_ms=None,
+                )
+                return
+
             if (
                 includes_hidden_photos
                 and not self._confirm_filtered_scene_merge()
@@ -1430,6 +1440,15 @@ class MainWindowWorkflowMixin:
         )
 
         return expanded_range, includes_hidden_photos
+
+    def _photo_ids_are_exact_existing_scene_group(
+            self: MainWindow, photo_ids: list[str]
+    ) -> bool:
+        """Return True when the merge would recreate an existing scene."""
+        return any(
+            photo_ids == group
+            for group in self.library.scene_group_photo_ids()
+        )
 
     def _filtered_merge_selection_is_contiguous(
             self: MainWindow,

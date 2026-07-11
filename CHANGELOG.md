@@ -13,6 +13,8 @@
     after warning when hidden photos in the selected continuous visible range
     will be included, while sparse filtered selections and insufficient
     filtered merge selections now show an `Esc`-dismissable warning.
+  - Filtered scene merge no longer asks to include hidden photos when the
+    expanded selection is already exactly one existing scene group.
   - Filtered break-scene attempts now show an `Esc`-dismissable warning
     explaining that the active filter must be cleared instead of silently doing
     nothing.

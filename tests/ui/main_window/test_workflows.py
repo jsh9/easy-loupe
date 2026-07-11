@@ -1011,6 +1011,68 @@ def test_filtered_merge_warns_and_includes_hidden_photos(
     del app
 
 
+def test_filtered_merge_existing_scene_stack_shows_selection_notice(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Avoid hidden-photo confirmation when expansion is already a full scene.
+
+    A filtered scene stack can expose only some members of one existing scene.
+    Expanding that one visible stack may recreate the exact current group, so
+    the UI should show the selection warning instead of asking users to confirm
+    a no-op merge.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_2400', 'dimgray'),
+            ('IMG_2401', 'blue'),
+            ('IMG_2402', 'green'),
+        ],
+        scene_groups=[['IMG_2400', 'IMG_2401', 'IMG_2402']],
+    )
+    window.library.get_photo('IMG_2400').flag = 'picked'
+    window.library.get_photo('IMG_2401').flag = 'rejected'
+    window.library.get_photo('IMG_2402').flag = 'picked'
+    window._apply_photo_filter(
+        PhotoFilterSelection(allowed_flags=frozenset({'picked'}))
+    )
+    app.processEvents()
+    original_groups = window.library.scene_group_photo_ids()
+    _select_list_rows(window.thumbnail_list, [0])
+    app.processEvents()
+    confirmation_calls: list[str] = []
+    monkeypatch.setattr(
+        window,
+        '_confirm_filtered_scene_merge',
+        lambda: confirmation_calls.append('confirm') or True,
+    )
+
+    window.merge_scene_action.trigger()
+    app.processEvents()
+
+    assert confirmation_calls == []
+    assert window.library.scene_group_photo_ids() == original_groups
+    assert window._metadata_undo_stack == []
+    assert not (tmp_path / METADATA_FILENAME).exists()
+    assert window.transient_message_overlay.isVisible() is True
+    assert window.transient_message_label.text() == (
+        workflows_module.MERGE_REQUIRES_SELECTION_MESSAGE
+    )
+    assert window.transient_message_timer.isActive() is False
+    assert window.exit_compare_shortcut.isEnabled() is True
+
+    window.exit_compare_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.transient_message_overlay.isHidden() is True
+    assert window.exit_compare_shortcut.isEnabled() is False
+
+    window.close()
+    del app
+
+
 def test_filtered_merge_blocks_sparse_visible_photo_selection(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
