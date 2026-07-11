@@ -117,6 +117,15 @@ class _ManagedWindow(Protocol):
     def close(self) -> None:
         """Close the managed window."""
 
+    def is_close_in_progress(self) -> bool:
+        """
+        Return whether the window is already closing.
+
+        WindowManager uses this for hidden deferred-close windows, where Qt
+        teardown is waiting on worker cleanup but another app-wide quit sweep
+        can still arrive.
+        """
+
     def setAttribute(  # noqa: N802 - Qt API naming
             self,
             attribute: Qt.WidgetAttribute,
@@ -188,7 +197,7 @@ class WindowManager:
         self._photo_window_factory = photo_window_factory
         self._app = app
         self._confirm_quit = confirm_quit
-        self._application_quit_confirmed = False
+        self._confirmed_quit_window_ids: set[int] = set()
         self._close_all_requested_window_ids: set[int] = set()
         self._windows: list[_ManagedWindow] = []
         if self._app is not None:
@@ -271,6 +280,12 @@ class WindowManager:
             # cleanup window is not sent repeated close events, while later
             # windows opened during that cleanup remain closable.
             self._close_all_requested_window_ids.add(id(window))
+            # Close-in-progress windows have already hidden and requested
+            # worker shutdown. Marking them above is enough; calling close()
+            # again would re-enter the deferred cleanup path.
+            if window.is_close_in_progress():
+                continue
+
             window.close()
 
     def request_application_quit(self) -> bool:
@@ -282,19 +297,37 @@ class WindowManager:
         worker cleanup.
         """
         if not self._windows:
+            self._confirmed_quit_window_ids.clear()
             return True
 
-        if not self._application_quit_confirmed:
+        self._prune_confirmed_quit_window_ids()
+        if not self._confirmed_quit_window_ids:
             if not self._confirm_quit(len(self._windows)):
                 return False
 
             # Native quit events can arrive again while deferred-close windows
-            # are hidden. Remember the user's approval so cleanup continues
-            # without re-prompting or restarting the close sweep.
-            self._application_quit_confirmed = True
+            # are hidden. Remember which retained windows the user approved so
+            # cleanup continues without re-prompting, but later windows require
+            # fresh confirmation after this approved sweep drains.
+            self._confirmed_quit_window_ids = {
+                id(window) for window in self._windows
+            }
 
         self.close_all_windows()
         return not self._windows
+
+    def _prune_confirmed_quit_window_ids(self) -> None:
+        """
+        Forget confirmed-quit approvals for windows no longer retained.
+
+        This keeps a confirmation scoped to the current close sweep: repeated
+        quit events can continue draining the same hidden windows, but later
+        windows must ask again after the original sweep is gone.
+        """
+        retained_window_ids = {id(window) for window in self._windows}
+        self._confirmed_quit_window_ids.intersection_update(
+            retained_window_ids
+        )
 
     def _request_application_quit_from_window(self) -> None:
         """Request app-wide quit from a signal that expects a ``None`` slot."""
@@ -319,6 +352,7 @@ class WindowManager:
     def _remove_window(self, window: _ManagedWindow) -> None:
         """Forget a destroyed window so Qt can quit after the last close."""
         self._close_all_requested_window_ids.discard(id(window))
+        self._confirmed_quit_window_ids.discard(id(window))
         try:
             self._windows.remove(window)
         except ValueError:

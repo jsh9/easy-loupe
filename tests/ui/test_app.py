@@ -308,6 +308,9 @@ class _FakeCullingWindow:
         self.closed = True
         self.destroy()
 
+    def is_close_in_progress(self) -> bool:
+        return self.closed
+
     def destroy(self) -> None:
         if self._destroyed:
             return
@@ -352,6 +355,9 @@ class _FakePhotoWindow:
         self.close_calls += 1
         self.closed = True
         self.destroy()
+
+    def is_close_in_progress(self) -> bool:
+        return self.closed
 
     def windowHandle(self) -> object | None:  # noqa: N802 - Qt naming in fake
         if self.screen is None:
@@ -603,13 +609,52 @@ def test_window_manager_close_app_signal_closes_all_windows_once() -> None:
     assert app.quit_calls == 1
 
 
+def test_window_manager_quit_skips_manually_deferred_close_window() -> None:
+    """
+    Avoid re-closing a hidden window already waiting on worker cleanup.
+
+    A user can close one busy window with Ctrl/Cmd+W or the window control,
+    then confirm app-wide quit from another window before the hidden cleanup
+    owner is destroyed. The app-wide sweep must not send that hidden window a
+    second close event.
+    """
+    app = _FakeApplication()
+    confirm_quit = _ConfirmationRecorder(True)
+    manager = app_module.WindowManager(
+        culling_window_factory=_DeferredCloseCullingWindow,
+        photo_window_factory=_FakePhotoWindow,
+        app=app,
+        confirm_quit=confirm_quit,
+    )
+    deferred = manager.open_culling_window()
+    second = manager.open_photo_window(Path('IMG_1000.JPG'))
+
+    deferred.close()
+
+    assert deferred.close_calls == 1
+    assert manager.windows() == [deferred, second]
+
+    assert app.request_quit() is False
+
+    assert confirm_quit.calls == [2]
+    assert deferred.close_calls == 1
+    assert second.close_calls == 1
+    assert manager.windows() == [deferred]
+    assert app.quit_calls == 0
+
+    deferred.finish_close()
+
+    assert manager.windows() == []
+    assert app.quit_calls == 1
+
+
 def test_window_manager_close_app_reaches_late_window() -> None:
     """
-    Close new windows opened while a deferred Close App sweep is draining.
+    Close late windows while an active confirmed sweep is draining.
 
-    The manager must avoid re-closing the hidden deferred window, but a later
-    Close App request should still reach windows retained after the user has
-    already confirmed app-wide quit.
+    The manager must avoid re-closing the hidden deferred window, but repeated
+    Close App should still reach windows opened before the original confirmed
+    sweep has fully drained.
     """
     app = _FakeApplication()
     confirm_quit = _ConfirmationRecorder(True)
@@ -645,13 +690,47 @@ def test_window_manager_close_app_reaches_late_window() -> None:
     assert app.quit_calls == 1
 
 
+def test_window_manager_quit_confirmation_resets_after_sweep_drains() -> None:
+    """
+    Require fresh confirmation after the originally confirmed sweep drains.
+
+    A live system file-open event can create a new window while an older hidden
+    deferred-close window is still draining. Once the originally confirmed
+    window is gone, that newer window must not inherit stale quit approval.
+    """
+    app = _FakeApplication()
+    confirm_quit = _ConfirmationRecorder(True, True)
+    manager = app_module.WindowManager(
+        culling_window_factory=_DeferredCloseCullingWindow,
+        photo_window_factory=_FakePhotoWindow,
+        app=app,
+        confirm_quit=confirm_quit,
+    )
+    deferred = manager.open_culling_window()
+
+    assert app.request_quit() is False
+
+    late_window = manager.open_photo_window(Path('IMG_1001.JPG'))
+    deferred.finish_close()
+
+    assert manager.windows() == [late_window]
+    assert app.quit_calls == 0
+
+    assert app.request_quit() is True
+
+    assert confirm_quit.calls == [1, 1]
+    assert late_window.close_calls == 1
+    assert manager.windows() == []
+    assert app.quit_calls == 1
+
+
 def test_window_manager_confirmed_quit_drains_deferred_close_once() -> None:
     """
     Avoid repeated confirmation and close requests during deferred app quit.
 
-    The confirmed-quit flag represents the cleanup-draining phase, so repeated
-    native quit events while a hidden window remains retained must not ask the
-    user again or re-close that window.
+    The active confirmed-quit set represents the cleanup-draining phase, so
+    repeated native quit events while a hidden window remains retained must not
+    ask the user again or re-close that window.
     """
     app = _FakeApplication()
     confirm_quit = _ConfirmationRecorder(True)

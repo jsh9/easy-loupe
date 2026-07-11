@@ -142,6 +142,15 @@ class MainWindow(
             ),
         ])
 
+    def is_close_in_progress(self) -> bool:
+        """
+        Return whether the window is already closing.
+
+        WindowManager needs this while this hidden window still owns worker
+        wrappers and is waiting for deferred Qt teardown.
+        """
+        return self._closing
+
     @staticmethod
     def _shortcut_tooltip(label: str, shortcut: str) -> str:
         native_shortcut = QKeySequence(shortcut).toString(

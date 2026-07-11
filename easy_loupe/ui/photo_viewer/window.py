@@ -263,6 +263,15 @@ class PhotoViewerWindow(QMainWindow):
         self._build_shortcuts()
         QTimer.singleShot(0, lambda: self.open_file(self._startup_file))
 
+    def is_close_in_progress(self) -> bool:
+        """
+        Return whether the window is already closing.
+
+        WindowManager needs this while this hidden window still owns worker
+        wrappers and is waiting for deferred Qt teardown.
+        """
+        return self._closing
+
     def _build_ui(self) -> None:
         root = QWidget(self)
         root.setObjectName('photoViewerRoot')
