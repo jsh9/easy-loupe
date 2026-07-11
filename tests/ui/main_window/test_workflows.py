@@ -169,6 +169,27 @@ def _confirm_next_filtered_scene_merge(
     )
 
 
+def _assert_break_scene_filter_warning(app: QApplication, window: Any) -> None:
+    """
+    Verify filtered break-scene warnings persist until Esc.
+
+    The warning uses the transient overlay rather than a dialog, so tests need
+    to prove both the blocking message and its shortcut-based recovery path.
+    """
+    assert window.transient_message_overlay.isVisible() is True
+    assert window.transient_message_label.text() == (
+        workflows_module.BREAK_SCENE_FILTER_ACTIVE_MESSAGE
+    )
+    assert window.transient_message_timer.isActive() is False
+    assert window.exit_compare_shortcut.isEnabled() is True
+
+    window.exit_compare_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.transient_message_overlay.isHidden() is True
+    assert window.exit_compare_shortcut.isEnabled() is False
+
+
 def test_main_window_sets_color_label_and_saves_metadata() -> None:
     class FakeLibrary:
         def __init__(self) -> None:
@@ -990,6 +1011,67 @@ def test_filtered_merge_warns_and_includes_hidden_photos(
     del app
 
 
+def test_filtered_merge_blocks_sparse_visible_photo_selection(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify filtered merges reject visible selections with skipped rows.
+
+    Hidden photos can be included for one continuous visible range, but a
+    sparse selection must not silently pull in visible photos that the user
+    intentionally left unselected.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7488', 'dimgray'),
+            ('IMG_7489', 'blue'),
+            ('IMG_7490', 'green'),
+            ('IMG_7491', 'white'),
+        ],
+    )
+    window.library.get_photo('IMG_7488').flag = 'picked'
+    window.library.get_photo('IMG_7489').flag = 'picked'
+    window.library.get_photo('IMG_7490').flag = 'rejected'
+    window.library.get_photo('IMG_7491').flag = 'picked'
+    window._apply_photo_filter(
+        PhotoFilterSelection(allowed_flags=frozenset({'picked'}))
+    )
+    app.processEvents()
+    _select_list_rows(window.thumbnail_list, [0, 2])
+    app.processEvents()
+    confirmation_calls: list[str] = []
+    monkeypatch.setattr(
+        window,
+        '_confirm_filtered_scene_merge',
+        lambda: confirmation_calls.append('confirm') or True,
+    )
+
+    window.merge_scene_action.trigger()
+    app.processEvents()
+
+    assert confirmation_calls == []
+    assert window.library.scene_group_photo_ids() == []
+    assert window._metadata_undo_stack == []
+    assert not (tmp_path / METADATA_FILENAME).exists()
+    assert window.transient_message_overlay.isVisible() is True
+    assert window.transient_message_label.text() == (
+        workflows_module.FILTERED_SCENE_MERGE_REQUIRES_RANGE_MESSAGE
+    )
+    assert window.transient_message_timer.isActive() is False
+    assert window.exit_compare_shortcut.isEnabled() is True
+
+    window.exit_compare_shortcut.activated.emit()
+    app.processEvents()
+
+    assert window.transient_message_overlay.isHidden() is True
+    assert window.exit_compare_shortcut.isEnabled() is False
+
+    window.close()
+    del app
+
+
 def test_filtered_merge_expands_visible_stack_to_hidden_scene_range(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1055,6 +1137,67 @@ def test_filtered_merge_expands_visible_stack_to_hidden_scene_range(
         ],
         'source': 'manual',
     }
+
+    window.close()
+    del app
+
+
+def test_filtered_merge_blocks_sparse_visible_scene_stack_selection(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify filtered scene-stack merges reject skipped visible stacks.
+
+    Continuous visible stack ranges may expand to hidden scene members. Sparse
+    visible stack selections must stop before expansion so an unselected
+    visible stack is not merged just because it sits between the selected
+    endpoints.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7493', 'dimgray'),
+            ('IMG_7494', 'blue'),
+            ('IMG_7495', 'green'),
+            ('IMG_7496', 'white'),
+            ('IMG_7497', 'purple'),
+        ],
+        scene_groups=[
+            ['IMG_7493', 'IMG_7494'],
+            ['IMG_7495'],
+            ['IMG_7496', 'IMG_7497'],
+        ],
+    )
+    window.library.get_photo('IMG_7493').flag = 'picked'
+    window.library.get_photo('IMG_7494').flag = 'rejected'
+    window.library.get_photo('IMG_7495').flag = 'picked'
+    window.library.get_photo('IMG_7496').flag = 'picked'
+    window.library.get_photo('IMG_7497').flag = 'rejected'
+    window._apply_photo_filter(
+        PhotoFilterSelection(allowed_flags=frozenset({'picked'}))
+    )
+    app.processEvents()
+    original_groups = window.library.scene_group_photo_ids()
+    _select_list_rows(window.thumbnail_list, [0, 2])
+    app.processEvents()
+    confirmation_calls: list[str] = []
+    monkeypatch.setattr(
+        window,
+        '_confirm_filtered_scene_merge',
+        lambda: confirmation_calls.append('confirm') or True,
+    )
+
+    window.merge_scene_action.trigger()
+    app.processEvents()
+
+    assert confirmation_calls == []
+    assert window.library.scene_group_photo_ids() == original_groups
+    assert window._metadata_undo_stack == []
+    assert not (tmp_path / METADATA_FILENAME).exists()
+    assert window.transient_message_label.text() == (
+        workflows_module.FILTERED_SCENE_MERGE_REQUIRES_RANGE_MESSAGE
+    )
 
     window.close()
     del app
@@ -1427,6 +1570,139 @@ def test_break_scene_context_menu_defers_break_until_menu_closes(
     app.processEvents()
 
     assert break_calls == [expected_scene_id]
+
+    window.close()
+    del app
+
+
+@pytest.mark.parametrize(
+    'menu_source',
+    [
+        pytest.param('thumbnail', id='vertical-thumbnail-strip'),
+        pytest.param('scene-strip', id='horizontal-scene-strip'),
+    ],
+)
+def test_filtered_break_scene_context_menu_shows_warning(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, menu_source: str
+) -> None:
+    """
+    Verify filtered break-scene right-clicks explain the blocked edit.
+
+    These menu paths used to stop at the active-filter guard without feedback.
+    Both visible scene surfaces must now show the persistent warning while
+    skipping the confirmation dialog and preserving hidden scene members.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7484', 'dimgray'),
+            ('IMG_7485', 'blue'),
+            ('IMG_7486', 'green'),
+            ('IMG_7487', 'white'),
+        ],
+        scene_groups=[
+            ['IMG_7484', 'IMG_7485', 'IMG_7486'],
+            ['IMG_7487'],
+        ],
+    )
+    window.library.get_photo('IMG_7484').flag = 'picked'
+    window.library.get_photo('IMG_7485').flag = 'picked'
+    window.library.get_photo('IMG_7486').flag = 'rejected'
+    window.library.get_photo('IMG_7487').flag = 'picked'
+    window._apply_photo_filter(
+        PhotoFilterSelection(allowed_flags=frozenset({'picked'}))
+    )
+    app.processEvents()
+    original_groups = window.library.scene_group_photo_ids()
+    confirmation_calls: list[str] = []
+    save_calls: list[str] = []
+
+    def fail_menu(*_args: object, **_kwargs: object) -> Never:
+        pytest.fail('filtered break-scene warning should not open a menu')
+
+    monkeypatch.setattr(workflows_module, 'QMenu', fail_menu)
+    monkeypatch.setattr(
+        window,
+        '_confirm_break_scene',
+        lambda: confirmation_calls.append('confirm') or True,
+    )
+    monkeypatch.setattr(
+        window.library,
+        'save_metadata',
+        lambda: save_calls.append('save'),
+    )
+
+    if menu_source == 'thumbnail':
+        window._show_thumbnail_context_menu(
+            _item_center(window.thumbnail_list, 0)
+        )
+    else:
+        window._show_scene_context_menu(_item_center(window.scene_list, 0))
+
+    app.processEvents()
+
+    assert window.library.scene_group_photo_ids() == original_groups
+    assert confirmation_calls == []
+    assert save_calls == []
+    assert window._metadata_undo_stack == []
+    assert not (tmp_path / METADATA_FILENAME).exists()
+    _assert_break_scene_filter_warning(app, window)
+
+    window.close()
+    del app
+
+
+def test_filtered_break_scene_direct_guard_shows_warning(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify direct scene-break calls under filters warn without mutation.
+
+    Non-menu entry points bypass right-click target checks, so the mutation
+    helper needs its own active-filter guard to preserve hidden scene members
+    and explain why the scene edit was blocked.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_7484', 'dimgray'),
+            ('IMG_7485', 'blue'),
+            ('IMG_7486', 'green'),
+        ],
+        scene_groups=[['IMG_7484', 'IMG_7485', 'IMG_7486']],
+    )
+    window.library.get_photo('IMG_7484').flag = 'picked'
+    window.library.get_photo('IMG_7485').flag = 'picked'
+    window.library.get_photo('IMG_7486').flag = 'rejected'
+    window._apply_photo_filter(
+        PhotoFilterSelection(allowed_flags=frozenset({'picked'}))
+    )
+    app.processEvents()
+    original_groups = window.library.scene_group_photo_ids()
+    confirmation_calls: list[str] = []
+    save_calls: list[str] = []
+    monkeypatch.setattr(
+        window,
+        '_confirm_break_scene',
+        lambda: confirmation_calls.append('confirm') or True,
+    )
+    monkeypatch.setattr(
+        window.library,
+        'save_metadata',
+        lambda: save_calls.append('save'),
+    )
+
+    window._break_scene_into_singletons(window.library.scenes[0].scene_id)
+    app.processEvents()
+
+    assert window.library.scene_group_photo_ids() == original_groups
+    assert confirmation_calls == []
+    assert save_calls == []
+    assert window._metadata_undo_stack == []
+    assert not (tmp_path / METADATA_FILENAME).exists()
+    _assert_break_scene_filter_warning(app, window)
 
     window.close()
     del app

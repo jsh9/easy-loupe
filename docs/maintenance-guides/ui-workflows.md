@@ -127,12 +127,15 @@ Major logic:
 - When scene detection is active, filtering applies to exact photos inside each
   scene: scene stacks disappear when no members match, and visible stack counts
   and scene strips contain only matching members. Scene merges remain available
-  while a filter is active; selected visible scene stacks expand to their full
-  underlying scene groups, and the user is warned before hidden photos in the
-  selected scene range are included in the merged scene. Merge attempts with
-  fewer than two visible photos or scene stacks show a persistent warning that
-  closes with `Esc`. Scene break actions stay disabled while a filter is active
-  so hidden scene members are not edited accidentally.
+  while a filter is active, but the selected visible rows must form one
+  continuous range. Selected visible scene stacks expand to their full
+  underlying scene groups, and the user is warned before hidden photos in that
+  continuous visible range are included in the merged scene. Sparse filtered
+  merge selections and merge attempts with fewer than two visible photos or
+  scene stacks show a persistent warning that closes with `Esc`. Scene break
+  actions stay disabled while a filter is active so hidden scene members are
+  not edited accidentally; blocked break attempts show a persistent warning
+  that closes with `Esc`.
 
 ## 2. Modes And Transitions
 
