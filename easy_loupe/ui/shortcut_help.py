@@ -832,7 +832,10 @@ def _window_group() -> ShortcutHelpGroup:
     shortcut = 'Ctrl+W / Alt+F4' if sys.platform == 'win32' else 'Ctrl+W'
     return ShortcutHelpGroup(
         'Window',
-        (ShortcutHelpRow(shortcut, 'Close this EasyLoupe window'),),
+        (
+            ShortcutHelpRow(shortcut, 'Close this EasyLoupe window'),
+            ShortcutHelpRow('Ctrl+Q', 'Quit EasyLoupe after confirmation'),
+        ),
     )
 
 

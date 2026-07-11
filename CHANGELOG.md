@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+- Fixed
+
+  - Windows opened during deferred app-quit cleanup now require their own quit
+    confirmation instead of inheriting the earlier approval.
+  - App-quit confirmations now follow the active EasyLoupe window when one is
+    available.
+  - Final-window shutdown now exits the event loop directly after deferred
+    worker cleanup so EasyLoupe does not remain in the macOS Dock.
+
+## [1.4.4] - 2026-07-11
+
+- Fixed
+
+  - `Ctrl+Q`/`Cmd+Q`, Dock/app-menu Quit, and `File > Close App` now ask for
+    confirmation before closing all EasyLoupe windows, while `Ctrl+W`/`Cmd+W`
+    still closes only the active window.
+
 ## [1.4.3] - 2026-07-11
 
 - Changed

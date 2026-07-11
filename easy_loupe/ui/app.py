@@ -8,10 +8,11 @@ from typing import TYPE_CHECKING, Protocol
 
 from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QFileOpenEvent, QScreen
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from easy_loupe.core.records import SUPPORTED_EXTENSIONS
 from easy_loupe.ui.identity import (
+    APP_NAME,
     apply_app_identity,
     branded_argv,
     prepare_app_identity,
@@ -24,6 +25,31 @@ from easy_loupe.ui.viewers.shell import resolve_widget_screen
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+APPLICATION_QUIT_ACCEPT_LABEL = f'Quit {APP_NAME}'
+
+
+def confirm_application_quit(window_count: int) -> bool:
+    """Return whether the user confirmed app-wide quit."""
+    dialog = QMessageBox(QApplication.activeWindow())
+    dialog.setIcon(QMessageBox.Icon.Question)
+    dialog.setWindowTitle(f'Quit {APP_NAME}?')
+    if window_count == 1:
+        dialog.setText(f'Quit {APP_NAME} and close the open window?')
+    else:
+        dialog.setText(
+            f'Quit {APP_NAME} and close all {window_count} windows?'
+        )
+
+    quit_button = dialog.addButton(
+        APPLICATION_QUIT_ACCEPT_LABEL,
+        QMessageBox.ButtonRole.AcceptRole,
+    )
+    cancel_button = dialog.addButton(QMessageBox.StandardButton.Cancel)
+    dialog.setDefaultButton(cancel_button)
+    dialog.setEscapeButton(cancel_button)
+    dialog.exec()
+    return dialog.clickedButton() is quit_button
 
 
 class EasyLoupeApplication(QApplication):
@@ -91,6 +117,15 @@ class _ManagedWindow(Protocol):
     def close(self) -> None:
         """Close the managed window."""
 
+    def is_close_in_progress(self) -> bool:
+        """
+        Return whether the window is already closing.
+
+        WindowManager uses this for hidden deferred-close windows, where Qt
+        teardown is waiting on worker cleanup but another app-wide quit sweep
+        can still arrive.
+        """
+
     def setAttribute(  # noqa: N802 - Qt API naming
             self,
             attribute: Qt.WidgetAttribute,
@@ -144,8 +179,8 @@ class _ManagedApplication(Protocol):
     def set_quit_handler(self, handler: Callable[[], bool] | None) -> None:
         """Set the application-level quit policy hook."""
 
-    def quit(self) -> None:
-        """Request application shutdown."""
+    def exit(self, return_code: int = 0) -> None:
+        """Exit the application event loop with ``return_code``."""
 
 
 class WindowManager:
@@ -156,10 +191,13 @@ class WindowManager:
             culling_window_factory: _CullingWindowFactory = MainWindow,
             photo_window_factory: _PhotoWindowFactory = PhotoViewerWindow,
             app: _ManagedApplication | None = None,
+            confirm_quit: Callable[[int], bool] = confirm_application_quit,
     ) -> None:
         self._culling_window_factory = culling_window_factory
         self._photo_window_factory = photo_window_factory
         self._app = app
+        self._confirm_quit = confirm_quit
+        self._confirmed_quit_window_ids: set[int] = set()
         self._close_all_requested_window_ids: set[int] = set()
         self._windows: list[_ManagedWindow] = []
         if self._app is not None:
@@ -212,7 +250,9 @@ class WindowManager:
         # Route explicit Close App menu requests through the manager because
         # individual windows do not know which other windows are retained or
         # still waiting on deferred worker cleanup.
-        window.close_app_requested.connect(self.close_all_windows)
+        window.close_app_requested.connect(
+            self._request_application_quit_from_window
+        )
         window.destroyed.connect(
             lambda _object=None, managed_window=window: self._remove_window(
                 managed_window
@@ -240,7 +280,60 @@ class WindowManager:
             # cleanup window is not sent repeated close events, while later
             # windows opened during that cleanup remain closable.
             self._close_all_requested_window_ids.add(id(window))
+            # Close-in-progress windows have already hidden and requested
+            # worker shutdown. Marking them above is enough; calling close()
+            # again would re-enter the deferred cleanup path.
+            if window.is_close_in_progress():
+                continue
+
             window.close()
+
+    def request_application_quit(self) -> bool:
+        """
+        Confirm app-wide quit and report whether Qt may finish this event.
+
+        ``False`` means the current quit event must stay consumed because the
+        user canceled or because hidden retained windows are still draining
+        worker cleanup.
+        """
+        if not self._windows:
+            self._confirmed_quit_window_ids.clear()
+            return True
+
+        self._prune_confirmed_quit_window_ids()
+        retained_window_ids = {id(window) for window in self._windows}
+        unconfirmed_window_ids = (
+            retained_window_ids - self._confirmed_quit_window_ids
+        )
+        if unconfirmed_window_ids:
+            if not self._confirm_quit(len(self._windows)):
+                return False
+
+            # Native quit events can arrive again while deferred-close windows
+            # are hidden. Remember which retained windows the user approved so
+            # cleanup continues without re-prompting, while any window opened
+            # during that cleanup still requires fresh confirmation.
+            self._confirmed_quit_window_ids = retained_window_ids
+
+        self.close_all_windows()
+        return not self._windows
+
+    def _prune_confirmed_quit_window_ids(self) -> None:
+        """
+        Forget confirmed-quit approvals for windows no longer retained.
+
+        This keeps a confirmation scoped to the windows in the approved close
+        sweep: repeated quit events can continue draining the same hidden
+        windows, but later windows are not covered by that approval.
+        """
+        retained_window_ids = {id(window) for window in self._windows}
+        self._confirmed_quit_window_ids.intersection_update(
+            retained_window_ids
+        )
+
+    def _request_application_quit_from_window(self) -> None:
+        """Request app-wide quit from a signal that expects a ``None`` slot."""
+        self.request_application_quit()
 
     def _handle_culling_request(
             self,
@@ -259,28 +352,32 @@ class WindowManager:
         viewer.close()
 
     def _remove_window(self, window: _ManagedWindow) -> None:
-        """Forget a destroyed window so Qt can quit after the last close."""
+        """Forget a destroyed window and exit after the last close."""
         self._close_all_requested_window_ids.discard(id(window))
+        self._confirmed_quit_window_ids.discard(id(window))
         try:
             self._windows.remove(window)
         except ValueError:
             return
 
         if not self._windows and self._app is not None:
-            self._app.quit()
+            # Final cleanup must not post another interruptible Quit event.
+            # A native macOS Quit may already have been ignored while hidden
+            # worker-owning windows drained, so end the event loop directly
+            # only after every managed window has been destroyed.
+            self._app.exit(0)
 
     def _handle_application_quit(self) -> bool:
         """
-        Ignore application quit while any EasyLoupe windows are retained.
+        Confirm app-wide quit and drain retained windows before exiting.
 
-        Ctrl/Cmd+Q can arrive as a native Qt quit event before a window
-        shortcut sees it. Treat that event as disabled while windows exist, but
-        allow the internal app.quit() call after the final retained window is
-        destroyed to finish the event loop.
+        Native macOS quit, Dock quit, and Ctrl/Cmd+Q can all arrive as a Qt
+        quit event. Confirm the app-wide close once, then keep consuming quit
+        events while hidden deferred-close windows finish worker cleanup.
         """
         # Returning False consumes the native Quit event. Returning True is
         # safe only after every worker-owning window has been forgotten.
-        return bool(not self._windows)
+        return self.request_application_quit()
 
 
 class StartupCoordinator:

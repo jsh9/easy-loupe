@@ -71,7 +71,7 @@ wheels = [
 
 [[package]]
 name = "easy-loupe"
-version = "1.4.3"
+version = "1.4.4"
 source = { editable = "." }
 dependencies = [
     { name = "imagehash" },

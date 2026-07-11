@@ -67,8 +67,8 @@ When you need to run tests on Windows:
 Use the existing pytest suite as the first-line verification step.
 
 - Run tests: `uv run pytest`
-- Alternate full-suite checks: `tox -e py312`, `tox -e py313`, `tox -e ty`,
-  `tox -e muff-lint`, `tox -e muff-format`, `tox -e pre-commit`
+- Alternate full-suite checks: `tox -e py312`, `tox -e ty`, `tox -e muff-lint`,
+  `tox -e muff-format`, `tox -e pre-commit`
 - For every change, in addition to running tests, other non-pytest environments
   in `tox` must also be run (e.g., `tox -e ty`, `tox -e muff-lint`,
   `tox -e muff-format`, `tox -e pre-commit`), and any errors must be fixed. If

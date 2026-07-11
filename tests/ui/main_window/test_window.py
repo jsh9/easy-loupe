@@ -254,7 +254,7 @@ def test_main_window_registers_open_detect_and_organize_actions() -> None:  # no
     assert window.close_app_action.shortcut().isEmpty() is True
     window.close_app_action.trigger()
     assert close_app_requests == ['requested']
-    assert_window_shortcut(window.disable_quit_shortcut, 'Ctrl+Q')
+    assert_window_shortcut(window.quit_app_shortcut, 'Ctrl+Q')
     assert window.history_menu.title() == '&History'
     assert_default_photo_sort_control(window)
     assert window.compare_menu.title() == '&Compare'
@@ -1893,13 +1893,17 @@ def test_main_window_ctrl_w_closes_only_that_window() -> None:
     Verify real lifecycle key dispatch for culling windows.
 
     Multiple EasyLoupe windows can coexist, so Ctrl/Cmd+W must close only the
-    active window and Ctrl/Cmd+Q must remain a no-op. Real key events matter
-    because direct signal emission would miss Qt focus or shortcut-routing
-    regressions.
+    active window and Ctrl/Cmd+Q must request confirmed app-wide quit. Real key
+    events matter because direct signal emission would miss Qt focus or
+    shortcut-routing regressions.
     """
     app = QApplication.instance() or QApplication([])
     first_window = main_window_module.MainWindow()
     second_window = main_window_module.MainWindow()
+    quit_requests: list[str] = []
+    second_window.close_app_requested.connect(
+        lambda: quit_requests.append('requested')
+    )
     first_window._initial_folder_prompt_pending = False
     second_window._initial_folder_prompt_pending = False
     first_window.show()
@@ -1907,7 +1911,7 @@ def test_main_window_ctrl_w_closes_only_that_window() -> None:
     app.processEvents()
 
     assert_action_shortcut(first_window.close_window_action, 'Ctrl+W')
-    assert_window_shortcut(second_window.disable_quit_shortcut, 'Ctrl+Q')
+    assert_window_shortcut(second_window.quit_app_shortcut, 'Ctrl+Q')
 
     # Make the target Qt-active before sending a real key event so the
     # assertion covers WindowShortcut routing instead of just the slot.
@@ -1919,8 +1923,8 @@ def test_main_window_ctrl_w_closes_only_that_window() -> None:
     assert first_window.isHidden() is True
     assert second_window.isVisible() is True
 
-    # Shortcut-level quit suppression is separate from native app quit
-    # handling; both paths must leave retained windows open.
+    # Shortcut-level app quit is a request signal. WindowManager owns the
+    # confirmation dialog and retained-window close sweep.
     # Make the remaining window Qt-active so Ctrl/Cmd+Q is tested through the
     # same focus-sensitive route a user would trigger.
     set_qt_active_window(second_window)
@@ -1929,6 +1933,7 @@ def test_main_window_ctrl_w_closes_only_that_window() -> None:
     app.processEvents()
 
     assert second_window.isVisible() is True
+    assert quit_requests == ['requested']
     second_window.close()
     first_window.deleteLater()
     second_window.deleteLater()
