@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- Fixed
+
+  - `Ctrl+Q`/`Cmd+Q`, Dock/app-menu Quit, and `File > Close App` now ask for
+    confirmation before closing all EasyLoupe windows, while `Ctrl+W`/`Cmd+W`
+    still closes only the active window.
+
 ## [1.4.3] - 2026-07-11
 
 - Changed

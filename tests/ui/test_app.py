@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 import easy_loupe.ui as ui_package
 import easy_loupe.ui.app as app_module
@@ -255,6 +255,27 @@ class _FakeApplication:
         return bool(self.quit_handler())
 
 
+class _ConfirmationRecorder:
+    """
+    Callable fake that records app-quit confirmation requests.
+
+    Exhausted responses raise so tests fail when a deferred quit path prompts
+    again after the user has already confirmed or canceled.
+    """
+
+    def __init__(self, *responses: bool) -> None:
+        self.calls: list[int] = []
+        self.responses = list(responses)
+
+    def __call__(self, window_count: int) -> bool:
+        self.calls.append(window_count)
+        if not self.responses:
+            msg = 'unexpected app-quit confirmation request'
+            raise AssertionError(msg)
+
+        return self.responses.pop(0)
+
+
 class _FakeCullingWindow:
     def __init__(self, launch_request: object = None) -> None:
         self.launch_request = launch_request
@@ -397,14 +418,58 @@ def test_window_manager_disables_implicit_last_window_quit() -> None:
     assert app.quit_handler is not None
 
 
+def test_confirm_application_quit_dialog_defaults_to_cancel(
+        monkeypatch: object,
+) -> None:
+    """
+    Verify app-wide quit confirmation defaults to cancel.
+
+    Cmd/Ctrl+Q is easy to hit accidentally instead of Cmd/Ctrl+W, so the
+    dialog must make the non-destructive choice the default and Esc action.
+    """
+    _app = QApplication.instance() or QApplication([])
+    clicked_button: dict[str, object] = {}
+
+    def fake_exec(dialog: QMessageBox) -> int:
+        assert dialog.text() == ('Quit EasyLoupe and close all 3 windows?')
+        assert (
+            dialog.standardButton(dialog.defaultButton())
+            == QMessageBox.StandardButton.Cancel
+        )
+        assert (
+            dialog.standardButton(dialog.escapeButton())
+            == QMessageBox.StandardButton.Cancel
+        )
+
+        quit_buttons = [
+            button
+            for button in dialog.buttons()
+            if button.text() == app_module.APPLICATION_QUIT_ACCEPT_LABEL
+        ]
+        assert len(quit_buttons) == 1
+        assert (
+            dialog.buttonRole(quit_buttons[0])
+            == QMessageBox.ButtonRole.AcceptRole
+        )
+        clicked_button['button'] = quit_buttons[0]
+        return int(QMessageBox.DialogCode.Accepted)
+
+    def fake_clicked_button(_dialog: QMessageBox) -> object:
+        return clicked_button['button']
+
+    monkeypatch.setattr(QMessageBox, 'exec', fake_exec)
+    monkeypatch.setattr(QMessageBox, 'clickedButton', fake_clicked_button)
+
+    assert app_module.confirm_application_quit(3) is True
+
+
 def test_window_manager_quits_after_last_window_is_destroyed() -> None:
     """
     Quit the app only after the final retained window is destroyed.
 
     A normal close can destroy immediately; background-close windows reach the
-    same path later from their deferred final close. This is the intentional
-    exit path that remains after native quit requests are disabled while
-    windows are retained.
+    same path later from their deferred final close. This is the controlled
+    exit path that keeps the event loop alive until retained windows are gone.
     """
     app = _FakeApplication()
     manager = app_module.WindowManager(
@@ -420,38 +485,66 @@ def test_window_manager_quits_after_last_window_is_destroyed() -> None:
     assert app.quit_calls == 1
 
 
-def test_window_manager_quit_request_ignores_retained_windows() -> None:
+def test_window_manager_quit_request_cancel_keeps_retained_windows() -> None:
     """
-    Ignore application quit requests while windows are retained.
+    Leave retained windows open when app-wide quit is canceled.
 
-    Ctrl/Cmd+Q can arrive as a native quit event, so retained windows must not
-    be closed by that path. Users close windows through window-scoped close
-    shortcuts or the window controls instead.
+    Native app quit, Dock quit, Ctrl/Cmd+Q, and Close App all share this
+    confirmation gate so accidental app-wide quit can be stopped.
     """
     app = _FakeApplication()
+    confirm_quit = _ConfirmationRecorder(False)
     manager = app_module.WindowManager(
         culling_window_factory=_FakeCullingWindow,
         photo_window_factory=_FakePhotoWindow,
         app=app,
+        confirm_quit=confirm_quit,
     )
     first = manager.open_culling_window()
     second = manager.open_photo_window(Path('IMG_1000.JPG'))
 
     assert app.request_quit() is False
 
+    assert confirm_quit.calls == [2]
     assert first.close_calls == 0
     assert second.close_calls == 0
     assert manager.windows() == [first, second]
     assert app.quit_calls == 0
 
 
+def test_window_manager_quit_request_closes_after_confirmation() -> None:
+    """
+    Close retained windows through normal close paths after confirmation.
+
+    A native quit request must now behave like confirmed Close App instead of
+    being ignored while retained windows exist.
+    """
+    app = _FakeApplication()
+    confirm_quit = _ConfirmationRecorder(True)
+    manager = app_module.WindowManager(
+        culling_window_factory=_FakeCullingWindow,
+        photo_window_factory=_FakePhotoWindow,
+        app=app,
+        confirm_quit=confirm_quit,
+    )
+    first = manager.open_culling_window()
+    second = manager.open_photo_window(Path('IMG_1000.JPG'))
+
+    assert app.request_quit() is True
+
+    assert confirm_quit.calls == [2]
+    assert first.close_calls == 1
+    assert second.close_calls == 1
+    assert manager.windows() == []
+    assert app.quit_calls == 1
+
+
 def test_window_manager_close_all_windows_closes_retained_windows() -> None:
     """
     Close App should close every retained window through normal close paths.
 
-    The app-close command is explicit menu behavior, so it closes all live
-    windows even though native quit events remain disabled for accidental
-    Ctrl/Cmd+Q delivery.
+    The lower-level close sweep closes all live windows through normal close
+    paths after app-wide quit has been confirmed.
     """
     app = _FakeApplication()
     manager = app_module.WindowManager(
@@ -472,16 +565,19 @@ def test_window_manager_close_all_windows_closes_retained_windows() -> None:
 
 def test_window_manager_close_app_signal_closes_all_windows_once() -> None:
     """
-    Route retained window Close App signals through the manager once.
+    Confirm retained window Close App signals only once.
 
     A deferred-close window remains retained while worker cleanup drains, so a
-    second Close App request must not send another close to that hidden window.
+    second Close App request must not re-prompt or send another close to that
+    hidden window.
     """
     app = _FakeApplication()
+    confirm_quit = _ConfirmationRecorder(True)
     manager = app_module.WindowManager(
         culling_window_factory=_DeferredCloseCullingWindow,
         photo_window_factory=_FakePhotoWindow,
         app=app,
+        confirm_quit=confirm_quit,
     )
     first = manager.open_culling_window()
     second = manager.open_photo_window(Path('IMG_1000.JPG'))
@@ -492,12 +588,14 @@ def test_window_manager_close_app_signal_closes_all_windows_once() -> None:
     assert second.close_calls == 1
     assert manager.windows() == [first]
     assert app.quit_calls == 0
+    assert confirm_quit.calls == [2]
 
     first.close_app_requested.emit()
 
     assert first.close_calls == 1
     assert manager.windows() == [first]
     assert app.quit_calls == 0
+    assert confirm_quit.calls == [2]
 
     first.finish_close()
 
@@ -510,14 +608,16 @@ def test_window_manager_close_app_reaches_late_window() -> None:
     Close new windows opened while a deferred Close App sweep is draining.
 
     The manager must avoid re-closing the hidden deferred window, but a later
-    Close App request should still reach windows retained after that first
-    sweep.
+    Close App request should still reach windows retained after the user has
+    already confirmed app-wide quit.
     """
     app = _FakeApplication()
+    confirm_quit = _ConfirmationRecorder(True)
     manager = app_module.WindowManager(
         culling_window_factory=_DeferredCloseCullingWindow,
         photo_window_factory=_FakePhotoWindow,
         app=app,
+        confirm_quit=confirm_quit,
     )
     deferred = manager.open_culling_window()
     first_photo = manager.open_photo_window(Path('IMG_1000.JPG'))
@@ -528,6 +628,7 @@ def test_window_manager_close_app_reaches_late_window() -> None:
     assert first_photo.close_calls == 1
     assert manager.windows() == [deferred]
     assert app.quit_calls == 0
+    assert confirm_quit.calls == [2]
 
     second_photo = manager.open_photo_window(Path('IMG_1001.JPG'))
     second_photo.close_app_requested.emit()
@@ -536,6 +637,7 @@ def test_window_manager_close_app_reaches_late_window() -> None:
     assert second_photo.close_calls == 1
     assert manager.windows() == [deferred]
     assert app.quit_calls == 0
+    assert confirm_quit.calls == [2]
 
     deferred.finish_close()
 
@@ -543,26 +645,36 @@ def test_window_manager_close_app_reaches_late_window() -> None:
     assert app.quit_calls == 1
 
 
-def test_window_manager_quit_request_ignores_deferred_close_window() -> None:
+def test_window_manager_confirmed_quit_drains_deferred_close_once() -> None:
     """
-    Avoid re-closing a hidden deferred-close window on app quit.
+    Avoid repeated confirmation and close requests during deferred app quit.
 
-    A normal close may hide a window while worker cleanup drains. A later
-    native quit event must be consumed without sending another close request.
+    The confirmed-quit flag represents the cleanup-draining phase, so repeated
+    native quit events while a hidden window remains retained must not ask the
+    user again or re-close that window.
     """
     app = _FakeApplication()
+    confirm_quit = _ConfirmationRecorder(True)
     manager = app_module.WindowManager(
         culling_window_factory=_DeferredCloseCullingWindow,
         photo_window_factory=_FakePhotoWindow,
         app=app,
+        confirm_quit=confirm_quit,
     )
     window = manager.open_culling_window()
-    window.close()
 
     assert app.request_quit() is False
 
+    assert confirm_quit.calls == [1]
     assert window.close_calls == 1
     assert window.closed is True
+    assert manager.windows() == [window]
+    assert app.quit_calls == 0
+
+    assert app.request_quit() is False
+
+    assert confirm_quit.calls == [1]
+    assert window.close_calls == 1
     assert manager.windows() == [window]
     assert app.quit_calls == 0
 
@@ -581,13 +693,16 @@ def test_window_manager_allows_quit_with_no_windows() -> None:
     the event loop normally.
     """
     app = _FakeApplication()
+    confirm_quit = _ConfirmationRecorder()
     app_module.WindowManager(
         culling_window_factory=_FakeCullingWindow,
         photo_window_factory=_FakePhotoWindow,
         app=app,
+        confirm_quit=confirm_quit,
     )
 
     assert app.request_quit() is True
+    assert confirm_quit.calls == []
 
 
 def test_startup_coordinator_opens_plain_window_without_startup_files() -> (

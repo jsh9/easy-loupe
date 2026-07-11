@@ -38,10 +38,10 @@ def test_shortcut_help_catalog_covers_each_context() -> None:
         rows = [row for group in groups for row in group.rows]
         assert any(row.shortcut == '?' for row in rows)
         assert any(row.shortcut == 'Esc' for row in rows)
-        # Window close belongs in every help context, but disabled quit must
-        # not be advertised as an available command.
+        # Window close and confirmed app-wide quit belong in every help
+        # context.
         assert any(row.shortcut.startswith('Ctrl+W') for row in rows)
-        assert not any('Ctrl+Q' in row.shortcut for row in rows)
+        assert any(row.shortcut == 'Ctrl+Q' for row in rows)
 
     photo_viewer_rows = [
         row

@@ -70,22 +70,12 @@ def make_lifecycle_shortcut(
     Create an unblocked shortcut for top-level window lifecycle actions.
 
     Lifecycle shortcuts stay outside busy/help gates so users can close a
-    window or consume Ctrl/Cmd+Q even while modal overlays are visible.
+    window or request app-wide quit even while modal overlays are visible.
     """
     shortcut = QShortcut(QKeySequence(key), parent)
     shortcut.setContext(Qt.WindowShortcut)
     shortcut.activated.connect(callback)
     return shortcut
-
-
-def ignore_quit_shortcut() -> None:
-    """
-    Consume Ctrl/Cmd+Q at the window layer.
-
-    The empty body is intentional: the shortcut exists only to stop Qt from
-    treating Ctrl/Cmd+Q as close or quit. WindowManager still handles native
-    quit events because some platforms bypass QShortcut delivery.
-    """
 
 
 def build_viewer_shortcuts[ShortcutT](

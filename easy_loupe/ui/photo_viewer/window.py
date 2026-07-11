@@ -81,7 +81,6 @@ from easy_loupe.ui.viewers.shell import (
     build_viewer_shortcuts,
     confirm_reset_zoom_centers,
     exif_overlay_geometry_ready,
-    ignore_quit_shortcut,
     make_lifecycle_shortcut,
     make_window_shortcut,
     update_exif_overlay_geometry,
@@ -333,8 +332,8 @@ class PhotoViewerWindow(QMainWindow):
 
         self.file_menu = menu_bar.addMenu('&File')
         # Keep lifecycle actions in EasyLoupe's File menu instead of letting
-        # Qt reinterpret them as native app-menu roles; the native Quit item is
-        # still intercepted separately to avoid accidental Ctrl/Cmd+Q exits.
+        # Qt reinterpret them as native app-menu roles; native Quit and
+        # Ctrl/Cmd+Q are confirmed through WindowManager.
         self.close_window_action = QAction('Close Window', self)
         self.close_window_action.setMenuRole(QAction.NoRole)
         self.close_window_action.setShortcut(QKeySequence('Ctrl+W'))
@@ -446,11 +445,11 @@ class PhotoViewerWindow(QMainWindow):
         )
 
     def _build_shortcuts(self) -> None:
-        # Lifecycle shortcuts bypass normal UI shortcut blocking so Ctrl/Cmd+Q
-        # is still consumed and Windows Alt+F4 still closes while overlays are
+        # Lifecycle shortcuts bypass normal UI shortcut blocking so users can
+        # close a window or request confirmed app-wide quit while overlays are
         # up. Close Window itself is owned by the File-menu QAction.
-        self.disable_quit_shortcut = make_lifecycle_shortcut(
-            self, 'Ctrl+Q', ignore_quit_shortcut
+        self.quit_app_shortcut = make_lifecycle_shortcut(
+            self, 'Ctrl+Q', self.close_app_requested.emit
         )
         if sys.platform == 'win32':
             self.windows_close_window_shortcut = make_lifecycle_shortcut(

@@ -478,9 +478,9 @@ def test_photo_viewer_ctrl_w_closes_only_that_window(
     Verify real lifecycle key dispatch for standalone viewer windows.
 
     System-opened photos create independent windows, so Ctrl/Cmd+W must close
-    only the active viewer and Ctrl/Cmd+Q must remain a no-op. Real key events
-    matter because direct signal emission would miss Qt focus or
-    shortcut-routing regressions.
+    only the active viewer and Ctrl/Cmd+Q must request confirmed app-wide quit.
+    Real key events matter because direct signal emission would miss Qt focus
+    or shortcut-routing regressions.
     """
     create_jpeg(tmp_path / 'A.JPG', 'green')
     create_jpeg(tmp_path / 'B.JPG', 'blue')
@@ -490,9 +490,13 @@ def test_photo_viewer_ctrl_w_closes_only_that_window(
     _app, second_window = _open_viewer(
         tmp_path, monkeypatch, startup_name='B.JPG'
     )
+    quit_requests: list[str] = []
+    second_window.close_app_requested.connect(
+        lambda: quit_requests.append('requested')
+    )
 
     _assert_action_shortcut(first_window.close_window_action, 'Ctrl+W')
-    _assert_window_shortcut(second_window.disable_quit_shortcut, 'Ctrl+Q')
+    _assert_window_shortcut(second_window.quit_app_shortcut, 'Ctrl+Q')
 
     # Make the target Qt-active before sending a real key event so the
     # assertion covers WindowShortcut routing instead of just the slot.
@@ -504,8 +508,8 @@ def test_photo_viewer_ctrl_w_closes_only_that_window(
     assert first_window.isHidden() is True
     assert second_window.isVisible() is True
 
-    # Shortcut-level quit suppression is separate from native app quit
-    # handling; both paths must leave retained windows open.
+    # Shortcut-level app quit is a request signal. WindowManager owns the
+    # confirmation dialog and retained-window close sweep.
     # Make the remaining window Qt-active so Ctrl/Cmd+Q is tested through the
     # same focus-sensitive route a user would trigger.
     set_qt_active_window(second_window)
@@ -514,6 +518,7 @@ def test_photo_viewer_ctrl_w_closes_only_that_window(
     app.processEvents()
 
     assert second_window.isVisible() is True
+    assert quit_requests == ['requested']
     second_window.close()
     first_window.deleteLater()
     second_window.deleteLater()
