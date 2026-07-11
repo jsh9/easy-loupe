@@ -492,7 +492,13 @@ def test_filter_resets_on_folder_load(
 def test_filter_scene_mode_shows_only_matching_exact_photos(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Verify scene stacks and scene strips are rebuilt from visible photos."""
+    """
+    Verify scene stacks and scene strips are rebuilt from visible photos.
+
+    Filtered scene mode hides non-matching exact photos but still allows merge
+    entry. Break actions remain blocked so hidden scene members are not edited
+    without first clearing the filter.
+    """
     _, app, window = create_main_window_with_library(
         tmp_path,
         monkeypatch,
@@ -528,7 +534,7 @@ def test_filter_scene_mode_shows_only_matching_exact_photos(
         'IMG_2400',
         'IMG_2402',
     ]
-    assert window.merge_scene_action.isEnabled() is False
+    assert window.merge_scene_action.isEnabled() is True
     context_position = window.thumbnail_list.visualItemRect(
         window.thumbnail_list.item(0)
     ).center()
@@ -536,7 +542,6 @@ def test_filter_scene_mode_shows_only_matching_exact_photos(
         window._context_scene_from_thumbnail_position(context_position) is None
     )
     before_groups = window.library.scene_group_photo_ids()
-    window._merge_selected_photos_into_scene()
     window._break_scene_into_singletons(window.library.scenes[0].scene_id)
     assert window.library.scene_group_photo_ids() == before_groups
 

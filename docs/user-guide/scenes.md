@@ -52,6 +52,15 @@ strip, selection is exact: selecting the full horizontal scene can merge it
 with selected vertical stacks, while selecting only part of the horizontal
 scene is treated as an attempted split and is blocked.
 
+When a filter is active, visible scene stacks can represent scenes that also
+contain hidden photos. Select one continuous visible range before merging;
+EasyLoupe warns before that merge includes hidden photos in the range. Sparse
+filtered selections are blocked so visible photos you skipped are not merged.
+
 Use the scene context menu to break a scene into single photos.
+
+When a filter is active, breaking scenes is blocked so hidden scene members are
+not edited accidentally. Clear the filter before breaking scenes; blocked
+attempts show a warning that closes with `Esc`.
 
 Scene edits are saved in `easy-loupe.json` alongside photo metadata.

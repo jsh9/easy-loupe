@@ -57,6 +57,26 @@ LOAD_WORKFLOW_PROGRESS_STAGES = (
     ProgressStageDefinition('thumbnails', 'Preparing thumbnails'),
     ProgressStageDefinition('browse', 'Preparing browse grid'),
 )
+FILTERED_SCENE_MERGE_WARNING_TEXT = (
+    'Some photos in the selected scene range are hidden by the current '
+    'filter. If you continue, those hidden photos will be included in the '
+    'merged scene.'
+)
+MERGE_REQUIRES_SELECTION_MESSAGE = (
+    'Select at least two visible photos or scene stacks to merge.\n'
+    'Press Esc to exit.'
+)
+FILTERED_SCENE_MERGE_REQUIRES_RANGE_MESSAGE = (
+    'The current selection skips visible photos. When filtering is active, '
+    'manual merging is only allowed when you select a continuous visible '
+    'range.\n\n'
+    'Press Esc to exit.'
+)
+BREAK_SCENE_FILTER_ACTIVE_MESSAGE = (
+    'Breaking scenes is not allowed when filtering is active. To manually '
+    'break scenes, please first turn off filtering.\n\n'
+    'Press Esc to exit.'
+)
 
 
 @dataclass(frozen=True)
@@ -980,6 +1000,11 @@ class MainWindowWorkflowMixin:
     def _show_thumbnail_context_menu(
             self: MainWindow, position: QPoint
     ) -> None:
+        # Check the filtered warning path before normal scene resolution
+        # because that resolver intentionally hides all filtered scene edits.
+        if self._filter_blocks_break_scene_from_thumbnail_position(position):
+            return
+
         scene = self._context_scene_from_thumbnail_position(position)
         if scene is None:
             return
@@ -999,6 +1024,11 @@ class MainWindowWorkflowMixin:
             )
 
     def _show_scene_context_menu(self: MainWindow, position: QPoint) -> None:
+        # Check the filtered warning path before normal scene resolution
+        # because that resolver intentionally hides all filtered scene edits.
+        if self._filter_blocks_break_scene_from_scene_strip(position):
+            return
+
         scene = self._context_scene_from_scene_strip()
         if scene is None:
             return
@@ -1043,6 +1073,40 @@ class MainWindowWorkflowMixin:
 
         return scene
 
+    def _filter_blocks_break_scene_from_thumbnail_position(
+            self: MainWindow, position: QPoint
+    ) -> bool:
+        """
+        Warn when a filtered thumbnail right-click targets a breakable scene.
+
+        The normal context-menu resolver suppresses filtered scene edits, so
+        this path checks the clicked row first to turn that blocked edit into
+        explicit user feedback without opening the break menu.
+        """
+        if (
+            self._busy
+            or self._compare_mode
+            or self._browse_mode
+            or not self._photo_filter_active()
+            or not self.library.scene_detection_done
+        ):
+            return False
+
+        item = self.thumbnail_list.itemAt(position)
+        if item is None:
+            return False
+
+        photo_id = item.data(PHOTO_ID_ROLE)
+        if photo_id is None:
+            return False
+
+        scene = self._breakable_library_scene_for_photo_id(str(photo_id))
+        if scene is None:
+            return False
+
+        self._show_break_scene_filter_warning()
+        return True
+
     def _context_scene_from_scene_strip(self: MainWindow) -> SceneGroup | None:
         if (
             self._busy
@@ -1060,13 +1124,103 @@ class MainWindowWorkflowMixin:
 
         return scene
 
+    def _filter_blocks_break_scene_from_scene_strip(
+            self: MainWindow, position: QPoint
+    ) -> bool:
+        """
+        Warn when a filtered scene-strip right-click targets a breakable scene.
+
+        The horizontal strip can show only visible scene members under a
+        filter, so this checks the clicked item against the full scene before
+        the filtered resolver converts the action into a silent no-op.
+        """
+        if (
+            self._busy
+            or self._compare_mode
+            or self._browse_mode
+            or not self._photo_filter_active()
+            or not self.library.scene_detection_done
+            or not self.scene_list.isVisible()
+        ):
+            return False
+
+        item = self.scene_list.itemAt(position)
+        if item is None:
+            return False
+
+        photo_id = item.data(PHOTO_ID_ROLE)
+        if photo_id is None:
+            return False
+
+        scene = self._breakable_library_scene_for_photo_id(str(photo_id))
+        if scene is None:
+            return False
+
+        self._show_break_scene_filter_warning()
+        return True
+
+    def _breakable_library_scene_for_photo_id(
+            self: MainWindow, photo_id: str
+    ) -> SceneGroup | None:
+        """
+        Return the full breakable library scene containing a photo.
+
+        Filtered scene views can collapse a real multi-photo scene to one
+        visible row, so warning decisions must inspect the unfiltered scene
+        list rather than the visible scene lookup.
+        """
+        for scene in self.library.get_scene_groups():
+            if (
+                photo_id in scene.photo_ids
+                and len(scene.photo_ids) >= MIN_SCENE_MERGE_PHOTO_COUNT
+            ):
+                return scene
+
+        return None
+
+    def _breakable_library_scene_by_id(
+            self: MainWindow, scene_id: str
+    ) -> SceneGroup | None:
+        """
+        Return a full breakable library scene by ID.
+
+        Direct break-scene callers may run while filters hide members, so the
+        defensive guard must check the unfiltered scene list before deciding
+        whether the blocked call deserves a warning.
+        """
+        for scene in self.library.get_scene_groups():
+            if (
+                scene.scene_id == scene_id
+                and len(scene.photo_ids) >= MIN_SCENE_MERGE_PHOTO_COUNT
+            ):
+                return scene
+
+        return None
+
+    def _show_break_scene_filter_warning(self: MainWindow) -> None:
+        """
+        Show the persistent warning for filtered break-scene attempts.
+
+        The message uses the transient overlay with no timeout so it matches
+        other validation warnings that explicitly tell users to press Esc.
+        """
+        self._show_transient_message(
+            BREAK_SCENE_FILTER_ACTIVE_MESSAGE,
+            timeout_ms=None,
+        )
+
     def _break_scene_into_singletons(self: MainWindow, scene_id: str) -> None:
         if (
             self._busy
             or self._main_view_frozen_after_move_organize
             or self._compare_mode
-            or self._photo_filter_active()
         ):
+            return
+
+        if self._photo_filter_active():
+            if self._breakable_library_scene_by_id(scene_id) is not None:
+                self._show_break_scene_filter_warning()
+
             return
 
         scene = self._scene_by_id.get(scene_id)
@@ -1132,14 +1286,21 @@ class MainWindowWorkflowMixin:
             self._busy
             or self._main_view_frozen_after_move_organize
             or self._compare_mode
-            or self._photo_filter_active()
         ):
             return
 
-        photo_ids = self._mergeable_scene_photo_ids()
+        selection_source = self._scene_merge_selection_source_for_action()
+        photo_ids = self._mergeable_scene_photo_ids(selection_source)
         if len(photo_ids) < MIN_SCENE_MERGE_PHOTO_COUNT:
+            self._show_transient_message(
+                MERGE_REQUIRES_SELECTION_MESSAGE,
+                timeout_ms=None,
+            )
             return
 
+        # Reject partial scene-strip selections before expanding hidden
+        # filtered photos; otherwise the expansion could make a split-like
+        # selection look like a valid full-scene merge.
         if self._is_scene_strip_subset_merge():
             self._show_transient_message(
                 'Cannot split an existing scene group.\n'
@@ -1147,6 +1308,45 @@ class MainWindowWorkflowMixin:
                 timeout_ms=TRANSIENT_MESSAGE_TIMEOUT_MS,
             )
             return
+
+        if self._photo_filter_active():
+            if not self._filtered_merge_selection_is_contiguous(
+                selection_source
+            ):
+                self._show_transient_message(
+                    FILTERED_SCENE_MERGE_REQUIRES_RANGE_MESSAGE,
+                    timeout_ms=None,
+                )
+                return
+
+            # The visible lists omit filtered photos, while the library merge
+            # API edits exactly the IDs it receives. After proving the visible
+            # selection is continuous, fill hidden in-range photos before
+            # saving.
+            photo_ids, includes_hidden_photos = (
+                self._expand_filtered_merge_photo_ids(
+                    photo_ids,
+                    selection_source=selection_source,
+                )
+            )
+            if len(photo_ids) < MIN_SCENE_MERGE_PHOTO_COUNT:
+                return
+
+            # Expansion can turn one filtered stack back into the exact full
+            # scene it already represents. Catch that before confirmation so
+            # users are not asked to approve a merge the library must no-op.
+            if self._photo_ids_are_exact_existing_scene_group(photo_ids):
+                self._show_transient_message(
+                    MERGE_REQUIRES_SELECTION_MESSAGE,
+                    timeout_ms=None,
+                )
+                return
+
+            if (
+                includes_hidden_photos
+                and not self._confirm_filtered_scene_merge()
+            ):
+                return
 
         thumbnail_anchor = self._capture_thumbnail_scroll_anchor(photo_ids[0])
         before_groups = self.library.scene_group_photo_ids()
@@ -1173,7 +1373,166 @@ class MainWindowWorkflowMixin:
         )
         self._refresh_metadata_history_actions()
 
-    def _mergeable_scene_photo_ids(self: MainWindow) -> list[str]:
+    def _expand_filtered_merge_photo_ids(
+            self: MainWindow,
+            photo_ids: list[str],
+            *,
+            selection_source: str | None,
+    ) -> tuple[list[str], bool]:
+        """
+        Include hidden photos in the selected scene-aware merge range.
+
+        Continuous visible ranges may hide in-between photos. Scene-stack
+        selections also represent full underlying scenes, while browse-grid
+        selections remain exact photos.
+        """
+        selected = set(photo_ids)
+        full_photo_ids = [
+            photo.photo_id for photo in self.library.get_photos()
+        ]
+        ordered_selected = [
+            photo_id for photo_id in full_photo_ids if photo_id in selected
+        ]
+        if len(ordered_selected) < MIN_SCENE_MERGE_PHOTO_COUNT:
+            return ordered_selected, False
+
+        visible_photo_ids = {
+            photo.photo_id for photo in self._visible_photos()
+        }
+        index_by_photo_id = {
+            photo_id: index for index, photo_id in enumerate(full_photo_ids)
+        }
+        expanded_selected = set(ordered_selected)
+        expand_scene_groups = (
+            selection_source in {'thumbnail', 'scene'}
+            and self.library.scene_detection_done
+            and not self._browse_mode
+        )
+        if expand_scene_groups:
+            # Filtered scene rows may expose only one visible member of a full
+            # scene. Expand through the unfiltered groups so selecting that row
+            # still preserves the hidden scene members during the merge.
+            scene_photo_ids_by_photo_id: dict[str, list[str]] = {}
+            for scene in self.library.get_scene_groups():
+                for scene_photo_id in scene.photo_ids:
+                    scene_photo_ids_by_photo_id[scene_photo_id] = (
+                        scene.photo_ids
+                    )
+
+            for photo_id in ordered_selected:
+                expanded_selected.update(
+                    scene_photo_ids_by_photo_id.get(photo_id, [photo_id])
+                )
+
+        ordered_expanded = [
+            photo_id
+            for photo_id in full_photo_ids
+            if photo_id in expanded_selected
+        ]
+        if len(ordered_expanded) < MIN_SCENE_MERGE_PHOTO_COUNT:
+            return ordered_expanded, False
+
+        first_index = index_by_photo_id[ordered_expanded[0]]
+        last_index = index_by_photo_id[ordered_expanded[-1]]
+        expanded_range = full_photo_ids[first_index : last_index + 1]
+        includes_hidden_photos = any(
+            photo_id not in visible_photo_ids for photo_id in expanded_range
+        )
+
+        return expanded_range, includes_hidden_photos
+
+    def _photo_ids_are_exact_existing_scene_group(
+            self: MainWindow, photo_ids: list[str]
+    ) -> bool:
+        """Return True when the merge would recreate an existing scene."""
+        return any(
+            photo_ids == group
+            for group in self.library.scene_group_photo_ids()
+        )
+
+    def _filtered_merge_selection_is_contiguous(
+            self: MainWindow,
+            selection_source: str | None,
+    ) -> bool:
+        """
+        Return True when selected visible rows form one continuous range.
+
+        Hidden photos may be included after confirmation, but visible rows that
+        users skipped must not be added implicitly.
+        """
+        rows = self._filtered_merge_visible_selection_rows(selection_source)
+        if len(rows) <= 1:
+            return True
+
+        return rows == list(range(rows[0], rows[-1] + 1))
+
+    def _filtered_merge_visible_selection_rows(
+            self: MainWindow,
+            selection_source: str | None,
+    ) -> list[int]:
+        if selection_source == 'browse':
+            return self._selected_row_indexes_from_list(self.browse_list)
+
+        if selection_source == 'scene':
+            return self._filtered_scene_merge_stack_rows()
+
+        return self._selected_row_indexes_from_list(self.thumbnail_list)
+
+    def _filtered_scene_merge_stack_rows(self: MainWindow) -> list[int]:
+        """
+        Return selected visible scene-stack rows for filtered range checks.
+
+        A full horizontal scene-strip selection means "include this current
+        stack", so its vertical row participates in the continuity test even
+        when the user made that part of the selection from the scene strip.
+        """
+        rows = set(self._selected_row_indexes_from_list(self.thumbnail_list))
+        current_scene = self._current_scene()
+        if current_scene is not None:
+            row = self._thumbnail_scene_rows.get(current_scene.scene_id)
+            if row is not None:
+                rows.add(row)
+
+        return sorted(rows)
+
+    @staticmethod
+    def _selected_row_indexes_from_list(list_widget: QListWidget) -> list[int]:
+        selected_items = sorted(
+            list_widget.selectedItems(), key=list_widget.row
+        )
+        if not selected_items and list_widget.currentItem() is not None:
+            selected_items = [list_widget.currentItem()]
+
+        rows = {
+            row
+            for item in selected_items
+            if (row := list_widget.row(item)) >= 0
+        }
+        return sorted(rows)
+
+    def _confirm_filtered_scene_merge(self: MainWindow) -> bool:
+        """
+        Ask before a filtered merge includes currently hidden photos.
+
+        Hidden in-between photos are not visible in the selection UI, so this
+        confirmation makes the broader scene edit explicit before metadata is
+        saved and undo history is recorded.
+        """
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle('Merge Includes Hidden Photos')
+        dialog.setText(FILTERED_SCENE_MERGE_WARNING_TEXT)
+        merge_button = dialog.addButton(
+            'Merge Scene', QMessageBox.ButtonRole.AcceptRole
+        )
+        dialog.addButton(QMessageBox.StandardButton.Cancel)
+        dialog.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        dialog.exec()
+        return dialog.clickedButton() is merge_button
+
+    def _mergeable_scene_photo_ids(
+            self: MainWindow,
+            selection_source: str | None = None,
+    ) -> list[str]:
         """
         Return the photos that the scene merge action should operate on.
 
@@ -1185,45 +1544,82 @@ class MainWindowWorkflowMixin:
         if self._compare_mode:
             return []
 
-        if not self.library.scene_detection_done or self._browse_mode:
-            return self._resolved_selection_photo_ids()
+        if selection_source is None:
+            selection_source = self._scene_merge_selection_source_for_action()
 
-        selection_source = self._scene_merge_selection_source
-        if selection_source == 'thumbnail':
-            return self._selected_scene_stack_photo_ids()
+        if selection_source == 'browse':
+            return self._resolved_selection_photo_ids()
 
         if selection_source == 'scene':
             return self._mergeable_scene_strip_photo_ids()
+
+        if (
+            selection_source == 'thumbnail'
+            and self.library.scene_detection_done
+            and not self._browse_mode
+        ):
+            return self._selected_scene_stack_photo_ids()
+
+        if selection_source == 'thumbnail':
+            return self._resolved_selection_photo_ids()
+
+        return []
+
+    def _scene_merge_selection_source_for_action(
+            self: MainWindow,
+    ) -> str | None:
+        """
+        Resolve which visible list owns the current merge command.
+
+        The same QAction can fire from focus, menu, or shortcut paths, so this
+        method freezes the selection surface before filtered range validation
+        and hidden-photo expansion derive different behavior from it.
+        """
+        if self._compare_mode:
+            return None
+
+        if self._browse_mode:
+            return 'browse'
+
+        if not self.library.scene_detection_done:
+            return 'thumbnail'
+
+        selection_source = self._scene_merge_selection_source
+        if selection_source == 'thumbnail':
+            return 'thumbnail'
+
+        if selection_source == 'scene':
+            return 'scene'
 
         focus_widget = QApplication.focusWidget()
         if focus_widget in {
             self.thumbnail_list,
             self.thumbnail_list.viewport(),
         }:
-            return self._selected_scene_stack_photo_ids()
+            return 'thumbnail'
 
         if focus_widget in {
             self.scene_list,
             self.scene_list.viewport(),
         }:
-            return self._mergeable_scene_strip_photo_ids()
+            return 'scene'
 
         thumbnail_selection_count = len(self.thumbnail_list.selectedItems())
         scene_selection_count = len(self.scene_list.selectedItems())
 
         if thumbnail_selection_count >= MIN_SCENE_MERGE_PHOTO_COUNT:
-            return self._selected_scene_stack_photo_ids()
+            return 'thumbnail'
 
         if scene_selection_count >= MIN_SCENE_MERGE_PHOTO_COUNT:
-            return self._mergeable_scene_strip_photo_ids()
+            return 'scene'
 
         if thumbnail_selection_count > 0:
-            return self._selected_scene_stack_photo_ids()
+            return 'thumbnail'
 
         if scene_selection_count > 0:
-            return self._mergeable_scene_strip_photo_ids()
+            return 'scene'
 
-        return []
+        return None
 
     def _mergeable_scene_strip_photo_ids(self: MainWindow) -> list[str]:
         """
