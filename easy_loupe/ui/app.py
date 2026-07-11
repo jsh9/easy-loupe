@@ -301,17 +301,19 @@ class WindowManager:
             return True
 
         self._prune_confirmed_quit_window_ids()
-        if not self._confirmed_quit_window_ids:
+        retained_window_ids = {id(window) for window in self._windows}
+        unconfirmed_window_ids = (
+            retained_window_ids - self._confirmed_quit_window_ids
+        )
+        if unconfirmed_window_ids:
             if not self._confirm_quit(len(self._windows)):
                 return False
 
             # Native quit events can arrive again while deferred-close windows
             # are hidden. Remember which retained windows the user approved so
-            # cleanup continues without re-prompting, but later windows require
-            # fresh confirmation after this approved sweep drains.
-            self._confirmed_quit_window_ids = {
-                id(window) for window in self._windows
-            }
+            # cleanup continues without re-prompting, while any window opened
+            # during that cleanup still requires fresh confirmation.
+            self._confirmed_quit_window_ids = retained_window_ids
 
         self.close_all_windows()
         return not self._windows
@@ -320,9 +322,9 @@ class WindowManager:
         """
         Forget confirmed-quit approvals for windows no longer retained.
 
-        This keeps a confirmation scoped to the current close sweep: repeated
-        quit events can continue draining the same hidden windows, but later
-        windows must ask again after the original sweep is gone.
+        This keeps a confirmation scoped to the windows in the approved close
+        sweep: repeated quit events can continue draining the same hidden
+        windows, but later windows are not covered by that approval.
         """
         retained_window_ids = {id(window) for window in self._windows}
         self._confirmed_quit_window_ids.intersection_update(

@@ -468,8 +468,9 @@ implementation.
 `Ctrl+Q`/`Cmd+Q`, native application Quit, Dock Quit, and `File > Close App`
 all request confirmed app-wide quit. The confirmation defaults to `Cancel`.
 After the user confirms, `WindowManager` closes every retained EasyLoupe window
-through the same deferred-close paths and suppresses repeated confirmations
-while hidden worker cleanup drains.
+through the same deferred-close paths and suppresses repeated confirmations for
+those same windows while hidden worker cleanup drains. A window opened during
+that cleanup requires fresh confirmation before it joins the close sweep.
 
 `File > Close Window` owns the `Ctrl+W`/`Cmd+W` shortcut and follows the same
 per-window close path as the window control.

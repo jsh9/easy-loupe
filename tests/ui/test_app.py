@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import subprocess  # noqa: S404 - isolates the QApplication singleton
+import sys
+import textwrap
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -469,6 +472,43 @@ def test_confirm_application_quit_dialog_defaults_to_cancel(
     assert app_module.confirm_application_quit(3) is True
 
 
+def test_easy_loupe_application_routes_native_quit_events() -> None:
+    """
+    Verify the real QApplication override consumes or allows native Quit.
+
+    QApplication is a process singleton, so this regression check uses an
+    isolated child process instead of replacing the suite's shared instance.
+    """
+    script = textwrap.dedent(
+        """
+        from PySide6.QtCore import QEvent
+
+        from easy_loupe.ui.app import EasyLoupeApplication
+
+        app = EasyLoupeApplication([])
+        calls = []
+
+        app.set_quit_handler(lambda: calls.append('cancel') or False)
+        canceled_event = QEvent(QEvent.Type.Quit)
+        assert app.event(canceled_event) is True
+        assert canceled_event.isAccepted() is False
+        assert calls == ['cancel']
+
+        app.set_quit_handler(lambda: calls.append('allow') or True)
+        allowed_event = QEvent(QEvent.Type.Quit)
+        assert app.event(allowed_event) is True
+        assert allowed_event.isAccepted() is True
+        assert calls == ['cancel', 'allow']
+        app.shutdown()
+        """
+    )
+
+    subprocess.run(  # noqa: S603 - trusted current Python interpreter
+        [sys.executable, '-c', script],
+        check=True,
+    )
+
+
 def test_window_manager_quits_after_last_window_is_destroyed() -> None:
     """
     Quit the app only after the final retained window is destroyed.
@@ -648,16 +688,15 @@ def test_window_manager_quit_skips_manually_deferred_close_window() -> None:
     assert app.quit_calls == 1
 
 
-def test_window_manager_close_app_reaches_late_window() -> None:
+def test_window_manager_close_app_confirms_late_window() -> None:
     """
-    Close late windows while an active confirmed sweep is draining.
+    Require fresh confirmation for a window opened during a close sweep.
 
-    The manager must avoid re-closing the hidden deferred window, but repeated
-    Close App should still reach windows opened before the original confirmed
-    sweep has fully drained.
+    The original approval covers only the windows retained at that moment, so a
+    later window must not close merely because deferred cleanup is ongoing.
     """
     app = _FakeApplication()
-    confirm_quit = _ConfirmationRecorder(True)
+    confirm_quit = _ConfirmationRecorder(True, True)
     manager = app_module.WindowManager(
         culling_window_factory=_DeferredCloseCullingWindow,
         photo_window_factory=_FakePhotoWindow,
@@ -682,9 +721,48 @@ def test_window_manager_close_app_reaches_late_window() -> None:
     assert second_photo.close_calls == 1
     assert manager.windows() == [deferred]
     assert app.quit_calls == 0
-    assert confirm_quit.calls == [2]
+    assert confirm_quit.calls == [2, 2]
 
     deferred.finish_close()
+
+    assert manager.windows() == []
+    assert app.quit_calls == 1
+
+
+def test_window_manager_close_app_cancel_keeps_late_window() -> None:
+    """
+    Keep a late window open when its fresh quit confirmation is canceled.
+
+    Deferred cleanup from an earlier approved sweep must continue without
+    extending that approval to a newly opened window.
+    """
+    app = _FakeApplication()
+    confirm_quit = _ConfirmationRecorder(True, False)
+    manager = app_module.WindowManager(
+        culling_window_factory=_DeferredCloseCullingWindow,
+        photo_window_factory=_FakePhotoWindow,
+        app=app,
+        confirm_quit=confirm_quit,
+    )
+    deferred = manager.open_culling_window()
+
+    assert app.request_quit() is False
+
+    late_window = manager.open_photo_window(Path('IMG_1001.JPG'))
+    late_window.close_app_requested.emit()
+
+    assert confirm_quit.calls == [1, 2]
+    assert deferred.close_calls == 1
+    assert late_window.close_calls == 0
+    assert manager.windows() == [deferred, late_window]
+    assert app.quit_calls == 0
+
+    deferred.finish_close()
+
+    assert manager.windows() == [late_window]
+    assert app.quit_calls == 0
+
+    late_window.close()
 
     assert manager.windows() == []
     assert app.quit_calls == 1

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Fixed
+
+  - Windows opened during deferred app-quit cleanup now require their own quit
+    confirmation instead of inheriting the earlier approval.
+
 ## [1.4.4] - 2026-07-11
 
 - Fixed
