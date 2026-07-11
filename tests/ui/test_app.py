@@ -6,7 +6,7 @@ import textwrap
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
 
 import easy_loupe.ui as ui_package
 import easy_loupe.ui.app as app_module
@@ -437,9 +437,11 @@ def test_confirm_application_quit_dialog_defaults_to_cancel(
     must make the non-destructive choice the default and Esc action.
     """
     _app = QApplication.instance() or QApplication([])
+    active_window = QWidget()
     clicked_button: dict[str, object] = {}
 
     def fake_exec(dialog: QMessageBox) -> int:
+        assert dialog.parent() is active_window
         assert dialog.text() == ('Quit EasyLoupe and close all 3 windows?')
         assert (
             dialog.standardButton(dialog.defaultButton())
@@ -466,6 +468,7 @@ def test_confirm_application_quit_dialog_defaults_to_cancel(
     def fake_clicked_button(_dialog: QMessageBox) -> object:
         return clicked_button['button']
 
+    monkeypatch.setattr(QApplication, 'activeWindow', lambda: active_window)
     monkeypatch.setattr(QMessageBox, 'exec', fake_exec)
     monkeypatch.setattr(QMessageBox, 'clickedButton', fake_clicked_button)
 

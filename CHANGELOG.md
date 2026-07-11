@@ -6,6 +6,8 @@
 
   - Windows opened during deferred app-quit cleanup now require their own quit
     confirmation instead of inheriting the earlier approval.
+  - App-quit confirmations now follow the active EasyLoupe window when one is
+    available.
 
 ## [1.4.4] - 2026-07-11
 

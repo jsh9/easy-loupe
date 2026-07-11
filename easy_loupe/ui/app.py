@@ -31,7 +31,7 @@ APPLICATION_QUIT_ACCEPT_LABEL = f'Quit {APP_NAME}'
 
 def confirm_application_quit(window_count: int) -> bool:
     """Return whether the user confirmed app-wide quit."""
-    dialog = QMessageBox()
+    dialog = QMessageBox(QApplication.activeWindow())
     dialog.setIcon(QMessageBox.Icon.Question)
     dialog.setWindowTitle(f'Quit {APP_NAME}?')
     if window_count == 1:
