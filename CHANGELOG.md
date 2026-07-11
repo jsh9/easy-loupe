@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.4.4] - 2026-07-11
+
 - Fixed
 
   - `Ctrl+Q`/`Cmd+Q`, Dock/app-menu Quit, and `File > Close App` now ask for

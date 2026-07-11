@@ -424,8 +424,8 @@ def test_confirm_application_quit_dialog_defaults_to_cancel(
     """
     Verify app-wide quit confirmation defaults to cancel.
 
-    Cmd/Ctrl+Q is easy to hit accidentally instead of Cmd/Ctrl+W, so the
-    dialog must make the non-destructive choice the default and Esc action.
+    Cmd/Ctrl+Q is easy to hit accidentally instead of Cmd/Ctrl+W, so the dialog
+    must make the non-destructive choice the default and Esc action.
     """
     _app = QApplication.instance() or QApplication([])
     clicked_button: dict[str, object] = {}
