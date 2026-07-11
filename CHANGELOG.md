@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-07-11
+
 - Changed
 
   - Reduced mouse wheel and trackpad scrolling speed in the main culling view's
