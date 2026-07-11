@@ -8,6 +8,8 @@
     confirmation instead of inheriting the earlier approval.
   - App-quit confirmations now follow the active EasyLoupe window when one is
     available.
+  - Final-window shutdown now exits the event loop directly after deferred
+    worker cleanup so EasyLoupe does not remain in the macOS Dock.
 
 ## [1.4.4] - 2026-07-11
 

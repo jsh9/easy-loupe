@@ -497,7 +497,9 @@ disables implicit last-visible-window quit and exits only after the manager has
 forgotten every destroyed window. Native application quit events must use the
 same confirmed app-wide quit path as `Ctrl+Q`/`Cmd+Q` and `File > Close App`,
 while preserving the last-window teardown boundary that keeps `QThread` child
-objects alive until worker code has stopped running.
+objects alive until worker code has stopped running. Once the final managed
+window is destroyed, the manager exits the event loop directly instead of
+issuing another interruptible Quit request.
 
 ## 7. Verification Pointers
 

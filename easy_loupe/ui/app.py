@@ -179,8 +179,8 @@ class _ManagedApplication(Protocol):
     def set_quit_handler(self, handler: Callable[[], bool] | None) -> None:
         """Set the application-level quit policy hook."""
 
-    def quit(self) -> None:
-        """Request application shutdown."""
+    def exit(self, return_code: int = 0) -> None:
+        """Exit the application event loop with ``return_code``."""
 
 
 class WindowManager:
@@ -352,7 +352,7 @@ class WindowManager:
         viewer.close()
 
     def _remove_window(self, window: _ManagedWindow) -> None:
-        """Forget a destroyed window so Qt can quit after the last close."""
+        """Forget a destroyed window and exit after the last close."""
         self._close_all_requested_window_ids.discard(id(window))
         self._confirmed_quit_window_ids.discard(id(window))
         try:
@@ -361,7 +361,11 @@ class WindowManager:
             return
 
         if not self._windows and self._app is not None:
-            self._app.quit()
+            # Final cleanup must not post another interruptible Quit event.
+            # A native macOS Quit may already have been ignored while hidden
+            # worker-owning windows drained, so end the event loop directly
+            # only after every managed window has been destroyed.
+            self._app.exit(0)
 
     def _handle_application_quit(self) -> bool:
         """

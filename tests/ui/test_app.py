@@ -234,7 +234,7 @@ class _FakeApplication:
     def __init__(self) -> None:
         self.quit_on_last_window_closed: bool | None = None
         self.quit_handler: Callable[[], bool] | None = None
-        self.quit_calls = 0
+        self.exit_codes: list[int] = []
 
     def setQuitOnLastWindowClosed(  # noqa: N802
             self, should_quit: bool
@@ -246,9 +246,9 @@ class _FakeApplication:
         """Record the application quit-event handler."""
         self.quit_handler = handler
 
-    def quit(self) -> None:
-        """Record explicit application quit requests."""
-        self.quit_calls += 1
+    def exit(self, return_code: int = 0) -> None:
+        """Record direct application event-loop exits."""
+        self.exit_codes.append(return_code)
 
     def request_quit(self) -> bool:
         """Invoke the installed quit handler like a Qt quit event would."""
@@ -512,9 +512,77 @@ def test_easy_loupe_application_routes_native_quit_events() -> None:
     )
 
 
-def test_window_manager_quits_after_last_window_is_destroyed() -> None:
+def test_window_manager_exits_after_deferred_native_quit() -> None:
     """
-    Quit the app only after the final retained window is destroyed.
+    Exit directly after an ignored native Quit and deferred window cleanup.
+
+    macOS can treat a repeated ``quit()`` request as interruptible after the
+    original native Quit was ignored. Two real deferred-close windows ensure
+    the manager must use the non-interruptible final ``exit(0)`` boundary.
+    """
+    script = textwrap.dedent(
+        """
+        from PySide6.QtCore import QCoreApplication, QEvent, QTimer, Signal
+        from PySide6.QtWidgets import QMainWindow
+
+        from easy_loupe.ui.app import EasyLoupeApplication, WindowManager
+
+
+        class QuitIgnoringApplication(EasyLoupeApplication):
+            def quit(self):
+                return
+
+
+        class DeferredWindow(QMainWindow):
+            close_app_requested = Signal()
+
+            def __init__(self, launch_request=None):
+                super().__init__()
+                self._close_started = False
+
+            def is_close_in_progress(self):
+                return self._close_started
+
+            def closeEvent(self, event):
+                if not self._close_started:
+                    self._close_started = True
+                    event.ignore()
+                    self.hide()
+                    QTimer.singleShot(0, self.close)
+                    return
+
+                super().closeEvent(event)
+
+
+        app = QuitIgnoringApplication(['EasyLoupe-shutdown-test'])
+        manager = WindowManager(
+            culling_window_factory=DeferredWindow,
+            app=app,
+            confirm_quit=lambda _count: True,
+        )
+        manager.open_culling_window()
+        manager.open_culling_window()
+        QTimer.singleShot(
+            0,
+            lambda: QCoreApplication.postEvent(
+                app, QEvent(QEvent.Type.Quit)
+            ),
+        )
+        QTimer.singleShot(2000, lambda: app.exit(99))
+        assert app.exec() == 0
+        app.shutdown()
+        """
+    )
+
+    subprocess.run(  # noqa: S603 - trusted current Python interpreter
+        [sys.executable, '-c', script],
+        check=True,
+    )
+
+
+def test_window_manager_exits_after_last_window_is_destroyed() -> None:
+    """
+    Exit the app only after the final retained window is destroyed.
 
     A normal close can destroy immediately; background-close windows reach the
     same path later from their deferred final close. This is the controlled
@@ -531,7 +599,7 @@ def test_window_manager_quits_after_last_window_is_destroyed() -> None:
     window.destroy()
 
     assert manager.windows() == []
-    assert app.quit_calls == 1
+    assert app.exit_codes == [0]
 
 
 def test_window_manager_quit_request_cancel_keeps_retained_windows() -> None:
@@ -558,7 +626,7 @@ def test_window_manager_quit_request_cancel_keeps_retained_windows() -> None:
     assert first.close_calls == 0
     assert second.close_calls == 0
     assert manager.windows() == [first, second]
-    assert app.quit_calls == 0
+    assert app.exit_codes == []
 
 
 def test_window_manager_quit_request_closes_after_confirmation() -> None:
@@ -585,7 +653,7 @@ def test_window_manager_quit_request_closes_after_confirmation() -> None:
     assert first.close_calls == 1
     assert second.close_calls == 1
     assert manager.windows() == []
-    assert app.quit_calls == 1
+    assert app.exit_codes == [0]
 
 
 def test_window_manager_close_all_windows_closes_retained_windows() -> None:
@@ -609,7 +677,7 @@ def test_window_manager_close_all_windows_closes_retained_windows() -> None:
     assert first.close_calls == 1
     assert second.close_calls == 1
     assert manager.windows() == []
-    assert app.quit_calls == 1
+    assert app.exit_codes == [0]
 
 
 def test_window_manager_close_app_signal_closes_all_windows_once() -> None:
@@ -636,20 +704,20 @@ def test_window_manager_close_app_signal_closes_all_windows_once() -> None:
     assert first.close_calls == 1
     assert second.close_calls == 1
     assert manager.windows() == [first]
-    assert app.quit_calls == 0
+    assert app.exit_codes == []
     assert confirm_quit.calls == [2]
 
     first.close_app_requested.emit()
 
     assert first.close_calls == 1
     assert manager.windows() == [first]
-    assert app.quit_calls == 0
+    assert app.exit_codes == []
     assert confirm_quit.calls == [2]
 
     first.finish_close()
 
     assert manager.windows() == []
-    assert app.quit_calls == 1
+    assert app.exit_codes == [0]
 
 
 def test_window_manager_quit_skips_manually_deferred_close_window() -> None:
@@ -683,12 +751,12 @@ def test_window_manager_quit_skips_manually_deferred_close_window() -> None:
     assert deferred.close_calls == 1
     assert second.close_calls == 1
     assert manager.windows() == [deferred]
-    assert app.quit_calls == 0
+    assert app.exit_codes == []
 
     deferred.finish_close()
 
     assert manager.windows() == []
-    assert app.quit_calls == 1
+    assert app.exit_codes == [0]
 
 
 def test_window_manager_close_app_confirms_late_window() -> None:
@@ -714,7 +782,7 @@ def test_window_manager_close_app_confirms_late_window() -> None:
     assert deferred.close_calls == 1
     assert first_photo.close_calls == 1
     assert manager.windows() == [deferred]
-    assert app.quit_calls == 0
+    assert app.exit_codes == []
     assert confirm_quit.calls == [2]
 
     second_photo = manager.open_photo_window(Path('IMG_1001.JPG'))
@@ -723,13 +791,13 @@ def test_window_manager_close_app_confirms_late_window() -> None:
     assert deferred.close_calls == 1
     assert second_photo.close_calls == 1
     assert manager.windows() == [deferred]
-    assert app.quit_calls == 0
+    assert app.exit_codes == []
     assert confirm_quit.calls == [2, 2]
 
     deferred.finish_close()
 
     assert manager.windows() == []
-    assert app.quit_calls == 1
+    assert app.exit_codes == [0]
 
 
 def test_window_manager_close_app_cancel_keeps_late_window() -> None:
@@ -758,17 +826,17 @@ def test_window_manager_close_app_cancel_keeps_late_window() -> None:
     assert deferred.close_calls == 1
     assert late_window.close_calls == 0
     assert manager.windows() == [deferred, late_window]
-    assert app.quit_calls == 0
+    assert app.exit_codes == []
 
     deferred.finish_close()
 
     assert manager.windows() == [late_window]
-    assert app.quit_calls == 0
+    assert app.exit_codes == []
 
     late_window.close()
 
     assert manager.windows() == []
-    assert app.quit_calls == 1
+    assert app.exit_codes == [0]
 
 
 def test_window_manager_quit_confirmation_resets_after_sweep_drains() -> None:
@@ -795,14 +863,14 @@ def test_window_manager_quit_confirmation_resets_after_sweep_drains() -> None:
     deferred.finish_close()
 
     assert manager.windows() == [late_window]
-    assert app.quit_calls == 0
+    assert app.exit_codes == []
 
     assert app.request_quit() is True
 
     assert confirm_quit.calls == [1, 1]
     assert late_window.close_calls == 1
     assert manager.windows() == []
-    assert app.quit_calls == 1
+    assert app.exit_codes == [0]
 
 
 def test_window_manager_confirmed_quit_drains_deferred_close_once() -> None:
@@ -829,19 +897,19 @@ def test_window_manager_confirmed_quit_drains_deferred_close_once() -> None:
     assert window.close_calls == 1
     assert window.closed is True
     assert manager.windows() == [window]
-    assert app.quit_calls == 0
+    assert app.exit_codes == []
 
     assert app.request_quit() is False
 
     assert confirm_quit.calls == [1]
     assert window.close_calls == 1
     assert manager.windows() == [window]
-    assert app.quit_calls == 0
+    assert app.exit_codes == []
 
     window.finish_close()
 
     assert manager.windows() == []
-    assert app.quit_calls == 1
+    assert app.exit_codes == [0]
     assert app.request_quit() is True
 
 
@@ -1055,7 +1123,7 @@ def test_main_keeps_pending_file_events_separate_from_argv(
             return [pending_photo]
 
         @staticmethod
-        def quit() -> None:
+        def exit(_return_code: int = 0) -> None:
             return
 
         @staticmethod
