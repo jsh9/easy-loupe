@@ -695,6 +695,96 @@ class MainWindowPresentationMixin:
         list_widget.addItem(item)
         list_widget.setItemWidget(item, widget)
 
+    @staticmethod
+    def _update_photo_item_metadata(
+            list_widget: QListWidget,
+            row: int | None,
+            *,
+            metadata_text: str,
+            rejected: bool,
+    ) -> None:
+        """Refresh one existing photo card without replacing its row widget."""
+        if row is None:
+            return
+
+        item = list_widget.item(row)
+        if item is None:
+            return
+
+        widget = list_widget.itemWidget(item)
+        if not isinstance(widget, ThumbnailItemWidget):
+            return
+
+        widget.set_metadata_text(metadata_text)
+        item.setData(FLAG_ROLE, 'rejected' if rejected else None)
+
+    def _refresh_metadata_items_in_place(
+            self: MainWindow, photo_ids: list[str]
+    ) -> None:
+        """
+        Refresh existing list cards for metadata edits made in compare mode.
+
+        The normal culling lists are hidden during compare. Keeping their row
+        widgets intact avoids asking Qt to lay out a newly rebuilt hidden list
+        before compare exit makes it visible again.
+        """
+        changed_photo_ids = set(photo_ids)
+        for photo_id in changed_photo_ids:
+            photo = self.library.get_photo(photo_id)
+            metadata_text = metadata_markup(photo)
+            rejected = photo.flag == 'rejected'
+            self._update_photo_item_metadata(
+                self.browse_list,
+                self._browse_photo_rows.get(photo_id),
+                metadata_text=metadata_text,
+                rejected=rejected,
+            )
+            self._update_photo_item_metadata(
+                self.scene_list,
+                self._scene_photo_rows.get(photo_id),
+                metadata_text=metadata_text,
+                rejected=rejected,
+            )
+            if not self.library.scene_detection_done:
+                self._update_photo_item_metadata(
+                    self.thumbnail_list,
+                    self._thumbnail_photo_rows.get(photo_id),
+                    metadata_text=metadata_text,
+                    rejected=rejected,
+                )
+
+        if not self.library.scene_detection_done:
+            return
+
+        # An exact non-cover edit can change whether its aggregate scene stack
+        # is rejected. Refresh each affected cover once so the vertical strip
+        # stays accurate without replacing any of its hidden row widgets.
+        affected_scene_ids = {
+            scene.scene_id
+            for photo_id in changed_photo_ids
+            if (scene := self._scene_for_photo_id(photo_id)) is not None
+        }
+        for scene_id in affected_scene_ids:
+            scene = self._scene_by_id[scene_id]
+            cover = self.library.get_photo(scene.photo_ids[0])
+            scene_count = len(scene.photo_ids)
+            rejected = (
+                all(
+                    self.library.get_photo(photo_id).flag == 'rejected'
+                    for photo_id in scene.photo_ids
+                )
+                if scene_count > 1
+                else cover.flag == 'rejected'
+            )
+            self._update_photo_item_metadata(
+                self.thumbnail_list,
+                self._thumbnail_scene_rows.get(scene_id),
+                metadata_text=''
+                if scene_count > 1
+                else metadata_markup(cover),
+                rejected=rejected,
+            )
+
     def _scene_display_name(self: MainWindow, scene: SceneGroup) -> str:
         if not scene.photo_ids:
             return ''

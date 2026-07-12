@@ -121,6 +121,10 @@ Major logic:
   workspace moves to the next visible photo in library order, then the previous
   visible photo, then the first visible photo. If nothing matches, the viewer
   is cleared and the selection label reports that no photos match.
+- Without an active filter, metadata edits in compare mode update the existing
+  hidden thumbnail, browse, and scene-strip cards in place. They must preserve
+  row-widget identity, selection, geometry, and scroll state so compare exit
+  reveals the original culling lists instead of a rebuilt hidden layout.
 - In compare mode, metadata edits under an active filter prune compared photos
   that no longer match and exit compare mode when fewer than two compared
   photos remain visible.

@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
-@pytest.fixture(autouse=True)  # noqa: RUF076 - prevent UI test focus theft.
+@pytest.fixture(autouse=True)
 def show_windows_without_desktop_activation(
         monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -44,8 +44,15 @@ def show_windows_without_desktop_activation(
     monkeypatch.setattr(QWidget, 'show', show_without_desktop_activation)
 
 
-@pytest.fixture(autouse=True)  # noqa: RUF076 - isolate Qt settings globally.
+@pytest.fixture(autouse=True)
 def clear_main_window_settings() -> Iterator[None]:
+    """
+    Isolate persisted main-window preferences between UI tests.
+
+    Tests exercise real ``QSettings`` behavior, so each case starts without
+    state left by earlier tests and restores the developer's original values
+    afterward instead of overwriting local application preferences.
+    """
     settings = QSettings(APP_NAME, APP_NAME)
     setting_keys = [
         COMPARE_PHOTO_LIMIT_SETTINGS_KEY,

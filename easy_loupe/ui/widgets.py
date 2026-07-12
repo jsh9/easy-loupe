@@ -456,6 +456,11 @@ class ThumbnailItemWidget(QWidget):
 
         return self._front_image_widget.visible_region_overlay()
 
+    def set_metadata_text(self, metadata_text: str) -> None:
+        """Update the reserved metadata row without changing card geometry."""
+        self.meta_label.setText(metadata_text)
+        self.meta_label.setVisible(bool(metadata_text))
+
     def apply_theme(
             self,
             theme: ThemePalette,
