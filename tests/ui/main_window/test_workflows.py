@@ -214,7 +214,10 @@ def test_main_window_sets_color_label_and_saves_metadata() -> None:
             self.library = FakeLibrary()
             self.refreshed = False
 
-        def _after_metadata_change(self) -> None:
+        def _after_metadata_change(
+                self, changed_photo_ids: list[str] | None = None
+        ) -> None:
+            assert changed_photo_ids == ['IMG_7100']
             self.refreshed = True
 
     fake_window = FakeWindow()

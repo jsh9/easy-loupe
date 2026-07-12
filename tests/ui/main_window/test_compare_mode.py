@@ -13,11 +13,15 @@ from typing import TYPE_CHECKING
 
 import pytest
 from PySide6.QtCore import QItemSelectionModel, Qt
+from PySide6.QtTest import QTest
 
 from easy_loupe.core.records import METADATA_FILENAME
 from easy_loupe.ui.main_window.build import VIEWER_KEYBOARD_PAN_STEP
+from easy_loupe.ui.main_window.filters import PhotoFilterSelection
+from easy_loupe.ui.theme import FLAG_ROLE
 from tests.ui._helpers import (
     create_main_window_with_library,
+    set_qt_active_window,
     set_scene_detection_result,
     thumbnail_overlay,
     trigger_scene_shortcut,
@@ -57,6 +61,14 @@ def _select_rows_with_current(
         list_widget.indexFromItem(current_item), flags
     )
     list_widget.setFocus(Qt.OtherFocusReason)
+
+
+def _item_widgets(list_widget: object) -> tuple[object, ...]:
+    """Return row-widget identities for detecting destructive list rebuilds."""
+    return tuple(
+        list_widget.itemWidget(list_widget.item(row))
+        for row in range(list_widget.count())
+    )
 
 
 def test_compare_mode_opens_default_limit_and_esc_restores_view(
@@ -847,6 +859,177 @@ def test_compare_mode_arrow_selection_tags_only_active_photo(
         .startswith('<span style="color: transparent;">')
     )
     assert '★★★★☆' in window.compare_viewer._metadata_labels[1].text()
+
+    window.close()
+
+
+@pytest.mark.parametrize('filter_active', [False, True])
+@pytest.mark.parametrize('scene_detection_enabled', [False, True])
+def test_compare_tagging_preserves_hidden_culling_row_widgets(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        filter_active: bool,
+        scene_detection_enabled: bool,
+) -> None:
+    """
+    Verify compare tagging updates hidden culling cards without rebuilding.
+
+    The intermittent regression left logical rows navigable while their
+    thumbnail widgets disappeared after compare exit. Exercising real Shift
+    selection, metadata, navigation, and Escape keys locks down the stronger
+    invariant: a metadata edit that leaves filter membership unchanged must
+    preserve every hidden row widget and its scroll position until those same
+    widgets are shown again.
+    """
+    photo_ids = [f'IMG_945{index:02d}' for index in range(16)]
+    scene_groups = (
+        [[photo_id] for photo_id in photo_ids]
+        if scene_detection_enabled
+        else None
+    )
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[(photo_id, 'dimgray') for photo_id in photo_ids],
+        scene_groups=scene_groups,
+    )
+    window.resize(1200, 800)
+    set_qt_active_window(window)
+    app.processEvents()
+    if filter_active:
+        window._apply_photo_filter(
+            PhotoFilterSelection(allowed_ratings=frozenset({None, 4}))
+        )
+        app.processEvents()
+
+    first_row = 6
+    window.thumbnail_list.setCurrentRow(first_row)
+    window.thumbnail_list.setFocus(Qt.OtherFocusReason)
+    window.thumbnail_list.viewport().setFocus(Qt.OtherFocusReason)
+    for _ in range(3):
+        QTest.keyClick(
+            window.thumbnail_list.viewport(),
+            Qt.Key_Down,
+            Qt.ShiftModifier,
+        )
+        app.processEvents()
+
+    selected_photo_ids = photo_ids[first_row : first_row + 4]
+    assert [
+        item.data(Qt.UserRole)
+        for item in window.thumbnail_list.selectedItems()
+    ] == selected_photo_ids
+    thumbnail_widgets = _item_widgets(window.thumbnail_list)
+    browse_widgets = _item_widgets(window.browse_list)
+    scene_widgets = _item_widgets(window.scene_list)
+    scroll_value = window.thumbnail_list.verticalScrollBar().value()
+
+    QTest.keyClick(window.thumbnail_list.viewport(), Qt.Key_C)
+    app.processEvents()
+    QTest.keyClick(window.compare_viewer, Qt.Key_Right)
+    app.processEvents()
+
+    tagged_photo_id = selected_photo_ids[1]
+    assert window.compare_viewer.active_photo_id() == tagged_photo_id
+
+    QTest.keyClick(window.compare_viewer, Qt.Key_4)
+    app.processEvents()
+
+    assert window.thumbnail_list.isHidden() is True
+    assert _item_widgets(window.thumbnail_list) == thumbnail_widgets
+    assert _item_widgets(window.browse_list) == browse_widgets
+    assert _item_widgets(window.scene_list) == scene_widgets
+    assert window.thumbnail_list.verticalScrollBar().value() == scroll_value
+    tagged_widget = thumbnail_widgets[first_row + 1]
+    assert tagged_widget is not None
+    assert '★★★★☆' in tagged_widget.meta_label.text()
+
+    QTest.keyClick(window.compare_viewer, Qt.Key_Escape)
+    app.processEvents()
+    app.processEvents()
+
+    assert window._compare_mode is False
+    assert _item_widgets(window.thumbnail_list) == thumbnail_widgets
+    assert _item_widgets(window.browse_list) == browse_widgets
+    assert all(widget is not None for widget in thumbnail_widgets)
+    assert [
+        item.data(Qt.UserRole)
+        for item in window.thumbnail_list.selectedItems()
+    ] == selected_photo_ids
+    assert window.current_photo_id == tagged_photo_id
+    assert window.thumbnail_list.currentRow() == first_row + 1
+
+    QTest.keyClick(window.thumbnail_list.viewport(), Qt.Key_Down)
+    app.processEvents()
+
+    assert window.current_photo_id == selected_photo_ids[2]
+    assert window.thumbnail_list.currentRow() == first_row + 2
+
+    window.close()
+
+
+def test_compare_rejection_refreshes_existing_scene_stack_and_exact_row(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify rejecting the last untagged scene member refreshes both strips.
+
+    A multi-photo stack is rejected only when every underlying photo is
+    rejected. This exercises that aggregate rule through the non-destructive
+    compare refresh while also checking the exact horizontal scene card.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_9460', 'dimgray'),
+            ('IMG_9461', 'blue'),
+            ('IMG_9462', 'green'),
+            ('IMG_9463', 'yellow'),
+        ],
+        scene_groups=[
+            ['IMG_9460', 'IMG_9461'],
+            ['IMG_9462'],
+            ['IMG_9463'],
+        ],
+    )
+    set_qt_active_window(window)
+    window.flag_actions['rejected'].trigger()
+    app.processEvents()
+
+    trigger_scene_shortcut(window, 'Shift+Right')
+    app.processEvents()
+    window.thumbnail_list.item(1).setSelected(True)
+    app.processEvents()
+
+    stack_item = window.thumbnail_list.item(0)
+    stack_widget = window.thumbnail_list.itemWidget(stack_item)
+    exact_item = window.scene_list.item(1)
+    exact_widget = window.scene_list.itemWidget(exact_item)
+    assert stack_item.data(FLAG_ROLE) is None
+    assert window._resolved_selection_photo_ids() == [
+        'IMG_9460',
+        'IMG_9461',
+        'IMG_9462',
+    ]
+
+    QTest.keyClick(window.scene_list.viewport(), Qt.Key_C)
+    app.processEvents()
+    QTest.keyClick(window.compare_viewer, Qt.Key_Right)
+    app.processEvents()
+    assert window.compare_viewer.active_photo_id() == 'IMG_9461'
+
+    QTest.keyClick(window.compare_viewer, Qt.Key_X)
+    app.processEvents()
+
+    assert window.thumbnail_list.itemWidget(stack_item) is stack_widget
+    assert window.scene_list.itemWidget(exact_item) is exact_widget
+    assert stack_item.data(FLAG_ROLE) == 'rejected'
+    assert exact_item.data(FLAG_ROLE) == 'rejected'
+    assert stack_widget.meta_label.text() == ''
+    assert stack_widget._front_image_widget.graphicsEffect() is not None
+    assert exact_widget._front_image_widget.graphicsEffect() is not None
 
     window.close()
 

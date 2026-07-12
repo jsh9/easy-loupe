@@ -850,7 +850,9 @@ class MainWindowWorkflowMixin:
             self.current_photo_id, rating=rating, fields={'rating'}
         )
         self.library.save_metadata()
-        self._after_metadata_change()
+        self._after_metadata_change(
+            [] if self.current_photo_id is None else [self.current_photo_id]
+        )
 
     def _set_color_label(self: MainWindow, color_label: str | None) -> None:
         if hasattr(self, '_apply_metadata_to_selection'):
@@ -863,7 +865,9 @@ class MainWindowWorkflowMixin:
             fields={'color_label'},
         )
         self.library.save_metadata()
-        self._after_metadata_change()
+        self._after_metadata_change(
+            [] if self.current_photo_id is None else [self.current_photo_id]
+        )
 
     def _set_flag(self: MainWindow, flag: str | None) -> None:
         if hasattr(self, '_apply_metadata_to_selection'):
@@ -874,7 +878,9 @@ class MainWindowWorkflowMixin:
             self.current_photo_id, flag=flag, fields={'flag'}
         )
         self.library.save_metadata()
-        self._after_metadata_change()
+        self._after_metadata_change(
+            [] if self.current_photo_id is None else [self.current_photo_id]
+        )
 
     def _apply_metadata_to_selection(
             self: MainWindow, field: str, value: Any
@@ -892,7 +898,11 @@ class MainWindowWorkflowMixin:
                 **{field: value},
             )
             self.library.save_metadata()
-            self._after_metadata_change()
+            self._after_metadata_change(
+                []
+                if self.current_photo_id is None
+                else [self.current_photo_id]
+            )
             return
 
         photo_ids = self._resolved_selection_photo_ids()
@@ -913,7 +923,7 @@ class MainWindowWorkflowMixin:
         )
         self._metadata_redo_stack.clear()
         self.library.save_metadata()
-        self._after_metadata_change()
+        self._after_metadata_change(photo_ids)
         self._refresh_metadata_history_actions()
 
     def _undo_metadata_edit(self: MainWindow) -> None:
@@ -936,7 +946,7 @@ class MainWindowWorkflowMixin:
         self._apply_metadata_values(edit.field, edit.before)
         self._metadata_redo_stack.append(edit)
         self.library.save_metadata()
-        self._after_metadata_change()
+        self._after_metadata_change(list(edit.before))
         self._refresh_metadata_history_actions()
 
     def _redo_metadata_edit(self: MainWindow) -> None:
@@ -959,7 +969,7 @@ class MainWindowWorkflowMixin:
         self._apply_metadata_values(edit.field, edit.after)
         self._metadata_undo_stack.append(edit)
         self.library.save_metadata()
-        self._after_metadata_change()
+        self._after_metadata_change(list(edit.after))
         self._refresh_metadata_history_actions()
 
     def _apply_metadata_values(
@@ -1725,7 +1735,48 @@ class MainWindowWorkflowMixin:
             photo_actions_enabled=enabled and bool(self.library.photos)
         )
 
-    def _after_metadata_change(self: MainWindow) -> None:
+    def _metadata_change_requires_filtered_rebuild(
+            self: MainWindow, photo_ids: list[str]
+    ) -> bool:
+        """Return whether metadata edits changed filtered list membership."""
+        if not self._photo_filter_active():
+            return False
+
+        # The row map still represents visibility before the metadata edit,
+        # while each photo record already contains its updated metadata.
+        return any(
+            (photo_id in self._browse_photo_rows)
+            != self._photo_filter_selection.matches(
+                self.library.get_photo(photo_id)
+            )
+            for photo_id in photo_ids
+        )
+
+    def _after_metadata_change(
+            self: MainWindow, changed_photo_ids: list[str] | None = None
+    ) -> None:
+        """
+        Refresh metadata presentation after an assignment, undo, or redo.
+
+        Compare edits that preserve filtered list membership update existing
+        hidden cards so Qt does not rebuild their row widgets before they
+        become visible again. Edits that cross a filter boundary continue
+        through the full rebuild and reconciliation path below.
+        """
+        photo_ids = (
+            changed_photo_ids
+            if changed_photo_ids is not None
+            else [photo.photo_id for photo in self.library.get_photos()]
+        )
+        if (
+            self._compare_mode
+            and not self._metadata_change_requires_filtered_rebuild(photo_ids)
+        ):
+            self._refresh_metadata_items_in_place(photo_ids)
+            self._refresh_compare_metadata_labels()
+            self._refresh_ui()
+            return
+
         previous_photo_id = self.current_photo_id
         scroll_states = {
             self.thumbnail_list: self._capture_scroll_state(

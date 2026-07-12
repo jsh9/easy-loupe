@@ -10,6 +10,10 @@
     available.
   - Final-window shutdown now exits the event loop directly after deferred
     worker cleanup so EasyLoupe does not remain in the macOS Dock.
+  - Tagging photos in Compare mode now updates existing hidden culling
+    thumbnails in place, including under filters that still match, so returning
+    with `Esc` cannot leave later strip rows invisible while they remain
+    keyboard-navigable.
 
 ## [1.4.4] - 2026-07-11
 
