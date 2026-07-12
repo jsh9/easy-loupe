@@ -17,6 +17,7 @@ from PySide6.QtTest import QTest
 
 from easy_loupe.core.records import METADATA_FILENAME
 from easy_loupe.ui.main_window.build import VIEWER_KEYBOARD_PAN_STEP
+from easy_loupe.ui.main_window.filters import PhotoFilterSelection
 from easy_loupe.ui.theme import FLAG_ROLE
 from tests.ui._helpers import (
     create_main_window_with_library,
@@ -862,11 +863,13 @@ def test_compare_mode_arrow_selection_tags_only_active_photo(
     window.close()
 
 
+@pytest.mark.parametrize('filter_active', [False, True])
 @pytest.mark.parametrize('scene_detection_enabled', [False, True])
 def test_compare_tagging_preserves_hidden_culling_row_widgets(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
         *,
+        filter_active: bool,
         scene_detection_enabled: bool,
 ) -> None:
     """
@@ -875,8 +878,9 @@ def test_compare_tagging_preserves_hidden_culling_row_widgets(
     The intermittent regression left logical rows navigable while their
     thumbnail widgets disappeared after compare exit. Exercising real Shift
     selection, metadata, navigation, and Escape keys locks down the stronger
-    invariant: an unfiltered metadata edit must preserve every hidden row
-    widget and its scroll position until those same widgets are shown again.
+    invariant: a metadata edit that leaves filter membership unchanged must
+    preserve every hidden row widget and its scroll position until those same
+    widgets are shown again.
     """
     photo_ids = [f'IMG_945{index:02d}' for index in range(16)]
     scene_groups = (
@@ -893,6 +897,11 @@ def test_compare_tagging_preserves_hidden_culling_row_widgets(
     window.resize(1200, 800)
     set_qt_active_window(window)
     app.processEvents()
+    if filter_active:
+        window._apply_photo_filter(
+            PhotoFilterSelection(allowed_ratings=frozenset({None, 4}))
+        )
+        app.processEvents()
 
     first_row = 6
     window.thumbnail_list.setCurrentRow(first_row)

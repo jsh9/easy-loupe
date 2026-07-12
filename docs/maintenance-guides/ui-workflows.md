@@ -121,13 +121,14 @@ Major logic:
   workspace moves to the next visible photo in library order, then the previous
   visible photo, then the first visible photo. If nothing matches, the viewer
   is cleared and the selection label reports that no photos match.
-- Without an active filter, metadata edits in compare mode update the existing
-  hidden thumbnail, browse, and scene-strip cards in place. They must preserve
-  row-widget identity, selection, geometry, and scroll state so compare exit
-  reveals the original culling lists instead of a rebuilt hidden layout.
-- In compare mode, metadata edits under an active filter prune compared photos
-  that no longer match and exit compare mode when fewer than two compared
-  photos remain visible.
+- Metadata edits in compare mode update the existing hidden thumbnail, browse,
+  and scene-strip cards in place when every changed photo keeps the same filter
+  membership. They must preserve row-widget identity, selection, geometry, and
+  scroll state so compare exit reveals the original culling lists instead of a
+  rebuilt hidden layout.
+- When a compare-mode metadata edit changes active-filter membership, the
+  culling lists are rebuilt. Compared photos that no longer match are pruned,
+  and compare mode exits when fewer than two compared photos remain visible.
 - When scene detection is active, filtering applies to exact photos inside each
   scene: scene stacks disappear when no members match, and visible stack counts
   and scene strips contain only matching members. Scene merges remain available

@@ -1735,24 +1735,43 @@ class MainWindowWorkflowMixin:
             photo_actions_enabled=enabled and bool(self.library.photos)
         )
 
+    def _metadata_change_requires_filtered_rebuild(
+            self: MainWindow, photo_ids: list[str]
+    ) -> bool:
+        """Return whether metadata edits changed filtered list membership."""
+        if not self._photo_filter_active():
+            return False
+
+        # The row map still represents visibility before the metadata edit,
+        # while each photo record already contains its updated metadata.
+        return any(
+            (photo_id in self._browse_photo_rows)
+            != self._photo_filter_selection.matches(
+                self.library.get_photo(photo_id)
+            )
+            for photo_id in photo_ids
+        )
+
     def _after_metadata_change(
             self: MainWindow, changed_photo_ids: list[str] | None = None
     ) -> None:
         """
         Refresh metadata presentation after an assignment, undo, or redo.
 
-        Unfiltered compare edits cannot change list membership, so update the
-        existing hidden cards and avoid rebuilding Qt row widgets before they
-        become visible again. Filtered edits can add or remove visible photos
-        and therefore continue through the full rebuild and reconciliation
-        path below.
+        Compare edits that preserve filtered list membership update existing
+        hidden cards so Qt does not rebuild their row widgets before they
+        become visible again. Edits that cross a filter boundary continue
+        through the full rebuild and reconciliation path below.
         """
-        if self._compare_mode and not self._photo_filter_active():
-            photo_ids = (
-                changed_photo_ids
-                if changed_photo_ids is not None
-                else [photo.photo_id for photo in self.library.get_photos()]
-            )
+        photo_ids = (
+            changed_photo_ids
+            if changed_photo_ids is not None
+            else [photo.photo_id for photo in self.library.get_photos()]
+        )
+        if (
+            self._compare_mode
+            and not self._metadata_change_requires_filtered_rebuild(photo_ids)
+        ):
             self._refresh_metadata_items_in_place(photo_ids)
             self._refresh_compare_metadata_labels()
             self._refresh_ui()
