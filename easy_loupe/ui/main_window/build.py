@@ -1777,16 +1777,23 @@ class MainWindowBuildMixin:
         """Hide immediately, then wait for cleanup before teardown."""
         self._initial_folder_prompt_pending = False
         self._initial_folder_prompt_timer.stop()
-        if self._background_task_active():
+        background_tasks_active = self._background_task_active()
+        if self._busy or background_tasks_active:
             # Qt close would destroy child widgets while worker-thread signals
             # can still be queued. Ignore this event, request shutdown, and let
-            # the QThread.finished cleanup path re-enter close once wrappers
-            # have been cleared. The visible window still disappears now so
-            # close has immediate effect for the user.
+            # the QThread.destroyed cleanup path re-enter close once wrappers
+            # have reached terminal cleanup. The visible window still
+            # disappears now so close has immediate effect for the user.
             event.ignore()
             self._closing = True
             self._close_after_background_tasks = True
             self.hide()
+            # Thread slots are the shutdown barrier for asynchronous work.
+            # `_busy` remains a barrier only for synchronous work unwinding
+            # from a re-entrant processEvents() call.
+            if background_tasks_active:
+                self._busy = False
+
             self._stop_main_window_background_tasks()
             return
 

@@ -25,7 +25,22 @@ from tests.ui._helpers import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
+
+
+class FakeLifecycleSignal:
+    """Small signal stand-in for deterministic thread teardown tests."""
+
+    def __init__(self) -> None:
+        self._callbacks: list[Callable[..., None]] = []
+
+    def connect(self, callback: Callable[..., None]) -> None:
+        self._callbacks.append(callback)
+
+    def emit(self) -> None:
+        for callback in list(self._callbacks):
+            callback()
 
 
 def _disable_background_startup(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1369,6 +1384,9 @@ def test_photo_viewer_close_waits_for_stored_background_thread_slot(
     class FakeThread:
         def __init__(self) -> None:
             self.quit_calls = 0
+            self.delete_later_calls = 0
+            self.finished = FakeLifecycleSignal()
+            self.destroyed = FakeLifecycleSignal()
 
         @staticmethod
         def isRunning() -> bool:  # noqa: N802 - Qt API
@@ -1376,6 +1394,9 @@ def test_photo_viewer_close_waits_for_stored_background_thread_slot(
 
         def quit(self) -> None:
             self.quit_calls += 1
+
+        def deleteLater(self) -> None:  # noqa: N802 - Qt API
+            self.delete_later_calls += 1
 
     create_jpeg(tmp_path / 'A.JPG', 'green')
     app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
@@ -1388,6 +1409,12 @@ def test_photo_viewer_close_waits_for_stored_background_thread_slot(
     window.destroyed.connect(lambda *_args: destroyed.append('destroyed'))
     window._photo_viewer_exif_thread = fake_thread
     window._photo_viewer_exif_worker = fake_worker
+    fake_thread.finished.connect(fake_thread.deleteLater)
+    fake_thread.destroyed.connect(
+        lambda: window._clear_photo_viewer_exif_worker(
+            fake_thread, fake_worker
+        )
+    )
 
     window.close()
     app.processEvents()
@@ -1398,9 +1425,16 @@ def test_photo_viewer_close_waits_for_stored_background_thread_slot(
     assert window._close_after_background_tasks is True
     assert window._photo_viewer_exif_thread is fake_thread
     assert fake_thread.quit_calls == 0
+    assert fake_thread.delete_later_calls == 1
     assert destroyed == []
 
-    window._clear_photo_viewer_exif_worker(fake_thread, fake_worker)
+    fake_thread.finished.emit()
+
+    assert window._photo_viewer_exif_thread is fake_thread
+    assert window._close_after_background_tasks is True
+    assert destroyed == []
+
+    fake_thread.destroyed.emit()
 
     assert window.isVisible() is False
     assert window._close_after_background_tasks is False

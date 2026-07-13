@@ -11,12 +11,16 @@ class FakeThread:
     def __init__(self, *, running: bool) -> None:
         self.running = running
         self.quit_calls = 0
+        self.delete_later_calls = 0
 
     def isRunning(self) -> bool:  # noqa: N802 - Qt API
         return self.running
 
     def quit(self) -> None:
         self.quit_calls += 1
+
+    def deleteLater(self) -> None:  # noqa: N802 - Qt API
+        self.delete_later_calls += 1
 
 
 class FakeWorker:
@@ -54,8 +58,8 @@ def test_thread_slot_close_shutdown_preserves_owner_references() -> None:
     """
     Verify close-time shutdown never clears owner references directly.
 
-    Even a stopped thread remains active for close purposes until the normal
-    finished cleanup callback clears the stored slot.
+    Even a stopped thread remains active for close purposes until QObject
+    destruction clears the stored slot.
     """
     owner = FakeOwner()
     owner.thread = FakeThread(running=False)
@@ -68,6 +72,7 @@ def test_thread_slot_close_shutdown_preserves_owner_references() -> None:
     assert owner.worker is not None
     assert owner.worker.cancel_calls == 1
     assert owner.thread.quit_calls == 0
+    assert owner.thread.delete_later_calls == 1
 
 
 def test_thread_slot_replacement_cleanup_clears_inactive_slot() -> None:
@@ -126,5 +131,6 @@ def test_thread_slot_request_shutdown_allows_worker_without_cancel() -> None:
     slot.request_shutdown()
 
     assert owner.thread.quit_calls == 1
+    assert owner.thread.delete_later_calls == 0
     assert owner.thread is not None
     assert owner.worker is not None

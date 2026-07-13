@@ -490,12 +490,21 @@ shortcut because multiple photos may be visible.
 
 Window close while scene detection or organizer/undo work is active must hide
 the visible window immediately, request best-effort worker shutdown, and defer
-the actual Qt teardown until the relevant `QThread.finished` cleanup clears the
-stored thread slot. Standalone photo-viewer close follows the same visible hide
-plus deferred-teardown rule for EXIF refresh, prefetch, and folder-hydration
-threads. Only workers with an explicit `cancel()` hook are cooperatively
-cancellable; file-operation workers drain to completion while teardown remains
-deferred invisibly.
+the actual Qt teardown until `QThread.destroyed` clears the stored thread slot.
+`finished` only means the native thread has stopped; the owner references stay
+retained until `deleteLater()` has destroyed the QThread object. A stopped or
+never-started retained thread receives `deleteLater()` during shutdown so it
+cannot hold a hidden window indefinitely. Standalone photo-viewer close follows
+the same visible hide plus destruction-barrier rule for EXIF refresh, prefetch,
+and folder-hydration threads. Only workers with an explicit `cancel()` hook are
+cooperatively cancellable; scene detection and file-operation workers drain to
+completion while teardown remains deferred invisibly.
+
+Main-window close also waits for synchronous progress work that is inside a
+re-entrant `QApplication.processEvents()` call. If Quit arrives while worker
+setup or folder loading is on that stack, the window hides immediately but
+stays alive until the synchronous work unwinds; worker setup aborts instead of
+starting new work after close has begun.
 
 `WindowManager` owns event-loop lifetime for these hidden-close paths: the app
 disables implicit last-visible-window quit and exits only after the manager has

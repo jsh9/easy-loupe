@@ -43,19 +43,32 @@ def request_thread_shutdown(
     """
     Ask a worker/thread pair to stop without clearing owner references.
 
-    Owners should clear their stored references from ``QThread.finished`` slots
-    only. Keeping that rule in one helper avoids app-close paths dropping the
-    Python wrappers while Qt is still unwinding worker-thread events.
+    Owners clear their stored references from ``QThread.destroyed`` callbacks.
+    Keeping that rule in one helper avoids app-close paths dropping the Python
+    wrappers while Qt is still unwinding worker-thread object deletion.
     """
     if worker is not None:
         cancel = getattr(worker, 'cancel', None)
         if callable(cancel):
             cancel()
 
+    if thread is None:
+        return
+
     if thread_is_running(thread):
         quit_thread = getattr(thread, 'quit', None)
         if callable(quit_thread):
             quit_thread()
+
+        return
+
+    # A thread can stop before its queued owner cleanup runs, or it may never
+    # have started if Quit was delivered during setup. Ensure its QObject
+    # destruction is queued so close-time cleanup has a terminal signal to
+    # observe instead of retaining the hidden window indefinitely.
+    delete_thread = getattr(thread, 'deleteLater', None)
+    if callable(delete_thread):
+        delete_thread()
 
 
 @dataclass(frozen=True)

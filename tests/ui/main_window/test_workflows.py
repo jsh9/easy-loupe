@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Never
+from typing import TYPE_CHECKING, Any, Never
 
 import pytest
-from PySide6.QtCore import QItemSelectionModel, QPoint, Qt, QThread
+from PySide6.QtCore import QItemSelectionModel, QPoint, Qt, QThread, QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QFileDialog, QLabel, QMessageBox
 
@@ -31,6 +31,23 @@ from tests.ui._helpers import (
     stub_read_exif,
     thumbnail_item_widget,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
+class FakeLifecycleSignal:
+    """Small signal stand-in for deterministic thread teardown tests."""
+
+    def __init__(self) -> None:
+        self._callbacks: list[Callable[..., None]] = []
+
+    def connect(self, callback: Callable[..., None]) -> None:
+        self._callbacks.append(callback)
+
+    def emit(self) -> None:
+        for callback in list(self._callbacks):
+            callback()
 
 
 def _list_widget_has_focus(app: QApplication, list_widget: object) -> bool:
@@ -501,6 +518,87 @@ def test_main_window_detect_scenes_starts_worker_thread_and_sets_busy_state(
     del app
 
 
+def test_main_window_quit_during_worker_setup_defers_destruction(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Keep the window alive when Quit arrives in a progress event pump.
+
+    Worker setup shows progress before it owns a QThread. That progress call
+    processes events synchronously, so close must wait for the setup stack to
+    unwind rather than destroying the window underneath it or starting work
+    after shutdown has begun.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_7410', 'dimgray'), ('IMG_7411', 'blue')],
+    )
+    started: list[str] = []
+    destroyed: list[str] = []
+    monkeypatch.setattr(
+        QThread,
+        'start',
+        lambda self: started.append(self.objectName() or 'started'),
+    )
+    window.setAttribute(Qt.WA_DeleteOnClose, True)
+    window.destroyed.connect(lambda *_args: destroyed.append('destroyed'))
+    QTimer.singleShot(0, window.close)
+
+    window.detect_scenes()
+
+    assert started == []
+    assert window._scene_thread is None
+    assert window._closing is True
+    assert window.isVisible() is False
+    assert destroyed == []
+
+    for _ in range(2):
+        app.processEvents()
+
+    assert destroyed == ['destroyed']
+    del app
+
+
+def test_main_window_close_destroys_never_started_thread_before_window(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Reconcile a retained QThread that never reached its finished signal.
+
+    Quit can arrive around worker startup. A stored but never-started QThread
+    will never emit ``finished``, so shutdown must queue its QObject deletion
+    and release the hidden window only from ``destroyed``.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_7412', 'dimgray'), ('IMG_7413', 'blue')],
+    )
+    monkeypatch.setattr(QThread, 'start', lambda _thread: None)
+    window.detect_scenes()
+    retained_thread = window._scene_thread
+    assert retained_thread is not None
+    events: list[str] = []
+    retained_thread.destroyed.connect(
+        lambda *_args: events.append('thread-destroyed')
+    )
+    window.setAttribute(Qt.WA_DeleteOnClose, True)
+    window.destroyed.connect(lambda *_args: events.append('window-destroyed'))
+
+    window.close()
+
+    assert window.isVisible() is False
+    assert window._scene_thread is retained_thread
+    assert events == []
+
+    for _ in range(3):
+        app.processEvents()
+
+    assert events == ['thread-destroyed', 'window-destroyed']
+    del app
+
+
 def test_main_window_detect_scenes_prompts_before_replacing_existing_scenes(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -613,12 +711,18 @@ def test_main_window_close_defers_until_scene_thread_clears(
         def __init__(self) -> None:
             self.running = initially_running
             self.quit_calls = 0
+            self.delete_later_calls = 0
+            self.finished = FakeLifecycleSignal()
+            self.destroyed = FakeLifecycleSignal()
 
         def isRunning(self) -> bool:  # noqa: N802 - Qt API
             return self.running
 
         def quit(self) -> None:
             self.quit_calls += 1
+
+        def deleteLater(self) -> None:  # noqa: N802 - Qt API
+            self.delete_later_calls += 1
 
     _, app, window = create_main_window_with_library(
         tmp_path,
@@ -634,6 +738,10 @@ def test_main_window_close_defers_until_scene_thread_clears(
     window.destroyed.connect(lambda *_args: destroyed.append('destroyed'))
     window._scene_thread = fake_thread
     window._scene_worker = fake_worker
+    fake_thread.finished.connect(fake_thread.deleteLater)
+    fake_thread.destroyed.connect(
+        lambda: window._clear_scene_worker(fake_thread, fake_worker)
+    )
 
     window.close()
     app.processEvents()
@@ -645,7 +753,15 @@ def test_main_window_close_defers_until_scene_thread_clears(
     assert destroyed == []
 
     fake_thread.running = False
-    window._clear_scene_worker(fake_thread, fake_worker)
+    fake_thread.finished.emit()
+
+    # Native thread completion only queues QObject deletion. The hidden
+    # window must remain retained until the QThread wrapper is destroyed.
+    assert window._scene_thread is fake_thread
+    assert window._close_after_background_tasks is True
+    assert destroyed == []
+
+    fake_thread.destroyed.emit()
 
     assert window.isVisible() is False
     assert window._close_after_background_tasks is False
@@ -4132,12 +4248,18 @@ def test_main_window_close_defers_until_operation_thread_clears(
         def __init__(self) -> None:
             self.running = initially_running
             self.quit_calls = 0
+            self.delete_later_calls = 0
+            self.finished = FakeLifecycleSignal()
+            self.destroyed = FakeLifecycleSignal()
 
         def isRunning(self) -> bool:  # noqa: N802 - Qt API
             return self.running
 
         def quit(self) -> None:
             self.quit_calls += 1
+
+        def deleteLater(self) -> None:  # noqa: N802 - Qt API
+            self.delete_later_calls += 1
 
     _, app, window = create_main_window_with_library(
         tmp_path,
@@ -4153,6 +4275,10 @@ def test_main_window_close_defers_until_operation_thread_clears(
     window.destroyed.connect(lambda *_args: destroyed.append('destroyed'))
     window._operation_thread = fake_thread
     window._operation_worker = fake_worker
+    fake_thread.finished.connect(fake_thread.deleteLater)
+    fake_thread.destroyed.connect(
+        lambda: window._clear_operation_worker(fake_thread, fake_worker)
+    )
 
     window.close()
     app.processEvents()
@@ -4164,7 +4290,13 @@ def test_main_window_close_defers_until_operation_thread_clears(
     assert destroyed == []
 
     fake_thread.running = False
-    window._clear_operation_worker(fake_thread, fake_worker)
+    fake_thread.finished.emit()
+
+    assert window._operation_thread is fake_thread
+    assert window._close_after_background_tasks is True
+    assert destroyed == []
+
+    fake_thread.destroyed.emit()
 
     assert window.isVisible() is False
     assert window._close_after_background_tasks is False

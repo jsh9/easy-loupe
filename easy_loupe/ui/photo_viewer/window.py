@@ -985,8 +985,8 @@ class PhotoViewerWindow(QMainWindow):
         )
         finished_thread = self._photo_viewer_exif_thread
         finished_worker = self._photo_viewer_exif_worker
-        self._photo_viewer_exif_thread.finished.connect(
-            lambda: self._clear_photo_viewer_exif_worker(
+        self._photo_viewer_exif_thread.destroyed.connect(
+            lambda _object=None: self._clear_photo_viewer_exif_worker(
                 finished_thread, finished_worker
             )
         )
@@ -1094,12 +1094,12 @@ class PhotoViewerWindow(QMainWindow):
         self._viewer_prefetch_thread.finished.connect(
             self._viewer_prefetch_thread.deleteLater
         )
-        # Capture this exact pair so a queued old finished signal cannot clear
-        # a newer prefetch slot after replacement logic grows more flexible.
+        # Capture this exact pair so an old destruction callback cannot clear a
+        # newer prefetch slot after replacement logic grows more flexible.
         finished_thread = self._viewer_prefetch_thread
         finished_worker = self._viewer_prefetch_worker
-        self._viewer_prefetch_thread.finished.connect(
-            lambda: self._clear_viewer_prefetch_worker(
+        self._viewer_prefetch_thread.destroyed.connect(
+            lambda _object=None: self._clear_viewer_prefetch_worker(
                 finished_thread, finished_worker
             )
         )
@@ -1165,8 +1165,8 @@ class PhotoViewerWindow(QMainWindow):
         )
         finished_thread = self._folder_hydration_thread
         finished_worker = self._folder_hydration_worker
-        self._folder_hydration_thread.finished.connect(
-            lambda: self._clear_folder_hydration_worker(
+        self._folder_hydration_thread.destroyed.connect(
+            lambda _object=None: self._clear_folder_hydration_worker(
                 request_id,
                 expected_folder,
                 finished_thread,
@@ -1404,8 +1404,8 @@ class PhotoViewerWindow(QMainWindow):
             and not self._photo_viewer_background_tasks_active()
         ):
             self._close_after_background_tasks = False
-            # Queue the final close so Qt can finish delivering the current
-            # QThread.finished signal and its deleteLater cleanup first.
+            # Queue final close after the last QThread destroyed callback
+            # finishes clearing the stored owner pair.
             QTimer.singleShot(0, self.close)
 
     def _refresh_visible_region_overlay(self) -> None:
