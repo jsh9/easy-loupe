@@ -815,6 +815,12 @@ class MainWindowBuildMixin:
                 )
                 self._check_photo_load_recursively_control(previous)
                 self._hide_progress()
+                # Clearing progress releases `_busy`, which may queue the final
+                # close. Return before a modal event loop or refresh can touch
+                # widgets after Qt deletes them.
+                if self._closing:
+                    return
+
                 QMessageBox.critical(self, 'Folder Reload Failed', str(exc))
                 self._refresh_ui()
                 return

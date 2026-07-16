@@ -137,6 +137,15 @@ class MainWindowWorkflowMixin:
                 return
 
             self._reset_photo_filter_selection()
+            # Rebuilding can generate previews and re-enter Qt through progress
+            # events. Keep it inside this try block so failure after Quit still
+            # clears `_busy` through the shared error cleanup.
+            self._rebuild_loaded_views(
+                show_progress=True, progress_reporter=reporter
+            )
+            if self._closing:
+                self._hide_progress()
+                return
         except Exception as exc:  # noqa: BLE001 - surface unexpected load errors in the UI
             self._hide_progress()
             if self._closing:
@@ -145,13 +154,6 @@ class MainWindowWorkflowMixin:
             self.open_button.setEnabled(True)
             self.detect_button.setEnabled(bool(self.library.photos))
             QMessageBox.critical(self, 'Failed to Open Folder', str(exc))
-            return
-
-        self._rebuild_loaded_views(
-            show_progress=True, progress_reporter=reporter
-        )
-        if self._closing:
-            self._hide_progress()
             return
 
         self._clear_metadata_history()

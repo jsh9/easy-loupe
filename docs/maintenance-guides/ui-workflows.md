@@ -502,9 +502,12 @@ completion while teardown remains deferred invisibly.
 
 Main-window close also waits for synchronous progress work that is inside a
 re-entrant `QApplication.processEvents()` call. If Quit arrives while worker
-setup or folder loading is on that stack, the window hides immediately but
-stays alive until the synchronous work unwinds; worker setup aborts instead of
-starting new work after close has begun.
+setup, folder loading, or loaded-view rebuilding is on that stack, the window
+hides immediately but stays alive until the synchronous work unwinds. Worker
+setup aborts instead of starting new work after close has begun. Folder-load
+and view-rebuild failures during closing still clear progress and return
+without opening error dialogs or performing a full UI refresh after close has
+begun.
 
 `WindowManager` owns event-loop lifetime for these hidden-close paths: the app
 disables implicit last-visible-window quit and exits only after the manager has

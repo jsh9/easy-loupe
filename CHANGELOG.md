@@ -9,8 +9,9 @@
   - App-quit confirmations now follow the active EasyLoupe window when one is
     available.
   - Confirmed app shutdown now waits for worker-thread object destruction and
-    re-entrant progress work before destroying hidden windows, preventing
-    EasyLoupe from remaining indefinitely in the macOS Dock.
+    re-entrant folder loading or view rebuilding to unwind, including on
+    failure, before destroying hidden windows, preventing EasyLoupe from
+    remaining indefinitely in the macOS Dock.
   - Tagging photos in Compare mode now updates existing hidden culling
     thumbnails in place, including under filters that still match, so returning
     with `Esc` cannot leave later strip rows invisible while they remain

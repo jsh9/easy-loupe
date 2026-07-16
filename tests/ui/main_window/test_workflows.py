@@ -344,6 +344,163 @@ def test_main_window_choose_folder_cancel_and_failure_paths_restore_ui(
     del app
 
 
+def test_main_window_quit_during_folder_view_rebuild_failure_closes(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify a view-rebuild failure cannot retain a hidden closing window.
+
+    Thumbnail preparation reports progress through ``processEvents()``, so Quit
+    can hide the window immediately before preview rendering fails. The failure
+    path must still clear the synchronous busy barrier and finish the deferred
+    close without opening an error dialog after shutdown has begun.
+    """
+    create_jpeg(tmp_path / 'IMG_8990.JPG', 'blue')
+    stub_read_exif(monkeypatch, {})
+    app = QApplication.instance() or QApplication([])
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    window.setAttribute(Qt.WA_DeleteOnClose, True)
+    window.show()
+    app.processEvents()
+
+    destroyed: list[str] = []
+    errors: list[tuple[str, str]] = []
+    window.destroyed.connect(
+        lambda *_args: destroyed.append('window-destroyed')
+    )
+    monkeypatch.setattr(
+        QFileDialog,
+        'getExistingDirectory',
+        lambda *_args, **_kwargs: str(tmp_path),
+    )
+    monkeypatch.setattr(
+        QMessageBox,
+        'critical',
+        lambda _parent, title, text: errors.append((title, text)),
+    )
+
+    original_load_folder = window.library.load_folder
+
+    def load_folder_then_prepare_failure(
+            folder: Path,
+            *,
+            progress_callback: Any = None,
+            progress_reporter: Any = None,
+    ) -> None:
+        original_load_folder(
+            folder,
+            progress_callback=progress_callback,
+            progress_reporter=progress_reporter,
+        )
+        QTimer.singleShot(0, window.close)
+
+        def fail_preview(*_args: object, **_kwargs: object) -> Never:
+            raise RuntimeError('preview failed')
+
+        monkeypatch.setattr(window.library, 'get_preview_path', fail_preview)
+
+    monkeypatch.setattr(
+        window.library, 'load_folder', load_folder_then_prepare_failure
+    )
+
+    window.choose_folder()
+
+    assert errors == []
+    assert window._closing is True
+    assert window._busy is False
+    assert window._close_after_background_tasks is False
+    assert window.isVisible() is False
+    assert window.progress_overlay.isHidden() is True
+    assert destroyed == []
+
+    # The first turn delivers the queued final close; the second delivers Qt's
+    # deferred deletion, proving the hidden window is no longer retained.
+    for _ in range(2):
+        app.processEvents()
+
+    assert destroyed == ['window-destroyed']
+    del app
+
+
+def test_main_window_quit_during_recursive_reload_failure_skips_error_ui(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify recursive-reload failure does not touch UI after close begins.
+
+    The reload progress pump can deliver Quit before a later filesystem error.
+    Rollback must still complete, but hiding progress must be the final UI work
+    so a modal dialog cannot destroy the window underneath a later refresh.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_8991', 'green')],
+    )
+    previous_recursive = window.library.load_recursively
+    destroyed: list[str] = []
+    errors: list[tuple[str, str]] = []
+    refreshes: list[str] = []
+    window.setAttribute(Qt.WA_DeleteOnClose, True)
+    window.destroyed.connect(
+        lambda *_args: destroyed.append('window-destroyed')
+    )
+    monkeypatch.setattr(window, '_confirm_recursive_load_reload', lambda: True)
+    monkeypatch.setattr(
+        QMessageBox,
+        'critical',
+        lambda _parent, title, text: errors.append((title, text)),
+    )
+    monkeypatch.setattr(
+        window, '_refresh_ui', lambda: refreshes.append('refresh')
+    )
+
+    def fail_recursive_reload(*, load_recursively: bool) -> Never:
+        window.library.set_load_recursively(load_recursively)
+        QTimer.singleShot(0, window.close)
+        window._show_progress('Scanning folder', 0)
+        raise RuntimeError('reload failed')
+
+    monkeypatch.setattr(
+        window,
+        '_reload_current_folder_after_recursive_preference_change',
+        fail_recursive_reload,
+    )
+
+    window._set_photo_load_recursively(not previous_recursive, persist=True)
+
+    assert errors == []
+    assert refreshes == []
+    assert window.library.load_recursively is previous_recursive
+    assert (
+        window.photo_load_recursively_checkbox.isChecked()
+        is previous_recursive
+    )
+    assert (
+        build_module.normalize_load_recursively(
+            window._settings().value(
+                build_module.PHOTO_LOAD_RECURSIVELY_SETTINGS_KEY
+            )
+        )
+        is previous_recursive
+    )
+    assert window._closing is True
+    assert window._busy is False
+    assert window._close_after_background_tasks is False
+    assert window.isVisible() is False
+    assert window.progress_overlay.isHidden() is True
+    assert destroyed == []
+
+    # The first turn delivers the queued final close; the second delivers Qt's
+    # deferred deletion, proving the hidden window is no longer retained.
+    for _ in range(2):
+        app.processEvents()
+
+    assert destroyed == ['window-destroyed']
+    del app
+
+
 @pytest.mark.parametrize(
     ('load_recursively', 'nested_photo'),
     [
