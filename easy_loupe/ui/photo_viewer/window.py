@@ -806,7 +806,7 @@ class PhotoViewerWindow(QMainWindow):
         ):
             # The worker may still be hydrating the full folder needed for
             # culling. Once a hydrated library exists, handoff may proceed even
-            # before QThread.finished has cleared the thread slot.
+            # before the QThread.destroyed callback clears the thread slot.
             self._pending_culling_handoff = True
             if self._folder_hydration_snapshot is not None:
                 self._show_progress_snapshot(self._folder_hydration_snapshot)
@@ -1379,9 +1379,9 @@ class PhotoViewerWindow(QMainWindow):
         """
         Request shutdown for close without clearing stored thread slots.
 
-        Closing must wait for each QThread.finished cleanup slot to clear the
-        Python references. Replacement cleanup is allowed to drop inactive
-        slots immediately, so close uses this narrower shutdown path instead.
+        Closing waits for each QThread.destroyed callback to clear the Python
+        references. Replacement cleanup may drop inactive slots immediately, so
+        close uses this narrower shutdown path instead.
         """
         self._pending_culling_handoff = False
         self._photo_viewer_exif_refresh_pending = False

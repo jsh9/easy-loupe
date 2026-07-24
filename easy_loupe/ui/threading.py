@@ -1,9 +1,9 @@
 """
 Qt thread lifecycle helpers shared by UI windows.
 
-Qt can stop running a thread before the owner has received ``finished`` and
-cleared its Python reference. Keep those states distinct so close paths can
-wait for wrapper cleanup while replacement paths can detect inactive threads.
+Qt can stop running a thread before its QObject is destroyed and the owner
+clears its Python reference. Keep those states distinct so close paths can wait
+for wrapper cleanup while replacement paths can detect inactive threads.
 """
 
 from __future__ import annotations
@@ -103,7 +103,7 @@ class ThreadSlot:
         Request replacement shutdown and clear inactive stored slots.
 
         Replacement paths may drop already-stopped wrappers because the window
-        remains alive. Close paths must keep them until finished cleanup runs.
+        remains alive. Close paths keep them until destruction cleanup runs.
         """
         thread = self.thread
         self.request_shutdown()
@@ -114,10 +114,11 @@ class ThreadSlot:
             self, finished_thread: object, finished_worker: object
     ) -> bool:
         """
-        Clear the slot only when a finished pair is still current.
+        Clear the slot only when a cleanup pair is still current.
 
-        Queued finished signals can arrive after replacement work stores a new
-        pair, so identity matching keeps stale callbacks from clearing it.
+        Delayed destruction callbacks can arrive after replacement work stores
+        a new pair, so identity matching keeps stale callbacks from clearing
+        it.
         """
         if self.thread is finished_thread and self.worker is finished_worker:
             self.clear()
@@ -161,7 +162,7 @@ class ThreadSlotGroup:
             finished_thread: object,
             finished_worker: object,
     ) -> bool:
-        """Clear a named slot only when a finished pair is still current."""
+        """Clear a named slot only when a cleanup pair is still current."""
         return self.slot(name).clear_if_current(
             finished_thread, finished_worker
         )

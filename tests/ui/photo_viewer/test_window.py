@@ -1374,9 +1374,9 @@ def test_photo_viewer_close_waits_for_stored_background_thread_slot(
     """
     Verify close hides first and destroys only after worker cleanup.
 
-    Qt can report a thread as not running before its finished cleanup slot has
+    Qt can report a thread as not running before its destruction callback has
     cleared the Python owner reference. The visible viewer should disappear
-    immediately, while widget teardown still waits for that cleanup slot. This
+    immediately, while widget teardown still waits for that callback. This
     observes ``destroyed`` because visibility is already false before the
     queued final close runs.
     """
@@ -1457,7 +1457,7 @@ def test_photo_viewer_replacement_cleanup_clears_inactive_thread_slot(
 
     This is narrower than close-time handling: replacing background work can
     clean up an inactive slot immediately, while window close waits for the
-    normal finished cleanup callback.
+    normal destruction callback.
     """
 
     class FakeThread:

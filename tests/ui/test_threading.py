@@ -95,9 +95,9 @@ def test_thread_slot_replacement_cleanup_clears_inactive_slot() -> None:
 
 def test_thread_slot_stale_finished_pair_does_not_clear_new_slot() -> None:
     """
-    Verify stale finished callbacks cannot clear newer thread references.
+    Verify stale cleanup callbacks cannot clear newer thread references.
 
-    This protects replacement-style flows where a queued old finished signal
+    This protects replacement-style flows where a delayed destruction callback
     may arrive after a new worker/thread pair has been stored.
     """
     owner = FakeOwner()

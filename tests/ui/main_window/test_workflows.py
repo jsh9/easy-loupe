@@ -859,7 +859,7 @@ def test_main_window_close_defers_until_scene_thread_clears(
 
     Background scene detection can still have queued Qt cleanup work after the
     user closes the window. The visible window should disappear immediately,
-    while final teardown still waits for the normal finished cleanup path. This
+    while final teardown still waits for the destruction cleanup path. This
     observes ``destroyed`` because visibility is already false before the
     queued final close runs.
     """
@@ -2898,7 +2898,7 @@ def test_main_window_handle_scene_failed_and_clear_worker_restore_ui(
     Verify scene-failure UI recovery waits for matching worker cleanup.
 
     The failed signal restores the error/progress state, but the action buttons
-    stay guarded until the finished cleanup clears the exact thread slot.
+    stay guarded until the destruction callback clears the exact thread slot.
     """
     _, app, window = create_main_window_with_library(
         tmp_path,

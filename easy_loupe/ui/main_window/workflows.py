@@ -645,8 +645,8 @@ class MainWindowWorkflowMixin:
             # active thread reference. This makes QObject destruction, rather
             # than native-thread completion, the terminal ownership boundary.
             self._close_after_background_tasks = False
-            # Queue the final close so Qt can finish delivering the current
-            # QThread.finished signal and its deleteLater cleanup first.
+            # Queue the final close so the current QThread.destroyed callback
+            # can return before deleting the window that owns this cleanup.
             QTimer.singleShot(0, self.close)
 
     def _show_operation_finished_dialog(
