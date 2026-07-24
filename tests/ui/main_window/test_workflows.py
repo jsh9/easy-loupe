@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Never
+from typing import TYPE_CHECKING, Any, Never
 
 import pytest
-from PySide6.QtCore import QItemSelectionModel, QPoint, Qt, QThread
+from PySide6.QtCore import QItemSelectionModel, QPoint, Qt, QThread, QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QFileDialog, QLabel, QMessageBox
 
@@ -31,6 +31,23 @@ from tests.ui._helpers import (
     stub_read_exif,
     thumbnail_item_widget,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
+class FakeLifecycleSignal:
+    """Small signal stand-in for deterministic thread teardown tests."""
+
+    def __init__(self) -> None:
+        self._callbacks: list[Callable[..., None]] = []
+
+    def connect(self, callback: Callable[..., None]) -> None:
+        self._callbacks.append(callback)
+
+    def emit(self) -> None:
+        for callback in list(self._callbacks):
+            callback()
 
 
 def _list_widget_has_focus(app: QApplication, list_widget: object) -> bool:
@@ -327,6 +344,163 @@ def test_main_window_choose_folder_cancel_and_failure_paths_restore_ui(
     del app
 
 
+def test_main_window_quit_during_folder_view_rebuild_failure_closes(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify a view-rebuild failure cannot retain a hidden closing window.
+
+    Thumbnail preparation reports progress through ``processEvents()``, so Quit
+    can hide the window immediately before preview rendering fails. The failure
+    path must still clear the synchronous busy barrier and finish the deferred
+    close without opening an error dialog after shutdown has begun.
+    """
+    create_jpeg(tmp_path / 'IMG_8990.JPG', 'blue')
+    stub_read_exif(monkeypatch, {})
+    app = QApplication.instance() or QApplication([])
+    window = main_window_module.MainWindow()
+    window._initial_folder_prompt_pending = False
+    window.setAttribute(Qt.WA_DeleteOnClose, True)
+    window.show()
+    app.processEvents()
+
+    destroyed: list[str] = []
+    errors: list[tuple[str, str]] = []
+    window.destroyed.connect(
+        lambda *_args: destroyed.append('window-destroyed')
+    )
+    monkeypatch.setattr(
+        QFileDialog,
+        'getExistingDirectory',
+        lambda *_args, **_kwargs: str(tmp_path),
+    )
+    monkeypatch.setattr(
+        QMessageBox,
+        'critical',
+        lambda _parent, title, text: errors.append((title, text)),
+    )
+
+    original_load_folder = window.library.load_folder
+
+    def load_folder_then_prepare_failure(
+            folder: Path,
+            *,
+            progress_callback: Any = None,
+            progress_reporter: Any = None,
+    ) -> None:
+        original_load_folder(
+            folder,
+            progress_callback=progress_callback,
+            progress_reporter=progress_reporter,
+        )
+        QTimer.singleShot(0, window.close)
+
+        def fail_preview(*_args: object, **_kwargs: object) -> Never:
+            raise RuntimeError('preview failed')
+
+        monkeypatch.setattr(window.library, 'get_preview_path', fail_preview)
+
+    monkeypatch.setattr(
+        window.library, 'load_folder', load_folder_then_prepare_failure
+    )
+
+    window.choose_folder()
+
+    assert errors == []
+    assert window._closing is True
+    assert window._busy is False
+    assert window._close_after_background_tasks is False
+    assert window.isVisible() is False
+    assert window.progress_overlay.isHidden() is True
+    assert destroyed == []
+
+    # The first turn delivers the queued final close; the second delivers Qt's
+    # deferred deletion, proving the hidden window is no longer retained.
+    for _ in range(2):
+        app.processEvents()
+
+    assert destroyed == ['window-destroyed']
+    del app
+
+
+def test_main_window_quit_during_recursive_reload_failure_skips_error_ui(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify recursive-reload failure does not touch UI after close begins.
+
+    The reload progress pump can deliver Quit before a later filesystem error.
+    Rollback must still complete, but hiding progress must be the final UI work
+    so a modal dialog cannot destroy the window underneath a later refresh.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_8991', 'green')],
+    )
+    previous_recursive = window.library.load_recursively
+    destroyed: list[str] = []
+    errors: list[tuple[str, str]] = []
+    refreshes: list[str] = []
+    window.setAttribute(Qt.WA_DeleteOnClose, True)
+    window.destroyed.connect(
+        lambda *_args: destroyed.append('window-destroyed')
+    )
+    monkeypatch.setattr(window, '_confirm_recursive_load_reload', lambda: True)
+    monkeypatch.setattr(
+        QMessageBox,
+        'critical',
+        lambda _parent, title, text: errors.append((title, text)),
+    )
+    monkeypatch.setattr(
+        window, '_refresh_ui', lambda: refreshes.append('refresh')
+    )
+
+    def fail_recursive_reload(*, load_recursively: bool) -> Never:
+        window.library.set_load_recursively(load_recursively)
+        QTimer.singleShot(0, window.close)
+        window._show_progress('Scanning folder', 0)
+        raise RuntimeError('reload failed')
+
+    monkeypatch.setattr(
+        window,
+        '_reload_current_folder_after_recursive_preference_change',
+        fail_recursive_reload,
+    )
+
+    window._set_photo_load_recursively(not previous_recursive, persist=True)
+
+    assert errors == []
+    assert refreshes == []
+    assert window.library.load_recursively is previous_recursive
+    assert (
+        window.photo_load_recursively_checkbox.isChecked()
+        is previous_recursive
+    )
+    assert (
+        build_module.normalize_load_recursively(
+            window._settings().value(
+                build_module.PHOTO_LOAD_RECURSIVELY_SETTINGS_KEY
+            )
+        )
+        is previous_recursive
+    )
+    assert window._closing is True
+    assert window._busy is False
+    assert window._close_after_background_tasks is False
+    assert window.isVisible() is False
+    assert window.progress_overlay.isHidden() is True
+    assert destroyed == []
+
+    # The first turn delivers the queued final close; the second delivers Qt's
+    # deferred deletion, proving the hidden window is no longer retained.
+    for _ in range(2):
+        app.processEvents()
+
+    assert destroyed == ['window-destroyed']
+    del app
+
+
 @pytest.mark.parametrize(
     ('load_recursively', 'nested_photo'),
     [
@@ -501,6 +675,87 @@ def test_main_window_detect_scenes_starts_worker_thread_and_sets_busy_state(
     del app
 
 
+def test_main_window_quit_during_worker_setup_defers_destruction(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Keep the window alive when Quit arrives in a progress event pump.
+
+    Worker setup shows progress before it owns a QThread. That progress call
+    processes events synchronously, so close must wait for the setup stack to
+    unwind rather than destroying the window underneath it or starting work
+    after shutdown has begun.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_7410', 'dimgray'), ('IMG_7411', 'blue')],
+    )
+    started: list[str] = []
+    destroyed: list[str] = []
+    monkeypatch.setattr(
+        QThread,
+        'start',
+        lambda self: started.append(self.objectName() or 'started'),
+    )
+    window.setAttribute(Qt.WA_DeleteOnClose, True)
+    window.destroyed.connect(lambda *_args: destroyed.append('destroyed'))
+    QTimer.singleShot(0, window.close)
+
+    window.detect_scenes()
+
+    assert started == []
+    assert window._scene_thread is None
+    assert window._closing is True
+    assert window.isVisible() is False
+    assert destroyed == []
+
+    for _ in range(2):
+        app.processEvents()
+
+    assert destroyed == ['destroyed']
+    del app
+
+
+def test_main_window_close_destroys_never_started_thread_before_window(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Reconcile a retained QThread that never reached its finished signal.
+
+    Quit can arrive around worker startup. A stored but never-started QThread
+    will never emit ``finished``, so shutdown must queue its QObject deletion
+    and release the hidden window only from ``destroyed``.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_7412', 'dimgray'), ('IMG_7413', 'blue')],
+    )
+    monkeypatch.setattr(QThread, 'start', lambda _thread: None)
+    window.detect_scenes()
+    retained_thread = window._scene_thread
+    assert retained_thread is not None
+    events: list[str] = []
+    retained_thread.destroyed.connect(
+        lambda *_args: events.append('thread-destroyed')
+    )
+    window.setAttribute(Qt.WA_DeleteOnClose, True)
+    window.destroyed.connect(lambda *_args: events.append('window-destroyed'))
+
+    window.close()
+
+    assert window.isVisible() is False
+    assert window._scene_thread is retained_thread
+    assert events == []
+
+    for _ in range(3):
+        app.processEvents()
+
+    assert events == ['thread-destroyed', 'window-destroyed']
+    del app
+
+
 def test_main_window_detect_scenes_prompts_before_replacing_existing_scenes(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -604,7 +859,7 @@ def test_main_window_close_defers_until_scene_thread_clears(
 
     Background scene detection can still have queued Qt cleanup work after the
     user closes the window. The visible window should disappear immediately,
-    while final teardown still waits for the normal finished cleanup path. This
+    while final teardown still waits for the destruction cleanup path. This
     observes ``destroyed`` because visibility is already false before the
     queued final close runs.
     """
@@ -613,12 +868,18 @@ def test_main_window_close_defers_until_scene_thread_clears(
         def __init__(self) -> None:
             self.running = initially_running
             self.quit_calls = 0
+            self.delete_later_calls = 0
+            self.finished = FakeLifecycleSignal()
+            self.destroyed = FakeLifecycleSignal()
 
         def isRunning(self) -> bool:  # noqa: N802 - Qt API
             return self.running
 
         def quit(self) -> None:
             self.quit_calls += 1
+
+        def deleteLater(self) -> None:  # noqa: N802 - Qt API
+            self.delete_later_calls += 1
 
     _, app, window = create_main_window_with_library(
         tmp_path,
@@ -634,6 +895,10 @@ def test_main_window_close_defers_until_scene_thread_clears(
     window.destroyed.connect(lambda *_args: destroyed.append('destroyed'))
     window._scene_thread = fake_thread
     window._scene_worker = fake_worker
+    fake_thread.finished.connect(fake_thread.deleteLater)
+    fake_thread.destroyed.connect(
+        lambda: window._clear_scene_worker(fake_thread, fake_worker)
+    )
 
     window.close()
     app.processEvents()
@@ -645,7 +910,15 @@ def test_main_window_close_defers_until_scene_thread_clears(
     assert destroyed == []
 
     fake_thread.running = False
-    window._clear_scene_worker(fake_thread, fake_worker)
+    fake_thread.finished.emit()
+
+    # Native thread completion only queues QObject deletion. The hidden
+    # window must remain retained until the QThread wrapper is destroyed.
+    assert window._scene_thread is fake_thread
+    assert window._close_after_background_tasks is True
+    assert destroyed == []
+
+    fake_thread.destroyed.emit()
 
     assert window.isVisible() is False
     assert window._close_after_background_tasks is False
@@ -2625,7 +2898,7 @@ def test_main_window_handle_scene_failed_and_clear_worker_restore_ui(
     Verify scene-failure UI recovery waits for matching worker cleanup.
 
     The failed signal restores the error/progress state, but the action buttons
-    stay guarded until the finished cleanup clears the exact thread slot.
+    stay guarded until the destruction callback clears the exact thread slot.
     """
     _, app, window = create_main_window_with_library(
         tmp_path,
@@ -4132,12 +4405,18 @@ def test_main_window_close_defers_until_operation_thread_clears(
         def __init__(self) -> None:
             self.running = initially_running
             self.quit_calls = 0
+            self.delete_later_calls = 0
+            self.finished = FakeLifecycleSignal()
+            self.destroyed = FakeLifecycleSignal()
 
         def isRunning(self) -> bool:  # noqa: N802 - Qt API
             return self.running
 
         def quit(self) -> None:
             self.quit_calls += 1
+
+        def deleteLater(self) -> None:  # noqa: N802 - Qt API
+            self.delete_later_calls += 1
 
     _, app, window = create_main_window_with_library(
         tmp_path,
@@ -4153,6 +4432,10 @@ def test_main_window_close_defers_until_operation_thread_clears(
     window.destroyed.connect(lambda *_args: destroyed.append('destroyed'))
     window._operation_thread = fake_thread
     window._operation_worker = fake_worker
+    fake_thread.finished.connect(fake_thread.deleteLater)
+    fake_thread.destroyed.connect(
+        lambda: window._clear_operation_worker(fake_thread, fake_worker)
+    )
 
     window.close()
     app.processEvents()
@@ -4164,7 +4447,13 @@ def test_main_window_close_defers_until_operation_thread_clears(
     assert destroyed == []
 
     fake_thread.running = False
-    window._clear_operation_worker(fake_thread, fake_worker)
+    fake_thread.finished.emit()
+
+    assert window._operation_thread is fake_thread
+    assert window._close_after_background_tasks is True
+    assert destroyed == []
+
+    fake_thread.destroyed.emit()
 
     assert window.isVisible() is False
     assert window._close_after_background_tasks is False

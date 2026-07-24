@@ -125,20 +125,37 @@ class MainWindowWorkflowMixin:
             reporter.start_stage(
                 'scan', message='Scanning folder', overall_progress=0
             )
+            if self._closing:
+                self._hide_progress()
+                return
+
             self.open_button.setEnabled(False)
             self.detect_button.setEnabled(False)
             self.library.load_folder(Path(folder), progress_reporter=reporter)
+            if self._closing:
+                self._hide_progress()
+                return
+
             self._reset_photo_filter_selection()
+            # Rebuilding can generate previews and re-enter Qt through progress
+            # events. Keep it inside this try block so failure after Quit still
+            # clears `_busy` through the shared error cleanup.
+            self._rebuild_loaded_views(
+                show_progress=True, progress_reporter=reporter
+            )
+            if self._closing:
+                self._hide_progress()
+                return
         except Exception as exc:  # noqa: BLE001 - surface unexpected load errors in the UI
             self._hide_progress()
+            if self._closing:
+                return
+
             self.open_button.setEnabled(True)
             self.detect_button.setEnabled(bool(self.library.photos))
             QMessageBox.critical(self, 'Failed to Open Folder', str(exc))
             return
 
-        self._rebuild_loaded_views(
-            show_progress=True, progress_reporter=reporter
-        )
         self._clear_metadata_history()
         self._hide_progress()
         self._set_main_view_frozen_after_move_organize(frozen=False)
@@ -232,6 +249,9 @@ class MainWindowWorkflowMixin:
                 return
 
         self._show_progress('Preparing scene detection...', 0)
+        if self._closing:
+            self._hide_progress()
+            return
 
         self._scene_thread = QThread(self)
         self._scene_worker = SceneDetectionWorker(self.library)
@@ -250,12 +270,16 @@ class MainWindowWorkflowMixin:
         self._scene_worker.finished.connect(self._scene_worker.deleteLater)
         self._scene_worker.failed.connect(self._scene_worker.deleteLater)
         self._scene_thread.finished.connect(self._scene_thread.deleteLater)
-        # Capture this exact pair so cleanup ignores stale finished callbacks
-        # if a future replacement path starts another scene worker first.
+        # Capture this exact pair so cleanup ignores stale callbacks if a
+        # future replacement path starts another scene worker first. Retain
+        # the pair until the QThread QObject, not only its native thread, has
+        # reached terminal destruction.
         finished_thread = self._scene_thread
         finished_worker = self._scene_worker
-        self._scene_thread.finished.connect(
-            lambda: self._clear_scene_worker(finished_thread, finished_worker)
+        self._scene_thread.destroyed.connect(
+            lambda _object=None: self._clear_scene_worker(
+                finished_thread, finished_worker
+            )
         )
         self._scene_thread.start()
 
@@ -289,6 +313,12 @@ class MainWindowWorkflowMixin:
         self._operation_kind = 'run'
         self._organizer_request = request
         self._show_progress('Preparing organizer workflow...', 0)
+        if self._closing:
+            self._organizer_request = None
+            self._operation_kind = None
+            self._hide_progress()
+            return
+
         self._operation_thread = QThread(self)
 
         def run_operation(
@@ -329,8 +359,8 @@ class MainWindowWorkflowMixin:
         )
         finished_thread = self._operation_thread
         finished_worker = self._operation_worker
-        self._operation_thread.finished.connect(
-            lambda: self._clear_operation_worker(
+        self._operation_thread.destroyed.connect(
+            lambda _object=None: self._clear_operation_worker(
                 finished_thread, finished_worker
             )
         )
@@ -374,6 +404,11 @@ class MainWindowWorkflowMixin:
 
         self._operation_kind = 'undo'
         self._show_progress('Preparing undo...', 0)
+        if self._closing:
+            self._operation_kind = None
+            self._hide_progress()
+            return
+
         self._operation_thread = QThread(self)
 
         def run_undo(
@@ -414,8 +449,8 @@ class MainWindowWorkflowMixin:
         )
         finished_thread = self._operation_thread
         finished_worker = self._operation_worker
-        self._operation_thread.finished.connect(
-            lambda: self._clear_operation_worker(
+        self._operation_thread.destroyed.connect(
+            lambda _object=None: self._clear_operation_worker(
                 finished_thread, finished_worker
             )
         )
@@ -490,8 +525,11 @@ class MainWindowWorkflowMixin:
             finished_thread: QThread | None,
             finished_worker: SceneDetectionWorker | None,
     ) -> None:
-        if self._background_thread_slots.clear_if_current(
-            'scene', finished_thread, finished_worker
+        if (
+            self._background_thread_slots.clear_if_current(
+                'scene', finished_thread, finished_worker
+            )
+            and not self._closing
         ):
             self.detect_button.setEnabled(bool(self.library.photos))
             self._refresh_ui()
@@ -582,8 +620,11 @@ class MainWindowWorkflowMixin:
             finished_thread: QThread | None,
             finished_worker: OperationWorker | None,
     ) -> None:
-        if self._background_thread_slots.clear_if_current(
-            'operation', finished_thread, finished_worker
+        if (
+            self._background_thread_slots.clear_if_current(
+                'operation', finished_thread, finished_worker
+            )
+            and not self._closing
         ):
             self._refresh_ui()
 
@@ -597,14 +638,15 @@ class MainWindowWorkflowMixin:
         """Complete a close that was waiting for background tasks to finish."""
         if (
             self._close_after_background_tasks
+            and not self._busy
             and not self._background_task_active()
         ):
-            # Re-enter close only after the finished slots have cleared active
-            # thread references. This keeps Qt wrapper lifetime tied to the
-            # normal worker cleanup path instead of the first close event.
+            # Re-enter close only after destroyed callbacks have cleared every
+            # active thread reference. This makes QObject destruction, rather
+            # than native-thread completion, the terminal ownership boundary.
             self._close_after_background_tasks = False
-            # Queue the final close so Qt can finish delivering the current
-            # QThread.finished signal and its deleteLater cleanup first.
+            # Queue the final close so the current QThread.destroyed callback
+            # can return before deleting the window that owns this cleanup.
             QTimer.singleShot(0, self.close)
 
     def _show_operation_finished_dialog(
@@ -651,6 +693,9 @@ class MainWindowWorkflowMixin:
         except Exception as exc:  # noqa: BLE001 - surface unexpected reload errors in the UI
             self._hide_progress()
             self._operation_kind = None
+            if self._closing:
+                return
+
             QMessageBox.critical(
                 self,
                 'Folder Reload Failed',
@@ -660,6 +705,10 @@ class MainWindowWorkflowMixin:
             return
 
         self._hide_progress()
+        if self._closing:
+            self._operation_kind = None
+            return
+
         self._set_main_view_frozen_after_move_organize(frozen=False)
         self._refresh_ui()
         self._operation_kind = None
@@ -740,6 +789,9 @@ class MainWindowWorkflowMixin:
         )
         self._clear_metadata_history()
         self._hide_progress()
+        if self._closing:
+            return
+
         self._refresh_ui()
         self._restore_active_navigation_focus(defer=True)
         # Unlike cancel/failure paths, this is a successful reload that found
@@ -820,6 +872,10 @@ class MainWindowWorkflowMixin:
     def _hide_progress(self: MainWindow) -> None:
         self.progress_overlay_controller.hide()
         self._busy = False
+        if self._closing:
+            self._finish_deferred_close_if_ready()
+            return
+
         self._set_interaction_enabled(enabled=True)
         self._refresh_info_overlay()
 
