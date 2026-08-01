@@ -132,6 +132,10 @@ Major logic:
   formats exist in the loaded folder. The split keeps metadata buckets first,
   then writes files under `jpg` or `raw` child folders. Shared XMP sidecars for
   RAW-backed photos follow the RAW output.
+- Starting an organizer workflow remembers its mode, criterion-specific
+  controls, action, JPG/RAW split, conflict policy, and XMP merge policy across
+  sessions. Canceling does not replace those choices, and the output parent
+  always starts from the currently loaded folder instead of a remembered path.
 - New organizer UI code should prefer criterion-specific option types; the
   legacy `OrganizeFilesOptions(...)` constructor remains for direct callers.
 - Write XMP mode supports merge policies `preserve` and `replace`.
@@ -192,6 +196,8 @@ Major logic:
   preserves the extended selection after refresh.
 - If organizer, XMP, or undo behavior changes, test dialog defaults and typed
   option mapping when UI-facing behavior changes.
+- When organizer controls change, verify accepted choices persist, canceled or
+  invalid choices preserve safe defaults, and output paths remain folder-local.
 - Test copy-vs-move, conflict-policy, and sidecar-handling behavior for file
   organization changes.
 - Test preserve-vs-replace behavior plus malformed-sidecar failures for XMP

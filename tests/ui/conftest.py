@@ -65,15 +65,30 @@ def clear_main_window_settings() -> Iterator[None]:
         for key in setting_keys
         if settings.contains(key)
     }
+    organizer_values = {
+        key: settings.value(key)
+        for key in settings.allKeys()
+        if key.startswith('organizer/')
+    }
     for key in setting_keys:
         settings.remove(key)
 
+    settings.beginGroup('organizer')
+    settings.remove('')
+    settings.endGroup()
+
     settings.sync()
     yield
+    settings.beginGroup('organizer')
+    settings.remove('')
+    settings.endGroup()
     for key in setting_keys:
         if key in original_values:
             settings.setValue(key, original_values[key])
         else:
             settings.remove(key)
+
+    for key, value in organizer_values.items():
+        settings.setValue(key, value)
 
     settings.sync()

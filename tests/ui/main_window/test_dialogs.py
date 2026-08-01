@@ -117,6 +117,160 @@ def test_organizer_dialog_defaults_and_mode_switch(tmp_path: Path) -> None:
     del app
 
 
+def test_organizer_dialog_remembers_accepted_controls_not_output_parent(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify every accepted control persists while the destination stays local.
+
+    Organizer choices should survive new dialog instances and app restarts, but
+    carrying an old output folder into another culling folder could route files
+    to an unrelated destination. Inactive criterion controls are included so
+    returning to a prior criterion also restores its last accepted choice.
+    """
+    app = QApplication.instance() or QApplication([])
+    first_folder = tmp_path / 'first'
+    second_folder = tmp_path / 'second'
+    third_folder = tmp_path / 'third'
+    first_folder.mkdir()
+    second_folder.mkdir()
+    third_folder.mkdir()
+
+    dialog = OrganizerDialog(current_folder=first_folder)
+    dialog._button_with_value(dialog.mode_group, 'xmp').setChecked(True)
+    dialog._button_with_value(dialog.criterion_group, 'rating').setChecked(
+        True
+    )
+    dialog._button_with_value(dialog.action_group, 'move').setChecked(True)
+    dialog._button_with_value(
+        dialog.flag_folder_mode_group, 'picked_only'
+    ).setChecked(True)
+    dialog.color_include_untagged_checkbox.setChecked(True)
+    dialog.rating_include_untagged_checkbox.setChecked(True)
+    dialog.split_jpg_raw_checkbox.setChecked(True)
+    dialog._button_with_value(
+        dialog.conflict_policy_group, 'overwrite'
+    ).setChecked(True)
+    dialog._button_with_value(dialog.merge_policy_group, 'replace').setChecked(
+        True
+    )
+    dialog.output_parent_edit.setText(str(tmp_path / 'custom-output'))
+    dialog.accept()
+
+    restored = OrganizerDialog(current_folder=second_folder)
+
+    assert restored.current_mode() == 'xmp'
+    assert restored._selected_value(restored.criterion_group) == 'rating'
+    assert restored._selected_value(restored.action_group) == 'move'
+    assert (
+        restored._selected_value(restored.flag_folder_mode_group)
+        == 'picked_only'
+    )
+    assert restored.color_include_untagged_checkbox.isChecked() is True
+    assert restored.rating_include_untagged_checkbox.isChecked() is True
+    assert restored.split_jpg_raw_checkbox.isChecked() is True
+    assert (
+        restored._selected_value(restored.conflict_policy_group) == 'overwrite'
+    )
+    assert restored._selected_value(restored.merge_policy_group) == 'replace'
+    assert restored.output_parent_edit.text() == str(second_folder)
+    assert restored.reorganize_box.isEnabled() is False
+    assert restored.xmp_box.isEnabled() is True
+
+    restored._button_with_value(restored.mode_group, 'reorganize').setChecked(
+        True
+    )
+    restored.accept()
+    restored_again = OrganizerDialog(current_folder=third_folder)
+
+    assert restored_again.current_mode() == 'reorganize'
+    assert restored_again.flag_folder_mode_box.isEnabled() is False
+    assert restored_again.color_include_untagged_box.isEnabled() is False
+    assert restored_again.rating_include_untagged_box.isEnabled() is True
+    assert restored_again.output_parent_edit.text() == str(third_folder)
+
+    dialog.close()
+    restored.close()
+    restored_again.close()
+    del app
+
+
+def test_organizer_dialog_cancel_keeps_last_accepted_controls(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify cancel discards control changes instead of persisting partial
+    intent.
+
+    Only pressing Start represents a configuration the user chose to run, so a
+    later canceled dialog must not replace that last accepted configuration.
+    """
+    app = QApplication.instance() or QApplication([])
+    accepted = OrganizerDialog(current_folder=tmp_path)
+    accepted._button_with_value(accepted.action_group, 'move').setChecked(True)
+    accepted.accept()
+
+    canceled = OrganizerDialog(current_folder=tmp_path)
+    canceled._button_with_value(canceled.action_group, 'copy').setChecked(True)
+    canceled.reject()
+    restored = OrganizerDialog(current_folder=tmp_path)
+
+    assert restored._selected_value(restored.action_group) == 'move'
+
+    accepted.close()
+    canceled.close()
+    restored.close()
+    del app
+
+
+def test_organizer_dialog_invalid_settings_fall_back_safely(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify stale settings cannot select unsupported organizer configurations.
+
+    Settings can outlive option changes or be edited outside EasyLoupe. Unknown
+    radio values should preserve current defaults, while conventional boolean
+    strings should normalize and invalid boolean values should become false.
+    """
+    app = QApplication.instance() or QApplication([])
+    settings = OrganizerDialog._settings()
+    for key in (
+        'organizer/mode',
+        'organizer/criterion',
+        'organizer/action',
+        'organizer/flag_folder_mode',
+        'organizer/conflict_policy',
+        'organizer/xmp_merge_policy',
+    ):
+        settings.setValue(key, 'unsupported')
+
+    settings.setValue('organizer/color_include_untagged', 'yes')
+    settings.setValue('organizer/rating_include_untagged', 'invalid')
+    settings.setValue('organizer/split_jpg_raw', 'on')
+
+    dialog = OrganizerDialog(current_folder=tmp_path)
+
+    assert dialog.current_mode() == 'reorganize'
+    assert dialog._selected_value(dialog.criterion_group) == 'flag'
+    assert dialog._selected_value(dialog.action_group) == 'copy'
+    assert (
+        dialog._selected_value(dialog.flag_folder_mode_group)
+        == 'picked_rejected_untagged'
+    )
+    assert dialog._selected_value(dialog.conflict_policy_group) == 'fail'
+    assert dialog._selected_value(dialog.merge_policy_group) == 'preserve'
+    assert dialog.color_include_untagged_checkbox.isChecked() is True
+    assert dialog.rating_include_untagged_checkbox.isChecked() is False
+    assert dialog.split_jpg_raw_checkbox.isChecked() is True
+    assert dialog.flag_folder_mode_box.isEnabled() is True
+    assert dialog.color_include_untagged_box.isEnabled() is False
+    assert dialog.rating_include_untagged_box.isEnabled() is False
+
+    dialog.close()
+    del app
+
+
 def test_organizer_dialog_selected_result_builds_typed_options(
         tmp_path: Path,
 ) -> None:
@@ -266,6 +420,7 @@ def test_organizer_dialog_validates_missing_output_folder() -> None:
             'Choose an output parent folder before continuing.',
         )
     ]
+    assert OrganizerDialog._settings().contains('organizer/mode') is False
 
     dialog.close()
     del app

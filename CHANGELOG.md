@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- Added
+
+  - `Organize Photos` now remembers the last accepted workflow controls across
+    app sessions while keeping the output parent tied to the currently loaded
+    folder.
+
 - Fixed
 
   - Windows opened during deferred app-quit cleanup now require their own quit

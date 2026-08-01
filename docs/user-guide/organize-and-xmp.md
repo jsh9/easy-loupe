@@ -20,6 +20,11 @@ photo app. Open it from the top bar, from the File menu, or with
 
 The dialog has two workflows: `Reorganize Files` and `Write XMP`.
 
+When you choose `Start`, EasyLoupe remembers the selected workflow and its
+controls for the next time you open the dialog, including after restarting the
+app. Canceling does not replace those remembered choices. The output parent is
+not remembered; it starts from the currently loaded folder each time.
+
 ## 1. Reorganize Files
 
 Reorganizing copies or moves photo files into metadata-based folders.
