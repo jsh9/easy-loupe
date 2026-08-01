@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
+from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import (
     QAbstractButton,
     QButtonGroup,
@@ -35,11 +36,22 @@ from easy_loupe.operations.export import (
     OrganizeFilesRequest,
 )
 from easy_loupe.operations.xmp import MergePolicy, WriteXmpOptions
+from easy_loupe.ui.identity import APP_NAME
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
 OrganizerMode = Literal['reorganize', 'xmp']
+
+_ORGANIZER_MODE_SETTINGS_KEY = 'organizer/mode'
+_ORGANIZER_CRITERION_SETTINGS_KEY = 'organizer/criterion'
+_ORGANIZER_ACTION_SETTINGS_KEY = 'organizer/action'
+_ORGANIZER_FLAG_FOLDER_MODE_SETTINGS_KEY = 'organizer/flag_folder_mode'
+_ORGANIZER_COLOR_UNTAGGED_SETTINGS_KEY = 'organizer/color_include_untagged'
+_ORGANIZER_RATING_UNTAGGED_SETTINGS_KEY = 'organizer/rating_include_untagged'
+_ORGANIZER_SPLIT_JPG_RAW_SETTINGS_KEY = 'organizer/split_jpg_raw'
+_ORGANIZER_CONFLICT_POLICY_SETTINGS_KEY = 'organizer/conflict_policy'
+_ORGANIZER_XMP_MERGE_POLICY_SETTINGS_KEY = 'organizer/xmp_merge_policy'
 
 
 @dataclass(slots=True, frozen=True)
@@ -77,6 +89,7 @@ class OrganizerDialog(QDialog):
         root.addStretch(1)
 
         self.mode_group.buttonToggled.connect(self._handle_mode_toggled)
+        self._restore_settings()
         self._sync_workflow_state()
 
         self.button_box = QDialogButtonBox(
@@ -174,7 +187,104 @@ class OrganizerDialog(QDialog):
                 )
                 return
 
+        self._save_settings()
         super().accept()
+
+    @staticmethod
+    def _settings() -> QSettings:
+        return QSettings(APP_NAME, APP_NAME)
+
+    def _restore_settings(self) -> None:
+        """Restore accepted organizer controls from application settings."""
+        settings = self._settings()
+        for key, group in self._get_radio_setting_bindings():
+            self._restore_radio_setting(settings, key, group)
+
+        for key, checkbox in self._get_checkbox_setting_bindings():
+            checkbox.setChecked(
+                self._normalize_stored_bool(settings.value(key))
+            )
+
+    def _save_settings(self) -> None:
+        """Persist organizer controls after the user accepts the dialog."""
+        settings = self._settings()
+        for key, group in self._get_radio_setting_bindings():
+            settings.setValue(key, self._selected_value(group))
+
+        for key, checkbox in self._get_checkbox_setting_bindings():
+            settings.setValue(key, checkbox.isChecked())
+
+    def _get_radio_setting_bindings(
+            self,
+    ) -> tuple[tuple[str, QButtonGroup], ...]:
+        return (
+            (_ORGANIZER_MODE_SETTINGS_KEY, self.mode_group),
+            (_ORGANIZER_CRITERION_SETTINGS_KEY, self.criterion_group),
+            (_ORGANIZER_ACTION_SETTINGS_KEY, self.action_group),
+            (
+                _ORGANIZER_FLAG_FOLDER_MODE_SETTINGS_KEY,
+                self.flag_folder_mode_group,
+            ),
+            (
+                _ORGANIZER_CONFLICT_POLICY_SETTINGS_KEY,
+                self.conflict_policy_group,
+            ),
+            (
+                _ORGANIZER_XMP_MERGE_POLICY_SETTINGS_KEY,
+                self.merge_policy_group,
+            ),
+        )
+
+    def _get_checkbox_setting_bindings(
+            self,
+    ) -> tuple[tuple[str, QCheckBox], ...]:
+        return (
+            (
+                _ORGANIZER_COLOR_UNTAGGED_SETTINGS_KEY,
+                self.color_include_untagged_checkbox,
+            ),
+            (
+                _ORGANIZER_RATING_UNTAGGED_SETTINGS_KEY,
+                self.rating_include_untagged_checkbox,
+            ),
+            (
+                _ORGANIZER_SPLIT_JPG_RAW_SETTINGS_KEY,
+                self.split_jpg_raw_checkbox,
+            ),
+        )
+
+    @classmethod
+    def _restore_radio_setting(
+            cls,
+            settings: QSettings,
+            key: str,
+            group: QButtonGroup,
+    ) -> None:
+        value = settings.value(key)
+        if not isinstance(value, str):
+            return
+
+        try:
+            button = cls._button_with_value(group, value)
+        except LookupError:
+            return
+
+        button.setChecked(True)
+
+    @staticmethod
+    def _normalize_stored_bool(value: object) -> bool:
+        if isinstance(value, bool):
+            return value
+
+        if isinstance(value, str):
+            normalized = value.strip().casefold()
+            if normalized in {'1', 'true', 'yes', 'on'}:
+                return True
+
+            if normalized in {'0', 'false', 'no', 'off'}:
+                return False
+
+        return False
 
     def _build_reorganize_section(self) -> QWidget:
         section = QWidget(self)
