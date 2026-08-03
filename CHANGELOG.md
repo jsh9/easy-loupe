@@ -10,9 +10,12 @@
 
 - Changed
 
-  - `Show Clipping` now warns only at exact RGB endpoints: red and blue mark
-    all-channel highlight and shadow clipping, while purple and cyan
-    distinguish one- or two-channel clipping.
+  - `Show Clipping` now warns only when a displayed RGB channel reaches exactly
+    `255` or `0`. Red marks pixels where all three channels are `255`, while
+    purple marks pixels where only one or two channels are `255`. Blue marks
+    pixels where all three channels are `0`, while cyan marks pixels where only
+    one or two channels are `0`. If a pixel has channels at both endpoints, the
+    highlight warning takes precedence.
 
 - Fixed
 
