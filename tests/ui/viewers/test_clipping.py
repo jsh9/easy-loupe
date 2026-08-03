@@ -4,16 +4,20 @@ from dataclasses import dataclass
 from threading import Event, Thread
 from typing import TYPE_CHECKING
 
+import pytest
 from PIL import Image
 from PySide6.QtWidgets import QApplication
 
 import easy_loupe.ui.viewers.clipping as clipping_module
 from easy_loupe.ui.viewers.clipping import (
     CLIPPING_ANALYSIS_MAX_LONG_EDGE,
-    HIGHLIGHT_CLIPPING_RGBA,
-    SHADOW_CLIPPING_RGBA,
+    COMPLETE_HIGHLIGHT_CLIPPING_RGBA,
+    COMPLETE_SHADOW_CLIPPING_RGBA,
+    PARTIAL_HIGHLIGHT_CLIPPING_RGBA,
+    PARTIAL_SHADOW_CLIPPING_RGBA,
     ClippingOverlayBuilder,
     ClippingOverlayPayload,
+    ExposureMasks,
     build_clipping_overlay_image,
     clipping_overlay_cache_key,
     clipping_overlay_payload_for_key,
@@ -23,34 +27,65 @@ from easy_loupe.ui.viewers.clipping import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-    import pytest
 
-
-def test_clipping_overlay_marks_any_channel_clipping_and_midtones() -> None:
+@pytest.mark.parametrize(
+    ('rgb', 'expected'),
+    [
+        pytest.param(
+            (255, 255, 255),
+            COMPLETE_HIGHLIGHT_CLIPPING_RGBA,
+            id='complete-highlight',
+        ),
+        pytest.param(
+            (255, 255, 200),
+            PARTIAL_HIGHLIGHT_CLIPPING_RGBA,
+            id='two-highlight-channels',
+        ),
+        pytest.param(
+            (255, 200, 200),
+            PARTIAL_HIGHLIGHT_CLIPPING_RGBA,
+            id='one-highlight-channel',
+        ),
+        pytest.param(
+            (0, 0, 0),
+            COMPLETE_SHADOW_CLIPPING_RGBA,
+            id='complete-shadow',
+        ),
+        pytest.param(
+            (0, 0, 8),
+            PARTIAL_SHADOW_CLIPPING_RGBA,
+            id='two-shadow-channels',
+        ),
+        pytest.param(
+            (0, 8, 8),
+            PARTIAL_SHADOW_CLIPPING_RGBA,
+            id='one-shadow-channel',
+        ),
+        pytest.param((128, 128, 128), (0, 0, 0, 0), id='midtone'),
+        pytest.param((254, 254, 254), (0, 0, 0, 0), id='near-highlight'),
+        pytest.param((1, 1, 1), (0, 0, 0, 0), id='near-shadow'),
+        pytest.param(
+            (255, 0, 0),
+            PARTIAL_HIGHLIGHT_CLIPPING_RGBA,
+            id='mixed-endpoints-highlight-wins',
+        ),
+    ],
+)
+def test_clipping_overlay_marks_exact_channel_levels(
+        rgb: tuple[int, int, int],
+        expected: tuple[int, int, int, int],
+) -> None:
     """
-    Verify the default exposure definition uses any clipped RGB channel.
+    Verify exact endpoints use distinct complete and partial warning colors.
 
-    Highlight warnings win when a pixel also has channel values low enough to
-    qualify as a shadow warning.
+    This protects against near-endpoint false positives and keeps high-side
+    clipping dominant when different channels hit both endpoints.
     """
-    image = Image.new('RGB', (6, 1))
-    image.putdata([
-        (255, 255, 255),
-        (0, 0, 0),
-        (128, 128, 128),
-        (255, 255, 200),
-        (0, 0, 8),
-        (255, 0, 0),
-    ])
+    image = Image.new('RGB', (1, 1), color=rgb)
 
     overlay = build_clipping_overlay_image(image)
 
-    assert overlay.getpixel((0, 0)) == HIGHLIGHT_CLIPPING_RGBA
-    assert overlay.getpixel((1, 0)) == SHADOW_CLIPPING_RGBA
-    assert overlay.getpixel((2, 0)) == (0, 0, 0, 0)
-    assert overlay.getpixel((3, 0)) == HIGHLIGHT_CLIPPING_RGBA
-    assert overlay.getpixel((4, 0)) == SHADOW_CLIPPING_RGBA
-    assert overlay.getpixel((5, 0)) == HIGHLIGHT_CLIPPING_RGBA
+    assert overlay.getpixel((0, 0)) == expected
 
 
 def test_clipping_overlay_pixmap_uses_displayed_image_path(
@@ -63,20 +98,32 @@ def test_clipping_overlay_pixmap_uses_displayed_image_path(
     loaded into the viewer, not from source metadata or a separate render path.
     """
     image_path = tmp_path / 'preview.png'
-    image = Image.new('RGB', (2, 1))
-    image.putdata([(255, 255, 255), (0, 0, 0)])
+    image = Image.new('RGB', (4, 1))
+    image.putdata([
+        (255, 255, 255),
+        (255, 200, 200),
+        (0, 0, 0),
+        (0, 8, 8),
+    ])
     image.save(image_path)
 
     app = QApplication.instance() or QApplication([])
     pixmap = clipping_overlay_pixmap(image_path)
     rendered = pixmap.toImage()
 
-    assert pixmap.width() == 2
+    assert pixmap.width() == 4
     assert pixmap.height() == 1
-    assert rendered.pixelColor(0, 0).red() == HIGHLIGHT_CLIPPING_RGBA[0]
-    assert rendered.pixelColor(0, 0).alpha() == HIGHLIGHT_CLIPPING_RGBA[3]
-    assert rendered.pixelColor(1, 0).blue() == SHADOW_CLIPPING_RGBA[2]
-    assert rendered.pixelColor(1, 0).alpha() == SHADOW_CLIPPING_RGBA[3]
+    expected_colors = (
+        COMPLETE_HIGHLIGHT_CLIPPING_RGBA,
+        PARTIAL_HIGHLIGHT_CLIPPING_RGBA,
+        COMPLETE_SHADOW_CLIPPING_RGBA,
+        PARTIAL_SHADOW_CLIPPING_RGBA,
+    )
+    for x, expected in enumerate(expected_colors):
+        actual = rendered.pixelColor(x, 0).getRgb()
+        assert actual[:3] == pytest.approx(expected[:3], abs=1)
+        assert actual[3] == expected[3]
+
     del app
 
 
@@ -142,17 +189,19 @@ class RecordingDownsampler:
 
 class RecordingExposureDefinition:
     policy_id = 'recording-exposure'
-    highlight_threshold = 250
-    shadow_threshold = 5
+    highlight_threshold = 255
+    shadow_threshold = 0
 
     def __init__(self) -> None:
         self.received_size: tuple[int, int] | None = None
 
-    def masks(self, image: Image.Image) -> tuple[Image.Image, Image.Image]:
+    def masks(self, image: Image.Image) -> ExposureMasks:
         self.received_size = image.size
-        return (
-            Image.new('L', image.size, color=255),
-            Image.new('L', image.size, color=0),
+        return ExposureMasks(
+            complete_highlight=Image.new('L', image.size, color=255),
+            partial_highlight=Image.new('L', image.size, color=0),
+            complete_shadow=Image.new('L', image.size, color=0),
+            partial_shadow=Image.new('L', image.size, color=0),
         )
 
 
@@ -177,7 +226,7 @@ def test_clipping_overlay_builder_injects_downsampler_before_masks() -> None:
     assert downsampler.received_size == (10, 5)
     assert exposure_definition.received_size == (2, 1)
     assert overlay.size == (2, 1)
-    assert overlay.getpixel((0, 0)) == HIGHLIGHT_CLIPPING_RGBA
+    assert overlay.getpixel((0, 0)) == COMPLETE_HIGHLIGHT_CLIPPING_RGBA
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,14 +242,16 @@ class IdentityDownsampler:
 @dataclass(frozen=True, slots=True)
 class TransparentExposureDefinition:
     policy_id: str
-    highlight_threshold: int = 250
-    shadow_threshold: int = 5
+    highlight_threshold: int = 255
+    shadow_threshold: int = 0
 
     @staticmethod
-    def masks(image: Image.Image) -> tuple[Image.Image, Image.Image]:
-        return (
-            Image.new('L', image.size, color=0),
-            Image.new('L', image.size, color=0),
+    def masks(image: Image.Image) -> ExposureMasks:
+        return ExposureMasks(
+            complete_highlight=Image.new('L', image.size, color=0),
+            partial_highlight=Image.new('L', image.size, color=0),
+            complete_shadow=Image.new('L', image.size, color=0),
+            partial_shadow=Image.new('L', image.size, color=0),
         )
 
 
@@ -233,6 +284,25 @@ def test_clipping_overlay_cache_key_includes_strategy_policy_ids(
 
     assert first_downsampler_key != second_downsampler_key
     assert first_exposure_key != second_exposure_key
+
+
+def test_clipping_overlay_cache_key_uses_exact_endpoint_policy(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify default cache keys identify the exact four-level mask policy.
+
+    This prevents payload reuse if clipping semantics change independently of
+    the displayed preview file.
+    """
+    image_path = tmp_path / 'preview.png'
+    Image.new('RGB', (1, 1), color='white').save(image_path)
+
+    key = clipping_overlay_cache_key(image_path)
+
+    assert key.highlight_threshold == 255
+    assert key.shadow_threshold == 0
+    assert key.exposure_policy_id == 'any-channel-levels-v2'
 
 
 def test_clipping_overlay_payload_coalesces_in_flight_builds(

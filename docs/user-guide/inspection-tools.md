@@ -63,11 +63,16 @@ browse view, compare view, and busy progress states.
 ## 5. Clipping Warnings
 
 Turn on `Show Clipping` from the top bar or press `J` to show highlight and
-shadow clipping warnings. Red marks clipped highlights, and blue marks clipped
-shadows.
+shadow clipping warnings. Red marks pixels whose three RGB channels are clipped
+at `255`, while purple marks pixels with one or two channels clipped at `255`.
+Blue marks pixels whose three channels are clipped at `0`, while cyan marks
+pixels with one or two channels clipped at `0`. If different channels in the
+same pixel clip at both endpoints, the highlight warning wins.
 
 The overlay may appear shortly after the photo because clipping analysis runs
-in the background. Browse thumbnails do not show clipping warnings.
+in the background. Large previews are downsampled before endpoint detection, so
+very small clipped specks can disappear. Browse thumbnails do not show clipping
+warnings.
 
 ## 6. Visible-Region Minimap
 

@@ -8,6 +8,12 @@
     app sessions while keeping the output parent tied to the currently loaded
     folder.
 
+- Changed
+
+  - `Show Clipping` now warns only at exact RGB endpoints: red and blue mark
+    all-channel highlight and shadow clipping, while purple and cyan
+    distinguish one- or two-channel clipping.
+
 - Fixed
 
   - Windows opened during deferred app-quit cleanup now require their own quit

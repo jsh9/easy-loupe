@@ -14,10 +14,12 @@ from PySide6.QtGui import QImage, QPixmap
 if TYPE_CHECKING:
     from pathlib import Path
 
-HIGHLIGHT_CLIPPING_THRESHOLD = 250
-SHADOW_CLIPPING_THRESHOLD = 5
-HIGHLIGHT_CLIPPING_RGBA = (255, 59, 48, 156)
-SHADOW_CLIPPING_RGBA = (0, 122, 255, 156)
+HIGHLIGHT_CLIPPING_THRESHOLD = 255
+SHADOW_CLIPPING_THRESHOLD = 0
+COMPLETE_HIGHLIGHT_CLIPPING_RGBA = (255, 59, 48, 184)
+PARTIAL_HIGHLIGHT_CLIPPING_RGBA = (203, 48, 224, 156)
+COMPLETE_SHADOW_CLIPPING_RGBA = (0, 122, 255, 184)
+PARTIAL_SHADOW_CLIPPING_RGBA = (50, 173, 230, 156)
 CLIPPING_ANALYSIS_MAX_LONG_EDGE = 3000
 CLIPPING_OVERLAY_MAX_LONG_EDGE = CLIPPING_ANALYSIS_MAX_LONG_EDGE
 CLIPPING_OVERLAY_CACHE_SIZE = 24
@@ -33,15 +35,32 @@ class ClippingImageDownsampler(Protocol):
         """Return an independent RGB image ready for exposure analysis."""
 
 
+@dataclass(frozen=True, slots=True)
+class ExposureMasks:
+    """Own the four category masks for one exposure analysis."""
+
+    complete_highlight: Image.Image
+    partial_highlight: Image.Image
+    complete_shadow: Image.Image
+    partial_shadow: Image.Image
+
+    def close(self) -> None:
+        """Close every mask after the overlay has copied its pixels."""
+        self.complete_highlight.close()
+        self.partial_highlight.close()
+        self.complete_shadow.close()
+        self.partial_shadow.close()
+
+
 class ExposureMaskDefinition(Protocol):
-    """Build highlight and shadow clipping masks from an RGB image."""
+    """Classify complete and partial channel clipping in an RGB image."""
 
     policy_id: str
     highlight_threshold: int
     shadow_threshold: int
 
-    def masks(self, image: Image.Image) -> tuple[Image.Image, Image.Image]:
-        """Return ``L`` mode highlight and shadow masks for ``image``."""
+    def masks(self, image: Image.Image) -> ExposureMasks:
+        """Return four ``L`` mode clipping masks for ``image``."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,14 +87,14 @@ class FastPillowDownsampler:
 
 @dataclass(frozen=True, slots=True)
 class AnyChannelExposureMaskDefinition:
-    """Treat any clipped RGB channel as an exposure warning."""
+    """Separate all-channel clipping from one- or two-channel clipping."""
 
     highlight_threshold: int = HIGHLIGHT_CLIPPING_THRESHOLD
     shadow_threshold: int = SHADOW_CLIPPING_THRESHOLD
-    policy_id: str = 'any-channel-v1'
+    policy_id: str = 'any-channel-levels-v2'
 
-    def masks(self, image: Image.Image) -> tuple[Image.Image, Image.Image]:
-        """Return highlight and shadow masks using any-channel thresholds."""
+    def masks(self, image: Image.Image) -> ExposureMasks:
+        """Return complete and partial masks for both exposure endpoints."""
         if image.mode == 'RGB':
             rgb_image = image
             close_rgb_image = False
@@ -94,12 +113,36 @@ class AnyChannelExposureMaskDefinition:
             _threshold_channel_at_or_below(green, self.shadow_threshold),
             _threshold_channel_at_or_below(blue, self.shadow_threshold),
         )
+        highlight_any = _any_channels_mask(highlight_channels)
+        shadow_any = _any_channels_mask(shadow_channels)
+        complete_highlight = _all_channels_mask(highlight_channels)
+        complete_shadow = _all_channels_mask(shadow_channels)
+        partial_highlight: Image.Image | None = None
+        partial_shadow: Image.Image | None = None
         try:
-            return (
-                _any_channels_mask(highlight_channels),
-                _any_channels_mask(shadow_channels),
+            partial_highlight = ImageChops.subtract(
+                highlight_any, complete_highlight
             )
+            partial_shadow = ImageChops.subtract(shadow_any, complete_shadow)
+            return ExposureMasks(
+                complete_highlight=complete_highlight,
+                partial_highlight=partial_highlight,
+                complete_shadow=complete_shadow,
+                partial_shadow=partial_shadow,
+            )
+        except BaseException:
+            complete_highlight.close()
+            complete_shadow.close()
+            if partial_highlight is not None:
+                partial_highlight.close()
+
+            if partial_shadow is not None:
+                partial_shadow.close()
+
+            raise
         finally:
+            highlight_any.close()
+            shadow_any.close()
             if close_rgb_image:
                 rgb_image.close()
 
@@ -137,15 +180,12 @@ class ClippingOverlayBuilder:
     def build_overlay_image(self, image: Image.Image) -> Image.Image:
         """Return an RGBA overlay for ``image`` after bounded analysis."""
         analysis_image = self.downsampler.downsample(image)
-        highlight_mask, shadow_mask = self.exposure_definition.masks(
-            analysis_image
-        )
+        masks = self.exposure_definition.masks(analysis_image)
         try:
-            return _overlay_image_from_masks(highlight_mask, shadow_mask)
+            return _overlay_image_from_masks(masks)
         finally:
             analysis_image.close()
-            highlight_mask.close()
-            shadow_mask.close()
+            masks.close()
 
 
 @dataclass(frozen=True, slots=True)
@@ -430,22 +470,41 @@ def _default_builder_for_key(
     )
 
 
-def _overlay_image_from_masks(
-        highlight_mask: Image.Image,
-        shadow_mask: Image.Image,
-) -> Image.Image:
-    overlay = Image.new('RGBA', highlight_mask.size, (0, 0, 0, 0))
-    # Paint shadow first, then highlight, so pixels clipped in both directions
-    # follow the product rule that overexposure wins ties.
+def _overlay_image_from_masks(masks: ExposureMasks) -> Image.Image:
+    overlay = Image.new('RGBA', masks.complete_highlight.size, (0, 0, 0, 0))
+    # Paint shadows before highlights so saturated pixels that hit both
+    # endpoints preserve the product rule that high-side clipping wins ties.
     overlay.paste(
-        Image.new('RGBA', shadow_mask.size, SHADOW_CLIPPING_RGBA),
+        Image.new(
+            'RGBA', masks.partial_shadow.size, PARTIAL_SHADOW_CLIPPING_RGBA
+        ),
         (0, 0),
-        shadow_mask,
+        masks.partial_shadow,
     )
     overlay.paste(
-        Image.new('RGBA', highlight_mask.size, HIGHLIGHT_CLIPPING_RGBA),
+        Image.new(
+            'RGBA', masks.complete_shadow.size, COMPLETE_SHADOW_CLIPPING_RGBA
+        ),
         (0, 0),
-        highlight_mask,
+        masks.complete_shadow,
+    )
+    overlay.paste(
+        Image.new(
+            'RGBA',
+            masks.partial_highlight.size,
+            PARTIAL_HIGHLIGHT_CLIPPING_RGBA,
+        ),
+        (0, 0),
+        masks.partial_highlight,
+    )
+    overlay.paste(
+        Image.new(
+            'RGBA',
+            masks.complete_highlight.size,
+            COMPLETE_HIGHLIGHT_CLIPPING_RGBA,
+        ),
+        (0, 0),
+        masks.complete_highlight,
     )
     return overlay
 
@@ -471,6 +530,16 @@ def _any_channels_mask(channels: tuple[Image.Image, ...]) -> Image.Image:
     mask = channels[0].copy()
     for channel in channels[1:]:
         next_mask = ImageChops.lighter(mask, channel)
+        mask.close()
+        mask = next_mask
+
+    return mask
+
+
+def _all_channels_mask(channels: tuple[Image.Image, ...]) -> Image.Image:
+    mask = channels[0].copy()
+    for channel in channels[1:]:
+        next_mask = ImageChops.darker(mask, channel)
         mask.close()
         mask = next_mask
 
