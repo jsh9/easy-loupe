@@ -470,43 +470,49 @@ def _default_builder_for_key(
     )
 
 
+def _paste_mask_color(
+        overlay: Image.Image,
+        mask: Image.Image,
+        rgba: tuple[int, int, int, int],
+) -> None:
+    """
+    Paste one warning color through a clipping mask.
+
+    Each solid layer spans the analysis image, so release it immediately after
+    pasting rather than leave its full-size buffer lifetime to garbage
+    collection.
+    """
+    color_layer = Image.new('RGBA', mask.size, rgba)
+    try:
+        overlay.paste(color_layer, (0, 0), mask)
+    finally:
+        color_layer.close()
+
+
 def _overlay_image_from_masks(masks: ExposureMasks) -> Image.Image:
     overlay = Image.new('RGBA', masks.complete_highlight.size, (0, 0, 0, 0))
-    # Paint shadows before highlights so saturated pixels that hit both
-    # endpoints preserve the product rule that high-side clipping wins ties.
-    overlay.paste(
-        Image.new(
-            'RGBA', masks.partial_shadow.size, PARTIAL_SHADOW_CLIPPING_RGBA
-        ),
-        (0, 0),
-        masks.partial_shadow,
-    )
-    overlay.paste(
-        Image.new(
-            'RGBA', masks.complete_shadow.size, COMPLETE_SHADOW_CLIPPING_RGBA
-        ),
-        (0, 0),
-        masks.complete_shadow,
-    )
-    overlay.paste(
-        Image.new(
-            'RGBA',
-            masks.partial_highlight.size,
-            PARTIAL_HIGHLIGHT_CLIPPING_RGBA,
-        ),
-        (0, 0),
-        masks.partial_highlight,
-    )
-    overlay.paste(
-        Image.new(
-            'RGBA',
-            masks.complete_highlight.size,
-            COMPLETE_HIGHLIGHT_CLIPPING_RGBA,
-        ),
-        (0, 0),
-        masks.complete_highlight,
-    )
-    return overlay
+    try:
+        # Paint shadows before highlights so saturated pixels that hit both
+        # endpoints preserve the product rule that high-side clipping wins.
+        _paste_mask_color(
+            overlay, masks.partial_shadow, PARTIAL_SHADOW_CLIPPING_RGBA
+        )
+        _paste_mask_color(
+            overlay, masks.complete_shadow, COMPLETE_SHADOW_CLIPPING_RGBA
+        )
+        _paste_mask_color(
+            overlay, masks.partial_highlight, PARTIAL_HIGHLIGHT_CLIPPING_RGBA
+        )
+        _paste_mask_color(
+            overlay, masks.complete_highlight, COMPLETE_HIGHLIGHT_CLIPPING_RGBA
+        )
+    except BaseException:
+        # Incomplete overlays have no caller, so release their pixel buffer
+        # before propagating any composition failure.
+        overlay.close()
+        raise
+    else:
+        return overlay
 
 
 def _bounded_size(

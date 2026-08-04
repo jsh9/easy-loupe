@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import product
 from threading import Event, Thread
 from typing import TYPE_CHECKING
 
@@ -15,6 +16,7 @@ from easy_loupe.ui.viewers.clipping import (
     COMPLETE_SHADOW_CLIPPING_RGBA,
     PARTIAL_HIGHLIGHT_CLIPPING_RGBA,
     PARTIAL_SHADOW_CLIPPING_RGBA,
+    AnyChannelExposureMaskDefinition,
     ClippingOverlayBuilder,
     ClippingOverlayPayload,
     ExposureMasks,
@@ -86,6 +88,38 @@ def test_clipping_overlay_marks_exact_channel_levels(
     overlay = build_clipping_overlay_image(image)
 
     assert overlay.getpixel((0, 0)) == expected
+
+
+def test_exposure_masks_partition_all_rgb_endpoint_combinations() -> None:
+    """
+    Verify complete and partial masks partition every RGB endpoint match.
+
+    Checking every endpoint and midtone combination proves the masks remain
+    mutually exclusive and exhaustive independently of overlay colors and paint
+    precedence.
+    """
+    rgb_values = tuple(product((0, 128, 255), repeat=3))
+    with Image.new('RGB', (len(rgb_values), 1)) as image:
+        image.putdata(rgb_values)
+        masks = AnyChannelExposureMaskDefinition().masks(image)
+        try:
+            for x, rgb in enumerate(rgb_values):
+                highlight_count = rgb.count(255)
+                shadow_count = rgb.count(0)
+                assert masks.complete_highlight.getpixel((x, 0)) == (
+                    255 if highlight_count == 3 else 0
+                )
+                assert masks.partial_highlight.getpixel((x, 0)) == (
+                    255 if 0 < highlight_count < 3 else 0
+                )
+                assert masks.complete_shadow.getpixel((x, 0)) == (
+                    255 if shadow_count == 3 else 0
+                )
+                assert masks.partial_shadow.getpixel((x, 0)) == (
+                    255 if 0 < shadow_count < 3 else 0
+                )
+        finally:
+            masks.close()
 
 
 def test_clipping_overlay_pixmap_uses_displayed_image_path(
