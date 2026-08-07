@@ -8,6 +8,15 @@
     app sessions while keeping the output parent tied to the currently loaded
     folder.
 
+- Changed
+
+  - `Show Clipping` now warns only when a displayed RGB channel reaches exactly
+    `255` or `0`. Red marks pixels where all three channels are `255`, while
+    purple marks pixels where only one or two channels are `255`. Blue marks
+    pixels where all three channels are `0`, while cyan marks pixels where only
+    one or two channels are `0`. If a pixel has channels at both endpoints, the
+    highlight warning takes precedence.
+
 - Fixed
 
   - Windows opened during deferred app-quit cleanup now require their own quit

@@ -286,21 +286,21 @@ Major logic:
   follows the current photo, hides automatically in browse mode, compare mode,
   and busy/progress states, and reappears when returning to eligible normal
   view state if the overlay preference remains enabled.
-- The `J` shortcut toggles `Show Clipping`, a session-only red/blue warning
-  overlay for clipped highlights and shadows. The overlay is drawn from the
-  displayed viewer preview pixels and applies to culling single/split panes,
-  standalone photo-viewer panes, compare grid panes, and selected compare
-  photos. Clipping analysis first downsamples the displayed preview to a
-  3000-pixel long edge, then scales the resulting overlay back over the full
-  viewer scene. Highlights use any RGB channel at or above the high threshold,
-  shadows use any RGB channel at or below the low threshold, and highlight
-  paint wins when both masks hit the same pixel. Overlay generation and cached
-  PNG decoding run off the UI thread and may appear shortly after the photo;
-  stale requests are checked before entering the thread pool during rapid
-  navigation, and viewer teardown cancels delayed starts plus marks in-flight
-  jobs so late results cannot update deleted panes. This speed-first analysis
-  can miss tiny clipped specks after downsampling. Browse thumbnails do not
-  show clipping warnings.
+- The `J` shortcut toggles `Show Clipping`, a session-only four-color warning
+  overlay for clipped highlights and shadows. Red marks all three RGB channels
+  at `255`, and purple marks one or two channels at `255`; blue marks all three
+  channels at `0`, and cyan marks one or two channels at `0`. Highlight paint
+  wins when different channels in one pixel hit both endpoints. The overlay is
+  drawn from the displayed viewer preview pixels and applies to culling
+  single/split panes, standalone photo-viewer panes, compare grid panes, and
+  selected compare photos. Clipping analysis first downsamples the displayed
+  preview to a 3000-pixel long edge, then scales the resulting overlay back
+  over the full viewer scene. Overlay generation and cached PNG decoding run
+  off the UI thread and may appear shortly after the photo; stale requests are
+  checked before entering the thread pool during rapid navigation, and viewer
+  teardown cancels delayed starts plus marks in-flight jobs so late results
+  cannot update deleted panes. This speed-first analysis can miss tiny clipped
+  specks after downsampling. Browse thumbnails do not show clipping warnings.
 
 ## 4. Selection And Browse Behavior
 
@@ -437,7 +437,7 @@ Current shortcut coverage in code includes:
 - `Ctrl+C`: copy the current single-photo viewer image to the system clipboard
   as pixels; this appears as `Cmd+C` on macOS
 - `I`: toggle the normal-view EXIF and RGB histogram overlay
-- `J`: toggle the `Show Clipping` red/blue highlight and shadow clipping
+- `J`: toggle the `Show Clipping` four-color highlight and shadow clipping
   overlay in viewer panes
 - `Space`: exit browse mode into fit-to-window view mode, promote split view
   into full zoom, toggle focus zoom while already in single-pane view mode, or
