@@ -98,8 +98,8 @@ def test_main_window_thumbnail_list_shows_visible_region_for_zoomed_photo(
     assert thumbnail_overlay(window.thumbnail_list, 0) is None
     assert thumbnail_overlay(window.thumbnail_list, 1) is None
 
-    window.viewer.toggle_focus_zoom()
-    window.viewer.zoom_step(1.25)
+    # Minimap tests need a crop; initial 100% can show the whole small image.
+    window.viewer.apply_manual_view(4.0, None)
     app.processEvents()
 
     overlay_before = thumbnail_overlay(window.thumbnail_list, 0)
@@ -139,8 +139,8 @@ def test_thumbnail_image_click_spatially_recenters_new_current_photo(
         ],
     )
 
-    window.viewer.toggle_focus_zoom()
-    window.viewer.zoom_step(1.25)
+    # Minimap tests need a crop; initial 100% can show the whole small image.
+    window.viewer.apply_manual_view(4.0, None)
     app.processEvents()
 
     widget = thumbnail_item_widget(window.thumbnail_list, 1)
@@ -179,8 +179,8 @@ def test_thumbnail_image_press_drag_continues_after_selection(
         ],
     )
 
-    window.viewer.toggle_focus_zoom()
-    window.viewer.zoom_step(1.25)
+    # Minimap tests need a crop; initial 100% can show the whole small image.
+    window.viewer.apply_manual_view(4.0, None)
     app.processEvents()
 
     widget = thumbnail_item_widget(window.thumbnail_list, 1)
@@ -231,8 +231,8 @@ def test_thumbnail_image_press_drag_clamps_zoomed_view_to_image_edge(
         ],
     )
 
-    window.viewer.toggle_focus_zoom()
-    window.viewer.zoom_step(1.25)
+    # Minimap tests need a crop; initial 100% can show the whole small image.
+    window.viewer.apply_manual_view(4.0, None)
     app.processEvents()
 
     widget = thumbnail_item_widget(window.thumbnail_list, 1)
@@ -273,8 +273,8 @@ def test_scene_thumbnail_image_click_spatially_recenters_exact_photo(
         scene_groups=[['IMG_8102', 'IMG_8103'], ['IMG_8104']],
     )
 
-    window.viewer.toggle_focus_zoom()
-    window.viewer.zoom_step(1.25)
+    # Minimap tests need a crop; initial 100% can show the whole small image.
+    window.viewer.apply_manual_view(4.0, None)
     app.processEvents()
 
     widget = thumbnail_item_widget(window.scene_list, 1)
@@ -315,8 +315,8 @@ def test_scene_thumbnail_image_press_drag_continues_after_selection(
         scene_groups=[['IMG_8114', 'IMG_8115'], ['IMG_8116']],
     )
 
-    window.viewer.toggle_focus_zoom()
-    window.viewer.zoom_step(1.25)
+    # Minimap tests need a crop; initial 100% can show the whole small image.
+    window.viewer.apply_manual_view(4.0, None)
     app.processEvents()
 
     widget = thumbnail_item_widget(window.scene_list, 1)
@@ -368,8 +368,8 @@ def test_spatial_thumbnail_clicks_ignore_browse_mode_and_stale_navigation(
         ],
     )
 
-    window.viewer.toggle_focus_zoom()
-    window.viewer.zoom_step(1.25)
+    # Minimap tests need a crop; initial 100% can show the whole small image.
+    window.viewer.apply_manual_view(4.0, None)
     app.processEvents()
     center_before = window.viewer.normalized_viewport_center()
 
@@ -420,8 +420,8 @@ def test_main_window_minimap_drag_recenters_zoomed_photo(
         photo_specs=[('IMG_8090', 'dimgray'), ('IMG_8091', 'blue')],
     )
 
-    window.viewer.toggle_focus_zoom()
-    window.viewer.zoom_step(1.25)
+    # Minimap tests need a crop; initial 100% can show the whole small image.
+    window.viewer.apply_manual_view(4.0, None)
     app.processEvents()
 
     widget = thumbnail_item_widget(window.thumbnail_list, 0)
@@ -465,8 +465,8 @@ def test_scene_strip_minimap_controls_exact_current_photo(
     app.processEvents()
     assert window.current_photo_id == 'IMG_8093'
 
-    window.viewer.toggle_focus_zoom()
-    window.viewer.zoom_step(1.25)
+    # Minimap tests need a crop; initial 100% can show the whole small image.
+    window.viewer.apply_manual_view(4.0, None)
     app.processEvents()
 
     scene_widget = thumbnail_item_widget(window.scene_list, 1)
@@ -506,8 +506,8 @@ def test_non_owner_and_inactive_minimap_requests_do_not_move_viewer(
         ],
     )
 
-    window.viewer.toggle_focus_zoom()
-    window.viewer.zoom_step(1.25)
+    # Minimap tests need a crop; initial 100% can show the whole small image.
+    window.viewer.apply_manual_view(4.0, None)
     app.processEvents()
     center_before = window.viewer.normalized_viewport_center()
 
@@ -606,8 +606,8 @@ def test_main_window_scene_mode_shows_visible_region_on_both_strips(
     assert window.thumbnail_list.count() == 2
     assert window.scene_list.count() == 2
 
-    window.viewer.toggle_focus_zoom()
-    window.viewer.zoom_step(1.25)
+    # Minimap tests need a crop; initial 100% can show the whole small image.
+    window.viewer.apply_manual_view(4.0, None)
     app.processEvents()
 
     left_overlay_before = thumbnail_overlay(window.thumbnail_list, 0)
@@ -654,8 +654,8 @@ def test_scene_mode_visible_region_overlay_hides_vertical_strip_for_non_cover_ph
         scene_groups=[['IMG_8175', 'IMG_8176'], ['IMG_8177']],
     )
 
-    window.viewer.toggle_focus_zoom()
-    window.viewer.zoom_step(1.25)
+    # Minimap tests need a crop; initial 100% can show the whole small image.
+    window.viewer.apply_manual_view(4.0, None)
     app.processEvents()
 
     cover_overlay = window.viewer.visible_region_rect()
@@ -728,8 +728,8 @@ def test_scene_mode_visible_region_overlay_survives_vertical_navigation(
     assert window.thumbnail_list.count() == 2
     assert window.scene_list.count() == 2
 
-    window.viewer.toggle_focus_zoom()
-    window.viewer.zoom_step(1.25)
+    # Minimap tests need a crop; initial 100% can show the whole small image.
+    window.viewer.apply_manual_view(4.0, None)
     app.processEvents()
 
     window.thumbnail_list.setCurrentRow(1)
@@ -772,8 +772,8 @@ def test_populate_scene_list_uses_targeted_visible_region_refresh(
         scene_groups=[['IMG_8200', 'IMG_8201'], ['IMG_8202']],
     )
 
-    window.viewer.toggle_focus_zoom()
-    window.viewer.zoom_step(1.25)
+    # Minimap tests need a crop; initial 100% can show the whole small image.
+    window.viewer.apply_manual_view(4.0, None)
     app.processEvents()
 
     bulk_overlay_widgets: list[object] = []
@@ -823,8 +823,8 @@ def test_scene_mode_visible_region_overlay_moves_to_vertical_strip_when_scenes_c
     assert window.thumbnail_list.count() == 1
     assert window.scene_list.count() == 2
 
-    window.viewer.toggle_focus_zoom()
-    window.viewer.zoom_step(1.25)
+    # Minimap tests need a crop; initial 100% can show the whole small image.
+    window.viewer.apply_manual_view(4.0, None)
     app.processEvents()
 
     visible_region = window.viewer.visible_region_rect()
@@ -862,8 +862,8 @@ def test_main_window_visible_region_overlay_clears_in_fit_and_browse_and_tracks_
         photo_specs=[('IMG_8190', 'dimgray'), ('IMG_8191', 'green')],
     )
 
-    window.viewer.toggle_focus_zoom()
-    window.viewer.zoom_step(1.25)
+    # Minimap tests need a crop; initial 100% can show the whole small image.
+    window.viewer.apply_manual_view(4.0, None)
     window.viewer.pan_by(35, -20)
     app.processEvents()
 

@@ -362,8 +362,10 @@ def test_compare_photo_viewer_locked_and_unlocked_zoom_targets(
     for individual checks. This test protects both interaction modes and the
     active pane selection made by clicking a pane.
     """
-    create_jpeg(tmp_path / 'IMG_9000.JPG', 'dimgray')
-    create_jpeg(tmp_path / 'IMG_9001.JPG', 'blue')
+    # Larger photos keep these AF points reachable at true 100%, so this test
+    # isolates locked targeting rather than edge clamping.
+    create_jpeg(tmp_path / 'IMG_9000.JPG', 'dimgray', size=(2400, 1600))
+    create_jpeg(tmp_path / 'IMG_9001.JPG', 'blue', size=(2400, 1600))
 
     app = QApplication.instance() or QApplication([])
     viewer = ComparePhotoViewer()
@@ -500,7 +502,7 @@ def test_compare_photo_viewer_space_opens_active_photo_and_toggles_actual_size(
     text that tells users how to get back to the grid.
     """
     create_jpeg(tmp_path / 'IMG_9006.JPG', 'dimgray')
-    create_jpeg(tmp_path / 'IMG_9007.JPG', 'slategray')
+    create_jpeg(tmp_path / 'IMG_9007.JPG', 'slategray', size=(100, 80))
 
     app = QApplication.instance() or QApplication([])
     viewer = ComparePhotoViewer()
@@ -539,12 +541,20 @@ def test_compare_photo_viewer_space_opens_active_photo_and_toggles_actual_size(
     assert viewer.help_label.text() == COMPARE_SELECTED_HELP_TEXT
     assert viewer.lock_zoom_button.isHidden() is True
     assert viewer.selected_viewer._mode == 'fit'
+    selected_fit_scale = viewer.selected_viewer._fit_scale
+    assert selected_fit_scale > 1.0
+    assert viewer.selected_viewer._current_scale == pytest.approx(
+        selected_fit_scale
+    )
 
     viewer.handle_zoom_toggle_shortcut()
     app.processEvents()
 
     assert viewer.selected_viewer._mode == 'manual'
-    assert viewer.selected_viewer.current_zoom_factor() > 1.0
+    assert viewer.selected_viewer.current_zoom_factor() == pytest.approx(
+        1.0 / selected_fit_scale
+    )
+    assert viewer.selected_viewer.current_zoom_factor() < 1.0
     assert viewer.selected_viewer._current_scale == pytest.approx(1.0)
     assert all(
         not grid_viewer.should_preserve_zoom()
@@ -555,12 +565,18 @@ def test_compare_photo_viewer_space_opens_active_photo_and_toggles_actual_size(
     app.processEvents()
 
     assert viewer.selected_viewer._mode == 'fit'
+    assert viewer.selected_viewer._current_scale == pytest.approx(
+        selected_fit_scale
+    )
 
     viewer.handle_space_shortcut()
     app.processEvents()
 
     assert viewer.selected_viewer._mode == 'manual'
-    assert viewer.selected_viewer.current_zoom_factor() > 1.0
+    assert viewer.selected_viewer.current_zoom_factor() == pytest.approx(
+        1.0 / selected_fit_scale
+    )
+    assert viewer.selected_viewer.current_zoom_factor() < 1.0
     assert viewer.selected_viewer._current_scale == pytest.approx(1.0)
     assert (
         viewer.selected_viewer.normalized_viewport_center()

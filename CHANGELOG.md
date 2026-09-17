@@ -10,6 +10,10 @@
 
 - Changed
 
+  - First-time focus inspection and compare-grid focus zoom now start at true
+    100%, clamping edge AF positions instead of increasing magnification.
+  - Low-resolution photos now scale up in fit-to-window views so they fill the
+    current viewer, while 100% inspection remains true actual size.
   - `Show Clipping` now warns only when a displayed RGB channel reaches exactly
     `255` or `0`. Red marks pixels where all three channels are `255`, while
     purple marks pixels where only one or two channels are `255`. Blue marks
@@ -19,6 +23,13 @@
 
 - Fixed
 
+  - Zoom-out no longer enlarges low-resolution photos from 100% inspection.
+    Zoom steps now stop at the smaller of fit-to-window and 100%, and stepping
+    at a limit leaves the current inspection state unchanged.
+  - Fit/manual toggles now remain reversible when inspection is the same size
+    as, or smaller than, fit view. Returning to fit restores click-and-hold
+    inspection, and manual zoom below fit survives navigation, split-view
+    transitions, and compare-view rebuilding.
   - Windows opened during deferred app-quit cleanup now require their own quit
     confirmation instead of inheriting the earlier approval.
   - App-quit confirmations now follow the active EasyLoupe window when one is

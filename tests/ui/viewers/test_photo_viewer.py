@@ -18,6 +18,17 @@ if TYPE_CHECKING:
 CLIPPING_OVERLAY_TIMEOUT_MS = 5_000
 
 
+def _expected_fit_scale(
+        viewer: photo_viewer_module.PhotoViewer,
+        image_size: tuple[int, int],
+) -> float:
+    viewport = viewer.viewport().size()
+    return min(
+        viewport.width() / image_size[0],
+        viewport.height() / image_size[1],
+    )
+
+
 def test_photo_viewer_restores_last_manual_view_for_same_photo_and_not_other_photo(
         tmp_path: Path,
 ) -> None:
@@ -684,6 +695,12 @@ def test_photo_viewer_focus_point_marker_can_be_disabled_and_stays_screen_sized(
 def test_photo_viewer_focus_zoom_starts_from_af_point(
         tmp_path: Path,
 ) -> None:
+    """
+    Initial inspection clamps an edge AF point while remaining at 100%.
+
+    Centering this AF point exactly would require extra magnification, which
+    would make the initial inspection scale depend on the focus location.
+    """
     create_jpeg(tmp_path / 'IMG_7006.JPG', 'white')
 
     app = QApplication.instance() or QApplication([])
@@ -696,23 +713,23 @@ def test_photo_viewer_focus_zoom_starts_from_af_point(
     viewer.toggle_focus_zoom()
 
     assert viewer._mode == 'manual'
-    assert viewer.normalized_viewport_center() == pytest.approx((0.8, 0.2))
+    assert viewer._current_scale == pytest.approx(1.0)
+    assert viewer.normalized_viewport_center() == pytest.approx((0.75, 0.25))
 
     viewer.close()
 
 
-def test_photo_viewer_actual_size_toggle_returns_to_fit_at_fit_scale_one(
+def test_photo_viewer_fit_view_upscales_small_photo_and_recomputes_on_resize(
         tmp_path: Path,
 ) -> None:
     """
-    Verify actual-size zoom toggles back to fit when fit scale is already 1.0.
+    Verify fit view can scale a low-resolution photo above actual size.
 
-    For example, a 500x400 photo inside a 1000x800 viewer already fits at 100%,
-    so fit view and actual-size view both use scale 1.0 and users will not see
-    a visual scale change. The selected-photo compare shortcut still needs to
-    advance internal state as fit -> actual-size -> fit.
+    The expected scale comes from the runtime Qt viewport so the assertion
+    stays stable across native and CI backends with different widget metrics.
     """
-    create_jpeg(tmp_path / 'IMG_7012.JPG', 'white', size=(100, 80))
+    image_size = (100, 80)
+    create_jpeg(tmp_path / 'IMG_7012.JPG', 'white', size=image_size)
 
     app = QApplication.instance() or QApplication([])
     viewer = photo_viewer_module.PhotoViewer()
@@ -722,18 +739,66 @@ def test_photo_viewer_actual_size_toggle_returns_to_fit_at_fit_scale_one(
 
     viewer.set_photo(tmp_path / 'IMG_7012.JPG', (0.5, 0.5))
 
+    fit_scale = _expected_fit_scale(viewer, image_size)
+
     assert viewer._mode == 'fit'
-    assert viewer._fit_scale == pytest.approx(1.0)
+    assert fit_scale > 1.0
+    assert viewer._fit_scale == pytest.approx(fit_scale)
+    assert viewer._current_scale == pytest.approx(fit_scale)
+
+    viewer.resize(220, 240)
+    app.processEvents()
+
+    resized_fit_scale = _expected_fit_scale(viewer, image_size)
+
+    assert resized_fit_scale > 1.0
+    assert resized_fit_scale != pytest.approx(fit_scale)
+    assert viewer._mode == 'fit'
+    assert viewer._fit_scale == pytest.approx(resized_fit_scale)
+    assert viewer._current_scale == pytest.approx(resized_fit_scale)
+
+    viewer.close()
+
+
+def test_photo_viewer_actual_size_toggle_returns_to_upscaled_fit(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify 100% inspection remains absolute when fit view is upscaled.
+
+    A low-resolution photo may open above actual size to fill the viewer.
+    Toggling actual-size inspection should shrink to one image pixel per screen
+    pixel, then return to the upscaled fit view on the next toggle.
+    """
+    image_size = (100, 80)
+    create_jpeg(tmp_path / 'IMG_7012.JPG', 'white', size=image_size)
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer()
+    viewer.resize(320, 240)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_photo(tmp_path / 'IMG_7012.JPG', (0.5, 0.5))
+    fit_scale = _expected_fit_scale(viewer, image_size)
+
+    assert viewer._mode == 'fit'
+    assert fit_scale > 1.0
+    assert viewer._current_scale == pytest.approx(fit_scale)
 
     viewer.toggle_actual_size_zoom()
 
     assert viewer._mode == 'manual'
+    assert viewer.is_actual_size_zoom_active() is True
     assert viewer._current_scale == pytest.approx(1.0)
+    assert viewer.current_zoom_factor() == pytest.approx(1.0 / fit_scale)
+    assert viewer.current_zoom_factor() < 1.0
 
     viewer.toggle_actual_size_zoom()
 
     assert viewer._mode == 'fit'
-    assert viewer._current_scale == pytest.approx(1.0)
+    assert viewer.is_actual_size_zoom_active() is False
+    assert viewer._current_scale == pytest.approx(fit_scale)
 
     viewer.close()
 
@@ -1139,7 +1204,9 @@ def test_photo_viewer_pending_focus_concrete_center_is_cleared_on_focus_update(
     viewer.toggle_focus_zoom()
 
     assert stale_center is not None
-    assert viewer.normalized_viewport_center() == pytest.approx((0.2, 0.8))
+    # The newly loaded edge AF point is clamped rather than enlarging 100%.
+    assert viewer._current_scale == pytest.approx(1.0)
+    assert viewer.normalized_viewport_center() == pytest.approx((0.25, 0.75))
     assert viewer.normalized_viewport_center() != pytest.approx(stale_center)
 
     viewer.close()
@@ -1324,6 +1391,59 @@ def test_photo_viewer_hold_zoom_temporarily_zooms_pans_and_restores_fit(
     assert viewer._hold_zoom_active is False
     assert viewer._mode == 'fit'
     assert viewer.visible_region_rect() is None
+
+    viewer.close()
+
+
+def test_photo_viewer_hold_zoom_uses_true_actual_size_for_upscaled_fit(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify hold-click inspection uses true 100% from an upscaled fit view.
+
+    Low-resolution photos can now open above actual size, but the temporary
+    hold inspection is still a one-image-pixel-per-screen-pixel view and should
+    restore the upscaled fit view on release.
+    """
+    image_size = (100, 80)
+    create_jpeg(tmp_path / 'IMG_7027.JPG', 'white', size=image_size)
+
+    app = QApplication.instance() or QApplication([])
+    viewer = photo_viewer_module.PhotoViewer(hold_zoom_enabled=True)
+    viewer.resize(320, 240)
+    viewer.show()
+    app.processEvents()
+
+    viewer.set_photo(tmp_path / 'IMG_7027.JPG', (0.5, 0.5))
+    fit_scale = _expected_fit_scale(viewer, image_size)
+
+    assert viewer._mode == 'fit'
+    assert fit_scale > 1.0
+    assert viewer._current_scale == pytest.approx(fit_scale)
+
+    QTest.mousePress(
+        viewer.viewport(),
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(160, 120),
+    )
+    app.processEvents()
+
+    assert viewer._hold_zoom_active is True
+    assert viewer._current_scale == pytest.approx(1.0)
+    assert viewer.visible_region_rect() is not None
+
+    QTest.mouseRelease(
+        viewer.viewport(),
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(160, 120),
+    )
+    app.processEvents()
+
+    assert viewer._hold_zoom_active is False
+    assert viewer._mode == 'fit'
+    assert viewer._current_scale == pytest.approx(fit_scale)
 
     viewer.close()
 

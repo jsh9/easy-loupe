@@ -539,7 +539,8 @@ def test_viewer_zoom_and_pan_shortcuts_change_scale_and_center(
         photo_specs=[('IMG_K500', 'dimgray')],
     )
 
-    window.viewer.toggle_focus_zoom()
+    # Start with a crop so the keyboard pan assertions require real motion.
+    window.viewer.apply_manual_view(4.0, None)
     app.processEvents()
 
     scale_before = window.viewer._current_scale
@@ -600,7 +601,8 @@ def test_main_window_recenter_zoom_shortcut_targets_single_manual_view(
     window._display_current_photo()
 
     window.viewer.toggle_focus_zoom()
-    window.viewer.zoom_step(1.25)
+    # Keep AF targets reachable at this scale to isolate recenter behavior.
+    window.viewer.apply_manual_view(4.0, None)
     window.viewer.pan_by(-40, 30)
     scale_before = window.viewer._current_scale
     remembered_center = window.viewer.normalized_viewport_center()
@@ -645,7 +647,8 @@ def test_main_window_recenter_zoom_shortcut_targets_split_zoom_pane(
     window.split_mode_shortcut.activated.emit()
     app.processEvents()
 
-    window.viewer.zoom_step(1.25)
+    # Keep AF targets reachable at this scale to isolate recenter behavior.
+    window.viewer.apply_manual_view(4.0, None)
     window.viewer.pan_by(-40, 30)
     scale_before = window.viewer.split_zoom_viewer.current_zoom_factor()
     remembered_center = window.viewer.normalized_viewport_center()
@@ -703,7 +706,8 @@ def test_main_window_recenter_zoom_shortcut_does_not_change_navigation_handoff(
     window._display_current_photo()
 
     window.viewer.toggle_focus_zoom()
-    window.viewer.zoom_step(1.25)
+    # Keep AF targets reachable at this scale to isolate recenter behavior.
+    window.viewer.apply_manual_view(4.0, None)
     window.viewer.pan_by(40, -30)
     zoom_factor = window.viewer._current_scale
     remembered_center = window.viewer.normalized_viewport_center()
@@ -749,7 +753,8 @@ def test_main_window_reset_zoom_centers_shortcut_uses_next_photo_focus_point(
     window._display_current_photo()
 
     window.viewer.toggle_focus_zoom()
-    window.viewer.zoom_step(1.25)
+    # Keep AF targets reachable at this scale to isolate recenter behavior.
+    window.viewer.apply_manual_view(4.0, None)
     window.viewer.pan_by(40, -30)
     zoom_factor = window.viewer._current_scale
     remembered_center = window.viewer.normalized_viewport_center()
@@ -837,7 +842,8 @@ def test_main_window_reset_zoom_centers_survives_multiple_photo_hops(
     window._display_current_photo()
 
     window.viewer.toggle_focus_zoom()
-    window.viewer.zoom_step(2.0)
+    # Keep AF targets reachable at this scale to isolate recenter behavior.
+    window.viewer.apply_manual_view(4.0, None)
     window.viewer.pan_by(40, -30)
 
     monkeypatch.setattr(
