@@ -280,6 +280,11 @@ Major logic:
   hidden pane may temporarily hit the 100% floor; keep the requested factor in
   memory so later resizing restores the intended view. `center=None` keeps
   AF/default-center intent, including through `zoom_to_normalized_center()`.
+- Returning to Fit through either toggle or the zoom-out floor preserves
+  existing manual memory, including its AF sentinel and any below-fit factor
+  temporarily clamped by resize. Deliberate zoom/pan/setter actions save the
+  view; a Fit transition captures only an otherwise unsaved manual view. Legacy
+  `preserve_zoom` loads use the same recording path as full handoffs.
 - Compare-grid `Z` uses explicit actual-size inspection for every pane. Compare
   clicks distinguish fit, actual-size, and manual modes without using a
   fit-relative zoom threshold. Explicit 100% remains absolute across resize and
@@ -297,11 +302,15 @@ Major logic:
   memory. Pressing `Shift+F` again restores the remembered manual center when
   one exists.
 - If centering an edge AF point requires extra live zoom, that temporary scale
-  must not be saved unless the user explicitly pans.
+  must not be saved unless the user explicitly pans. Leaving the temporary view
+  through Fit preserves the original memory for AF-centered and manually
+  centered views alike.
 - `Ctrl+Shift+F` resets remembered manual zoom centers to each photo's AF point
   or image center while preserving remembered zoom levels. A remembered center
   of `None` means resolve to the current photo's AF/default center, so the
-  intent survives late-loading AF metadata.
+  intent survives late-loading AF metadata. The active pane restores the saved
+  factor and clamps the AF position without increasing magnification, even
+  after temporary recentering or a resize clamp.
 - Viewer zoom and pan shortcuts target only the active zoomed pane. In split
   view, that means the right pane; the left fit pane remains unchanged.
 - Pressing `Space` while in split view promotes the right pane into single-pane
@@ -586,9 +595,10 @@ issuing another interruptible Quit request.
 - Cover fit scales below, equal to, and above 100% in zoom/toggle tests. Verify
   main-container mode and hold eligibility after repeated toggles, limit
   no-ops, below-fit memory across resize/navigation/split handoff, mixed-size
-  compare panes, and selected-compare restoration. Pan and minimap tests must
-  explicitly create a cropped view because first-time 100% may show the whole
-  photo.
+  compare panes, and selected-compare restoration. Include returning to Fit
+  after a resize floor or transient AF recenter, plus reset-centers in those
+  states. Pan and minimap tests must explicitly create a cropped view because
+  first-time 100% may show the whole photo.
 - Verify `Shift+F` is view-only unless the user pans, including edge AF points
   that require extra live zoom and resize while temporarily recentered.
 - Verify `Ctrl+Shift+F` preserves remembered zoom levels, resets centers to

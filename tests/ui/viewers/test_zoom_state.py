@@ -457,29 +457,183 @@ def test_compare_grid_actual_size_survives_resize_and_toggles_back(
 
 
 @pytest.mark.parametrize('restore_path', ['setter', 'normalized'])
+@pytest.mark.parametrize('fit_toggle', ['focus', 'actual'])
 def test_restoring_below_fit_memory_does_not_save_temporary_floor(
-        small_viewer: PhotoViewer, restore_path: str
+        small_viewer: PhotoViewer, restore_path: str, fit_toggle: str
 ) -> None:
     """
     Retain a restored factor while a smaller pane clamps its live scale.
 
-    Compare rebuilding temporarily shrinks the hidden selected pane. Saving
-    that 100% clamp would magnify the photo when its full layout returns.
+    Returning to Fit after a resize must not save the temporary 100% clamp.
+    Both toggles must preserve concrete centers and AF-centered intent.
     """
     viewer = small_viewer
     app = QApplication.instance()
-    viewer.resize(200, 160)
-    app.processEvents()
     if restore_path == 'setter':
         viewer.set_manual_view(0.3125, (0.5, 0.5))
     else:
         viewer.zoom_to_normalized_center(None, zoom_factor=0.3125)
 
+    memory = dict(viewer._manual_views)
+    assert viewer._current_scale == pytest.approx(1.25)
+    viewer.resize(200, 160)
+    app.processEvents()
     assert viewer._current_scale == pytest.approx(1.0)
     assert viewer.current_manual_view().zoom_factor == pytest.approx(0.3125)
+    if fit_toggle == 'focus':
+        viewer.toggle_focus_zoom()
+    else:
+        viewer.toggle_actual_size_zoom()
+
+    assert viewer.is_fit_view() is True
+    assert viewer._manual_views == memory
     viewer.resize(400, 320)
     app.processEvents()
+    viewer.toggle_focus_zoom()
     assert viewer._current_scale == pytest.approx(1.25)
+    assert viewer._manual_views == memory
+
+
+@pytest.mark.parametrize(
+    'focus_point', [(0.5, 0.5), (0.05, 0.9)], ids=['center', 'edge']
+)
+@pytest.mark.parametrize('state', ['manual', 'recentered', 'resized'])
+def test_reset_centers_preserves_below_fit_zoom(
+        small_viewer: PhotoViewer,
+        focus_point: tuple[float, float],
+        state: str,
+) -> None:
+    """
+    Reset only centers, including after temporary recentering or a resize.
+
+    The active photo must retain its saved factor rather than an AF-fitting
+    scale or a temporary floor; inactive legacy entries must retain theirs.
+    """
+    viewer = small_viewer
+    app = QApplication.instance()
+    viewer.set_focus_point(focus_point)
+    viewer.set_manual_view(0.3125, (0.5, 0.5))
+    viewer._manual_views['other'] = (2.0, (0.2, 0.8))
+    if state == 'recentered':
+        viewer.toggle_recenter_current_view()
+    elif state == 'resized':
+        viewer.resize(200, 160)
+        app.processEvents()
+
+    viewer.reset_manual_view_centers()
+
+    assert viewer.current_manual_view() == ManualView(0.3125, None)
+    assert viewer._manual_views['other'] == ManualView(2.0, None)
+    assert viewer._transient_recenter_active is False
+    assert viewer._current_scale == pytest.approx(
+        1.0 if state == 'resized' else 1.25
+    )
+    assert viewer.normalized_viewport_center() == pytest.approx((0.5, 0.5))
+    viewer.resize(400, 320)
+    app.processEvents()
+    viewer.toggle_focus_zoom()
+    viewer.toggle_focus_zoom()
+    assert viewer._current_scale == pytest.approx(1.25)
+    assert viewer.current_manual_view() == ManualView(0.3125, None)
+
+
+@pytest.mark.parametrize('focus_center', [True, False], ids=['af', 'manual'])
+@pytest.mark.parametrize('fit_exit', ['focus', 'actual', 'zoom-out'])
+def test_return_to_fit_preserves_pre_recenter_memory(
+        tmp_path: Path, focus_center: bool, fit_exit: str
+) -> None:
+    """
+    Exiting an edge AF recenter through Fit must restore the original 100%.
+
+    AF sentinel memory needs the same protection as concrete centers, across
+    both toggle APIs and the zoom-out path that reaches Fit.
+    """
+    path = tmp_path / 'edge.jpg'
+    create_jpeg(path, 'gray', size=(640, 480))
+    app = QApplication.instance() or QApplication([])
+    viewer = PhotoViewer()
+    viewer.resize(320, 240)
+    viewer.show()
+    app.processEvents()
+    viewer.set_photo(path, (0.9, 0.5))
+    try:
+        viewer.toggle_focus_zoom()
+        if not focus_center:
+            viewer.set_manual_view(2.0, (0.75, 0.5))
+
+        memory = dict(viewer._manual_views)
+        viewer.toggle_recenter_current_view()
+        assert viewer._current_scale == pytest.approx(2.5)
+        if fit_exit == 'focus':
+            viewer.toggle_focus_zoom()
+        elif fit_exit == 'actual':
+            viewer.toggle_actual_size_zoom()
+        else:
+            viewer.zoom_step(0.1)
+
+        assert viewer.is_fit_view() is True
+        assert viewer._manual_views == memory
+        viewer.toggle_focus_zoom()
+        assert viewer._current_scale == pytest.approx(1.0)
+        assert viewer.current_manual_view().zoom_factor == pytest.approx(2.0)
+        assert viewer._manual_views == memory
+    finally:
+        viewer.close()
+        app.processEvents()
+
+
+@pytest.mark.parametrize('center', [None, (0.2, 0.8)], ids=['af', 'concrete'])
+def test_legacy_preserve_zoom_records_carried_view(
+        small_viewer: PhotoViewer,
+        tmp_path: Path,
+        center: tuple[float, float] | None,
+) -> None:
+    """
+    Save legacy carryover before a fit transition trusts existing memory.
+
+    Previously visited photos may have older tuple memory; carrying a new view
+    must replace it without recording the new photo's temporary floor.
+    """
+    viewer = small_viewer
+    path = tmp_path / 'next.jpg'
+    create_jpeg(path, 'gray', size=(200, 160))
+    viewer._manual_views[str(path)] = (3.0, (0.7, 0.3))
+    viewer.toggle_focus_zoom()
+    viewer.zoom_step(1.25)
+    viewer.set_photo(
+        path, (0.1, 0.9), preserve_zoom=True, preserved_center=center
+    )
+    assert viewer._current_scale == pytest.approx(1.0)
+    assert viewer.current_manual_view() == ManualView(0.3125, center)
+    viewer.toggle_focus_zoom()
+    viewer.toggle_focus_zoom()
+    assert viewer.current_manual_view() == ManualView(0.3125, center)
+
+
+def test_selected_compare_fit_toggle_preserves_resize_clamp_memory(
+        mixed_compare_viewer: ComparePhotoViewer,
+) -> None:
+    """Selected compare Space must not save a smaller window's 100% floor."""
+    viewer = mixed_compare_viewer
+    app = QApplication.instance()
+    viewer.handle_space_shortcut()
+    app.processEvents()
+    viewer.handle_space_shortcut()
+    viewer.zoom_step(1.25)
+    pane = viewer.selected_viewer
+    memory = pane.current_manual_view()
+    viewer.resize(400, 320)
+    app.processEvents()
+    assert pane._current_scale == pytest.approx(1.0)
+    viewer.handle_space_shortcut()
+    assert pane.is_fit_view() is True
+    viewer.resize(800, 640)
+    app.processEvents()
+    # Compare Space enters explicit 100%; use manual restore to inspect the
+    # saved view independently of that absolute-size shortcut contract.
+    pane.restore_or_focus_manual_view()
+    assert pane.current_manual_view() == memory
+    assert pane._current_scale == pytest.approx(1.25)
 
 
 @pytest.mark.parametrize('locked', [True, False], ids=['locked', 'unlocked'])

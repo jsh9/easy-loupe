@@ -818,6 +818,43 @@ def test_main_window_reset_zoom_centers_shortcut_uses_next_photo_focus_point(
     window.close()
 
 
+def test_main_window_reset_shortcut_preserves_small_photo_zoom(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Confirmed reset must preserve below-fit zoom through the main window."""
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_SMALL', 'dimgray')],
+    )
+    image_path = tmp_path / 'IMG_SMALL.JPG'
+    create_jpeg(image_path, 'dimgray', size=(100, 80))
+    window.library.get_photo('IMG_SMALL').focus_point = (0.05, 0.9)
+    window.viewer.setFixedSize(400, 320)
+    app.processEvents()
+    window._display_current_photo(force_fit=True)
+    window.viewer.toggle_focus_zoom()
+    window.viewer.zoom_step(1.25)
+    monkeypatch.setattr(
+        QMessageBox, 'question', lambda *_args: QMessageBox.Yes
+    )
+    try:
+        window.reset_zoom_centers_shortcut.activated.emit()
+        app.processEvents()
+
+        assert window.viewer._mode == 'single-manual'
+        assert window.viewer.single_viewer._current_scale == pytest.approx(
+            1.25
+        )
+        memory = window.viewer.current_manual_view()
+        assert memory is not None
+        assert memory.zoom_factor == pytest.approx(0.3125)
+        assert memory.center is None
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_main_window_reset_zoom_centers_survives_multiple_photo_hops(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

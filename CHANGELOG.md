@@ -29,7 +29,9 @@
   - Fit/manual toggles now remain reversible when inspection is the same size
     as, or smaller than, fit view. Returning to fit restores click-and-hold
     inspection, and manual zoom below fit survives navigation, split-view
-    transitions, and compare-view rebuilding.
+    transitions, compare-view rebuilding, and toggling to fit after resizing.
+    Leaving temporary AF recentering through fit preserves the original zoom,
+    and resetting centers retains saved magnification even below fit.
   - Windows opened during deferred app-quit cleanup now require their own quit
     confirmation instead of inheriting the earlier approval.
   - App-quit confirmations now follow the active EasyLoupe window when one is
