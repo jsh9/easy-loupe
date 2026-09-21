@@ -23,6 +23,9 @@
 
 - Fixed
 
+  - Filtered scene merges now preserve the visible selection and vertical strip
+    position when a hidden member sorts before the visible scene cover, instead
+    of jumping to the first photo in the strip.
   - Zoom-out no longer enlarges low-resolution photos from 100% inspection.
     Zoom steps now stop at the smaller of fit-to-window and 100%, and stepping
     at a limit leaves the current inspection state unchanged.

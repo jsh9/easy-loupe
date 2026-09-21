@@ -439,6 +439,10 @@ Major logic:
   keep keyboard focus on the browse grid after the lists are rebuilt.
 - Scene merges from the vertical thumbnail strip expand selected scene stacks
   to all photos in those stacks.
+- Scene merges restore selection to the first visible selected photo and use it
+  to preserve the vertical strip position. Hidden members included in a
+  filtered merge must not become the selection or scroll anchor, even when they
+  sort before the visible cover by capture time.
 - Scene merges from the horizontal scene strip use exact in-scene photo
   selection: selecting only part of the current scene is blocked as an
   attempted split, while selecting the full horizontal scene can merge that
