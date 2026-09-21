@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.4.5] - 2026-09-21
+
 - Added
 
   - `Organize Photos` now remembers the last accepted workflow controls across
@@ -12,8 +14,9 @@
 
   - First-time focus inspection and compare-grid focus zoom now start at true
     100%, clamping edge AF positions instead of increasing magnification.
-  - Low-resolution photos now scale up in fit-to-window views so they fill the
-    current viewer, while 100% inspection remains true actual size.
+  - Low-resolution photos now scale up to fit the viewer, while 100% inspection
+    remains actual size. Zoom state is preserved across navigation, resizing,
+    and view changes.
   - `Show Clipping` now warns only when a displayed RGB channel reaches exactly
     `255` or `0`. Red marks pixels where all three channels are `255`, while
     purple marks pixels where only one or two channels are `255`. Blue marks
@@ -26,15 +29,10 @@
   - Filtered scene merges now preserve the visible selection and vertical strip
     position when a hidden member sorts before the visible scene cover, instead
     of jumping to the first photo in the strip.
-  - Zoom-out no longer enlarges low-resolution photos from 100% inspection.
-    Zoom steps now stop at the smaller of fit-to-window and 100%, and stepping
-    at a limit leaves the current inspection state unchanged.
-  - Fit/manual toggles now remain reversible when inspection is the same size
-    as, or smaller than, fit view. Returning to fit restores click-and-hold
-    inspection, and manual zoom below fit survives navigation, split-view
-    transitions, compare-view rebuilding, and toggling to fit after resizing.
-    Leaving temporary AF recentering through fit preserves the original zoom,
-    and resetting centers retains saved magnification even below fit.
+  - Fit/manual toggles now return to Fit when inspection and Fit have equal
+    magnification.
+  - Returning to Fit after temporary autofocus recentering preserves remembered
+    zoom, and resetting focus centers preserves magnification.
   - Windows opened during deferred app-quit cleanup now require their own quit
     confirmation instead of inheriting the earlier approval.
   - App-quit confirmations now follow the active EasyLoupe window when one is
