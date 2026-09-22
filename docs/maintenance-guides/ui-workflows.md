@@ -595,7 +595,10 @@ issuing another interruptible Quit request.
   follows current-photo changes, hides during browse/compare/busy states, and
   remains readable when the viewer is resized.
 - Verify first-time focus zoom uses the AF point while remembered manual zoom
-  remains higher priority, and edge AF points clamp at true 100%.
+  remains higher priority, and edge AF points clamp at true 100%. Derive
+  expected edge-clamped centers from the actual viewport after showing the
+  widget; native CI desktops can constrain requested window sizes. Cover a
+  compact window as well as the larger inspection layout.
 - Cover fit scales below, equal to, and above 100% in zoom/toggle tests. Verify
   main-container mode and hold eligibility after repeated toggles, limit
   no-ops, below-fit memory across resize/navigation/split handoff, mixed-size

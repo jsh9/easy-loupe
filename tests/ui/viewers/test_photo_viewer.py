@@ -1169,8 +1169,14 @@ def test_photo_viewer_pending_focus_reset_center_survives_focus_update(
     viewer.close()
 
 
+@pytest.mark.parametrize(
+    'viewer_size',
+    [(1200, 800), (1024, 650)],
+    ids=['large-window', 'compact-window'],
+)
 def test_photo_viewer_pending_focus_concrete_center_is_cleared_on_focus_update(
         tmp_path: Path,
+        viewer_size: tuple[int, int],
 ) -> None:
     """
     Verify concrete fallback centers do not survive late AF metadata.
@@ -1180,11 +1186,12 @@ def test_photo_viewer_pending_focus_concrete_center_is_cleared_on_focus_update(
     the new AF point rather than the stale fallback-centered pan.
     """
     image_path = tmp_path / 'IMG_7022.JPG'
-    create_jpeg(image_path, 'white', size=(2400, 1600))
+    image_size = (2400, 1600)
+    create_jpeg(image_path, 'white', size=image_size)
 
     app = QApplication.instance() or QApplication([])
     viewer = photo_viewer_module.PhotoViewer()
-    viewer.resize(1200, 800)
+    viewer.resize(*viewer_size)
     viewer.show()
     app.processEvents()
 
@@ -1206,7 +1213,16 @@ def test_photo_viewer_pending_focus_concrete_center_is_cleared_on_focus_update(
     assert stale_center is not None
     # The newly loaded edge AF point is clamped rather than enlarging 100%.
     assert viewer._current_scale == pytest.approx(1.0)
-    assert viewer.normalized_viewport_center() == pytest.approx((0.25, 0.75))
+    # Native desktops can constrain the requested window size. At 100%, each
+    # edge needs half the actual viewport in image pixels around its center.
+    viewport = viewer.viewport().size()
+    expected_center = (
+        max(0.2, viewport.width() / (2 * image_size[0])),
+        min(0.8, 1 - viewport.height() / (2 * image_size[1])),
+    )
+    assert viewer.normalized_viewport_center() == pytest.approx(
+        expected_center
+    )
     assert viewer.normalized_viewport_center() != pytest.approx(stale_center)
 
     viewer.close()
