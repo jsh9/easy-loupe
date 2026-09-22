@@ -22,11 +22,16 @@ while culling.
 
 ## 1. Fit View And Manual Zoom
 
-Photos open fit-to-window by default. Press `Space` or `Z` to enter manual
-zoom, then press it again to return to fit view.
+Photos open fit-to-window by default. Low-resolution photos are enlarged when
+needed to fill the current viewer. Press `Space` or `Z` to enter manual zoom,
+then press it again to return to fit view. First-time inspection starts at 100
+percent near the AF point or image center. Near the edges, the viewing position
+is clamped instead of increasing magnification.
 
 Manual zoom is remembered per photo. Returning to a photo restores its last
-manual zoom position and scale.
+manual zoom position and scale. Remembered magnification stays relative to
+fit-to-window when resizing or switching between single and split views.
+Explicit 100 percent compare inspection stays at actual size when resized.
 
 Use:
 
@@ -35,8 +40,20 @@ Use:
 - `W`, `A`, `S`, and `D` to pan.
 - `Ctrl+C`/`Cmd+C` to copy the whole viewed image to the clipboard.
 
+Zoom-in enlarges by 25 percent per step; zoom-out reduces magnification by 20
+percent. Zoom-out stops at the smaller of fit-to-window and 100 percent. At a
+zoom limit, pressing the corresponding key leaves the view unchanged. For
+example, if a small photo fits at 400 percent, zoom-out from fit goes to 320
+percent; zoom-in from 100 percent goes to 125 percent.
+
+Fit and inspection are separate modes even when they look the same. Pressing
+`Space` or `Z` again always returns manual inspection to fit view. Panning has
+no effect while the whole image is visible.
+
 In fit view, click and hold on the photo to temporarily inspect that point at
-100 percent.
+true 100 percent. For low-resolution photos enlarged by fit view, this can make
+the image smaller while the mouse button is held. Releasing restores fit view
+without changing remembered manual zoom, including when resized during hold.
 
 ## 2. Split View
 

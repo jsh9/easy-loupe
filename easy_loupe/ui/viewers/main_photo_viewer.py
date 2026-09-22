@@ -300,15 +300,11 @@ class MainPhotoViewer(QWidget):
             self, zoom_factor: float, center: tuple[float, float] | None
     ) -> None:
         """Apply a manual zoom factor and center to the active zoom pane."""
-        use_focus_center = center is None
-        if center is None:
-            center = self._current_focus_point
-
+        # Pass AF intent through directly; a separate recenter could enlarge
+        # a below-fit handoff just to place an edge AF point at pane center.
         self._active_zoom_viewer().zoom_to_normalized_center(
             center, zoom_factor=zoom_factor
         )
-        if use_focus_center:
-            self._active_zoom_viewer().recenter_manual_view()
 
         self._sync_mode()
 

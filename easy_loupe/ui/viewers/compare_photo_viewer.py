@@ -31,7 +31,6 @@ if TYPE_CHECKING:
 DEFAULT_COMPARE_PHOTO_LIMIT = 8
 COMPARE_PHOTO_LIMIT_OPTIONS = (2, 3, 4, 6, 8, 10, 12, 16, 20)
 MIN_COMPARE_PHOTO_COUNT = 2
-COMPARE_ZOOM_EPSILON = 1.001
 COMPARE_PANE_DRAG_THRESHOLD_PX = 4.0
 SMALL_GRID_MAX_PHOTOS = 4
 MEDIUM_GRID_MAX_PHOTOS = 6
@@ -454,10 +453,9 @@ class ComparePhotoViewer(QWidget):
             manual_view = state.manual_view
             if manual_view.center is None:
                 self.selected_viewer.zoom_to_normalized_center(
-                    photo.focus_point,
+                    None,
                     zoom_factor=manual_view.zoom_factor,
                 )
-                self.selected_viewer.recenter_manual_view()
             else:
                 self.selected_viewer.set_manual_view(
                     manual_view.zoom_factor,
@@ -608,7 +606,7 @@ class ComparePhotoViewer(QWidget):
         if not self._viewers:
             return
 
-        if all(not viewer.should_preserve_zoom() for viewer in self._viewers):
+        if all(viewer.is_fit_view() for viewer in self._viewers):
             for viewer in self._viewers:
                 viewer.zoom_to_focus_point()
 
@@ -725,9 +723,14 @@ class ComparePhotoViewer(QWidget):
             return
 
         self._set_active_index(index)
-        zoom_factor = self._viewers[index].current_zoom_factor()
-        if zoom_factor <= COMPARE_ZOOM_EPSILON:
-            zoom_factor = None
+        source = self._viewers[index]
+        # Preserve the source's inspection type across locked panes. A manual
+        # factor below 1 is valid for small photos, so treating it as Fit would
+        # reset a custom zoom to 100% on every click.
+        actual_size = (
+            source.is_fit_view() or source.is_actual_size_zoom_active()
+        )
+        zoom_factor = source.current_zoom_factor()
 
         if self._locked_zoom:
             targets = self._viewers
@@ -735,7 +738,12 @@ class ComparePhotoViewer(QWidget):
             targets = [self._viewers[index]]
 
         for viewer in targets:
-            viewer.zoom_to_normalized_center(center, zoom_factor=zoom_factor)
+            if actual_size:
+                viewer.zoom_to_actual_size(center)
+            else:
+                viewer.zoom_to_normalized_center(
+                    center, zoom_factor=zoom_factor
+                )
 
     def _handle_viewer_drag(self, index: int, dx: float, dy: float) -> None:
         if index < 0 or index >= len(self._viewers):

@@ -195,8 +195,8 @@ Transition summary:
 - `Space` in compare grid opens the active compared photo alone in
   fit-to-window size.
 - `Space` or `Z` in selected-photo compare view toggles that photo between fit
-  view and 100% zoom. For a small photo that already fits at 100%, this changes
-  internal fit/inspection state without a visible scale change.
+  view and 100% zoom. Low-resolution photos can be larger in fit view than in
+  true 100% inspection because fit-to-window is allowed to upscale them.
 - `Z` in compare grid toggles every compared pane between fit view and
   AF-centered 100% zoom.
 - `Esc` while a selected compare photo is open returns to the comparison grid.
@@ -254,26 +254,63 @@ Major logic:
   restores its last manual zoom center and scale; a different photo gets its
   own remembered state or falls back to the extracted AF point.
 - A photo with no remembered manual view enters focus zoom around the extracted
-  AF point or image center. Remembered per-photo manual zoom state takes
-  priority when returning to a photo.
+  AF point or image center at scale 1.0. Edge AF positions clamp without
+  increasing the initial magnification. Remembered per-photo manual zoom state
+  takes priority when returning to a photo.
 - `Show AF point` is unchecked by default. When checked, the main viewer shows
   a fixed-screen-size red square at the photo's extracted AF point in fit view,
   manual/focus zoom, and both panes of split view.
 - The `F` shortcut toggles `Show AF point`.
+- Fit-to-window panes can upscale low-resolution photos above 100% so the
+  loaded image fills the current viewer area.
+- Fit/manual state is explicit: `is_fit_view()` and `should_preserve_zoom()`
+  must not infer mode from magnification. Manual inspection may be equal to or
+  smaller than fit; toggling back to fit must restore hold inspection even when
+  the scale does not change. Manual visible-region reporting returns the
+  full-image rectangle when the whole photo is visible, while fit clears it.
+- Zoom steps multiply the current scale by 1.25 or 0.8 and clamp between
+  `min(fit_scale, 1.0)` and the existing maximum. A step at a limit leaves
+  flags and memory unchanged. Reaching the minimum by zooming out returns to
+  fit only when fit is at or below 100%; crossing an upscaled fit scale stays
+  manual. Keyboard, minimap, and drag pan gestures are no-ops when the entire
+  photo is visible.
+- `ManualView.zoom_factor` and `current_zoom_factor()` remain relative to Fit.
+  Setters, resize restoration, navigation, and split/compare handoffs accept
+  factors below or equal to 1.0. Restoring a below-fit factor into a smaller or
+  hidden pane may temporarily hit the 100% floor; keep the requested factor in
+  memory so later resizing restores the intended view. `center=None` keeps
+  AF/default-center intent, including through `zoom_to_normalized_center()`.
+- Returning to Fit through either toggle or the zoom-out floor preserves
+  existing manual memory, including its AF sentinel and any below-fit factor
+  temporarily clamped by resize. Deliberate zoom/pan/setter actions save the
+  view; a Fit transition captures only an otherwise unsaved manual view. Legacy
+  `preserve_zoom` loads use the same recording path as full handoffs.
+- Compare-grid `Z` uses explicit actual-size inspection for every pane. Compare
+  clicks distinguish fit, actual-size, and manual modes without using a
+  fit-relative zoom threshold. Explicit 100% remains absolute across resize and
+  pan and does not replace manual memory; adjusting zoom enters manual
+  inspection. Existing above-fit manual centering and `Shift+F` transient
+  recenter behavior remain in effect.
 - In fit-to-window panes, left click-and-hold temporarily zooms to 100% while
-  anchoring the clicked image point under the cursor when possible. Near the
-  photo edges and corners, the viewport clamps inward to keep the zoomed view
-  inside the image bounds.
+  anchoring the clicked image point under the cursor when possible. For an
+  upscaled low-resolution fit view, this true 100% inspection can make the
+  image smaller while the mouse button is held. Near the photo edges and
+  corners, the viewport clamps inward to keep the zoomed view inside the image
+  bounds.
 - `Shift+F` in manual zoom temporarily recenters the active zoomed pane on the
   photo's AF point or image center without replacing remembered manual zoom
   memory. Pressing `Shift+F` again restores the remembered manual center when
   one exists.
 - If centering an edge AF point requires extra live zoom, that temporary scale
-  must not be saved unless the user explicitly pans.
+  must not be saved unless the user explicitly pans. Leaving the temporary view
+  through Fit preserves the original memory for AF-centered and manually
+  centered views alike.
 - `Ctrl+Shift+F` resets remembered manual zoom centers to each photo's AF point
   or image center while preserving remembered zoom levels. A remembered center
   of `None` means resolve to the current photo's AF/default center, so the
-  intent survives late-loading AF metadata.
+  intent survives late-loading AF metadata. The active pane restores the saved
+  factor and clamps the AF position without increasing magnification, even
+  after temporary recentering or a resize clamp.
 - Viewer zoom and pan shortcuts target only the active zoomed pane. In split
   view, that means the right pane; the left fit pane remains unchanged.
 - Pressing `Space` while in split view promotes the right pane into single-pane
@@ -402,6 +439,10 @@ Major logic:
   keep keyboard focus on the browse grid after the lists are rebuilt.
 - Scene merges from the vertical thumbnail strip expand selected scene stacks
   to all photos in those stacks.
+- Scene merges restore selection to the first visible selected photo and use it
+  to preserve the vertical strip position. Hidden members included in a
+  filtered merge must not become the selection or scroll anchor, even when they
+  sort before the visible cover by capture time.
 - Scene merges from the horizontal scene strip use exact in-scene photo
   selection: selecting only part of the current scene is blocked as an
   attempted split, while selecting the full horizontal scene can merge that
@@ -554,7 +595,17 @@ issuing another interruptible Quit request.
   follows current-photo changes, hides during browse/compare/busy states, and
   remains readable when the viewer is resized.
 - Verify first-time focus zoom uses the AF point while remembered manual zoom
-  remains higher priority.
+  remains higher priority, and edge AF points clamp at true 100%. Derive
+  expected edge-clamped centers from the actual viewport after showing the
+  widget; native CI desktops can constrain requested window sizes. Cover a
+  compact window as well as the larger inspection layout.
+- Cover fit scales below, equal to, and above 100% in zoom/toggle tests. Verify
+  main-container mode and hold eligibility after repeated toggles, limit
+  no-ops, below-fit memory across resize/navigation/split handoff, mixed-size
+  compare panes, and selected-compare restoration. Include returning to Fit
+  after a resize floor or transient AF recenter, plus reset-centers in those
+  states. Pan and minimap tests must explicitly create a cropped view because
+  first-time 100% may show the whole photo.
 - Verify `Shift+F` is view-only unless the user pans, including edge AF points
   that require extra live zoom and resize while temporarily recentered.
 - Verify `Ctrl+Shift+F` preserves remembered zoom levels, resets centers to

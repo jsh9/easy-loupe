@@ -40,13 +40,23 @@ Use:
 
 ## 3. Zoom And Inspection
 
-Press `Z` in the compare grid to toggle focus zoom for the compared panes. Use
-`-`, `=`, or `+` to zoom, and `W`, `A`, `S`, `D` to pan the active or locked
-panes. The lock button controls whether zoom and pan stay synchronized across
-panes.
+Press `Z` in the compare grid to toggle each compared pane between fit view and
+true 100 percent near its AF point. Edge positions are clamped, and small
+photos may shrink during inspection. Use `-`, `=`, or `+` to zoom, and `W`,
+`A`, `S`, `D` to pan the active or locked panes. The lock button controls
+whether zoom and pan stay synchronized across panes.
 
 Press `Space` to open the active photo alone. In that selected-photo view,
-press `Space` or `Z` to switch between fit view and 100 percent inspection.
+press `Space` or `Z` to switch between fit view and true 100 percent
+inspection. Low-resolution photos may be larger in fit view than in 100 percent
+inspection.
+
+The `+`/`=` and `-` controls always enlarge and shrink respectively, stopping
+at the zoom limits. The minimum is the smaller of fit-to-window and 100
+percent. Adjusting magnification enters manual zoom; clicking a compared photo
+preserves that manual scale even when it is below fit. Press `Z` in the grid,
+or `Space`/`Z` in selected-photo view, to return inspection to fit. Resizing or
+panning during explicit 100 percent inspection preserves actual size.
 
 ## 4. Leaving Compare View
 

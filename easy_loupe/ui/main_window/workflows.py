@@ -1375,6 +1375,9 @@ class MainWindowWorkflowMixin:
             )
             return
 
+        # Keep visible IDs for selection and scroll restoration because the
+        # expanded merge can begin with a hidden photo that has no list row.
+        selected_photo_ids = photo_ids.copy()
         if self._photo_filter_active():
             if not self._filtered_merge_selection_is_contiguous(
                 selection_source
@@ -1414,7 +1417,9 @@ class MainWindowWorkflowMixin:
             ):
                 return
 
-        thumbnail_anchor = self._capture_thumbnail_scroll_anchor(photo_ids[0])
+        thumbnail_anchor = self._capture_thumbnail_scroll_anchor(
+            selected_photo_ids[0]
+        )
         before_groups = self.library.scene_group_photo_ids()
         before_source = self.library.scene_source
         self.library.merge_photos_into_scene(photo_ids)
@@ -1434,7 +1439,7 @@ class MainWindowWorkflowMixin:
         self._metadata_redo_stack.clear()
         self.library.save_metadata()
         self._after_scene_change(
-            selected_photo_ids=photo_ids,
+            selected_photo_ids=selected_photo_ids,
             thumbnail_anchor=thumbnail_anchor,
         )
         self._refresh_metadata_history_actions()

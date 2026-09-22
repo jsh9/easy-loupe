@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Never
 
@@ -2374,6 +2375,106 @@ def test_merge_visible_vertical_cover_preserves_strip_position(
         'IMG_0012',
         'IMG_0013',
     ]
+
+    window.close()
+    del app
+
+
+@pytest.mark.parametrize(
+    'hidden_capture_seconds',
+    [115, 130],
+    ids=['hidden-first', 'visible-first'],
+)
+def test_filtered_merge_preserves_visible_selection_and_strip_position(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        hidden_capture_seconds: int,
+) -> None:
+    """
+    Keep the visible merged stack selected at its original strip position.
+
+    A hidden member can sort before the visible cover by capture time. Using
+    that hidden photo to restore selection loses the scroll anchor and makes
+    focus restoration fall back to the first row of the entire strip.
+    """
+    # Selection is set directly here; stale modifiers from earlier keyboard
+    # tests must not extend it to an unrelated row in the shared QApplication.
+    monkeypatch.setattr(
+        QApplication, 'keyboardModifiers', lambda: Qt.NoModifier
+    )
+    photo_ids = [f'IMG_{index:04d}' for index in range(40)]
+    cover_row = 12
+    cover_id, hidden_id, next_id = photo_ids[cover_row : cover_row + 3]
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[(photo_id, 'dimgray') for photo_id in photo_ids],
+        scene_groups=[
+            *[[photo_id] for photo_id in photo_ids[:cover_row]],
+            [cover_id, hidden_id],
+            *[[photo_id] for photo_id in photo_ids[cover_row + 2 :]],
+        ],
+    )
+    capture_start = datetime(2026, 1, 1, tzinfo=UTC)
+    for index, photo_id in enumerate(photo_ids):
+        window.library.get_photo(photo_id).capture_at = (
+            capture_start + timedelta(seconds=index * 10)
+        )
+
+    window.library.get_photo(hidden_id).capture_at = capture_start + timedelta(
+        seconds=hidden_capture_seconds
+    )
+    window.library.set_sort_order(
+        sort_mode=PHOTO_SORT_MODE_CAPTURE_TIME,
+        sort_reversed=False,
+    )
+    expected_group = [
+        photo.photo_id
+        for photo in window.library.get_photos()
+        if photo.photo_id in {cover_id, hidden_id, next_id}
+    ]
+    window.library.get_photo(hidden_id).flag = 'rejected'
+    window._apply_photo_filter(
+        PhotoFilterSelection(allowed_flags=frozenset({None, 'picked'}))
+    )
+    window.resize(1200, 800)
+    set_qt_active_window(window)
+    app.processEvents()
+    _select_list_rows(window.thumbnail_list, [cover_row, cover_row + 1])
+    app.processEvents()
+    _set_list_item_viewport_top(window.thumbnail_list, cover_row, 160)
+    app.processEvents()
+    cover_item = window.thumbnail_list.item(cover_row)
+    assert cover_item is not None
+    before_top = window.thumbnail_list.visualItemRect(cover_item).top()
+    assert 0 <= before_top < window.thumbnail_list.viewport().height()
+    assert window.thumbnail_list.verticalScrollBar().value() > 0
+    captured: dict[str, object] = {}
+    _confirm_next_filtered_scene_merge(
+        monkeypatch, accept=True, captured=captured
+    )
+
+    window.merge_scene_action.trigger()
+    app.processEvents()
+
+    assert captured['title'] == 'Merge Includes Hidden Photos'
+    assert window.current_photo_id == cover_id
+    assert window.thumbnail_list.currentRow() == cover_row
+    merged_item = window.thumbnail_list.item(cover_row)
+    assert merged_item is not None
+    assert window.thumbnail_list.selectedItems() == [merged_item]
+    after_top = window.thumbnail_list.visualItemRect(merged_item).top()
+    assert abs(after_top - before_top) <= 1
+    assert [
+        window.scene_list.item(row).data(theme_module.PHOTO_ID_ROLE)
+        for row in range(window.scene_list.count())
+    ] == [cover_id, next_id]
+    assert hidden_id not in window._browse_photo_rows
+    assert window.library.scene_group_photo_ids()[cover_row] == expected_group
+    saved_metadata = json.loads(
+        (tmp_path / METADATA_FILENAME).read_text(encoding='utf-8')
+    )
+    assert saved_metadata['scenes']['groups'][cover_row] == expected_group
 
     window.close()
     del app
