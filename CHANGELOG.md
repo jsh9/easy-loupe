@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- Changed
+
+  - The main view's left thumbnail strip now keeps the next photo or scene
+    stack fully visible below the current selection when space allows, making
+    it easier to judge scene boundaries while navigating.
+
 ## [1.4.5] - 2026-09-21
 
 - Added

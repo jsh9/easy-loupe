@@ -353,6 +353,11 @@ Primary files:
 Major logic:
 
 - In normal view mode, the left strip selection tracks the current photo.
+- When navigating or scrolling to the current left-strip item, reveal the next
+  displayed row below it if needed and both rows fit in the viewport. This
+  applies to photos and scene stacks in the current sort/filter order. The
+  final row scrolls normally. Manual wheel scrolling, explicit positioning, and
+  scroll restoration after metadata or scene edits retain their behavior.
 - When scene detection is complete, the left strip represents scene stacks, so
   the selected left item is the first photo of the current scene rather than
   necessarily the exact current photo.

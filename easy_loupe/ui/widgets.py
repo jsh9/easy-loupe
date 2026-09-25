@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Protocol
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QWheelEvent
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QFrame,
     QGraphicsColorizeEffect,
@@ -19,7 +20,9 @@ from PySide6.QtWidgets import (
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from PySide6.QtCore import QModelIndex
     from PySide6.QtGui import QMouseEvent, QPaintEvent
+    from PySide6.QtWidgets import QListWidgetItem
 
     from easy_loupe.ui.theme import ThemePalette
 
@@ -545,6 +548,76 @@ class ThumbnailListWidget(QListWidget):
         super().__init__()
         self._owner = owner
         self._wheel_scroll_remainder = 0.0
+        self._handling_mouse_press = False
+
+    def currentChanged(  # noqa: N802 - Qt API
+            self, current: QModelIndex, previous: QModelIndex
+    ) -> None:
+        """Keep the next thumbnail visible after Qt updates the current row."""
+        super().currentChanged(current, previous)
+        self._ensure_next_item_visible()
+
+    def scrollToItem(  # noqa: N802 - Qt API
+            self,
+            item: QListWidgetItem,
+            hint: QAbstractItemView.ScrollHint = (
+                QAbstractItemView.ScrollHint.EnsureVisible
+            ),
+    ) -> None:
+        """Handle default scrolls even when the current row has not changed."""
+        super().scrollToItem(item, hint)
+        if (
+            hint == QAbstractItemView.ScrollHint.EnsureVisible
+            and item is self.currentItem()
+        ):
+            self._ensure_next_item_visible()
+
+    def _ensure_next_item_visible(self) -> None:
+        """Reveal the following row when both it and the current row fit."""
+        if not self.isVisible() or self._handling_mouse_press:
+            return
+
+        current = self.currentItem()
+        if current is None:
+            return
+
+        following = self.item(self.currentRow() + 1)
+        if following is None:
+            return
+
+        current_rect = self.visualItemRect(current)
+        following_rect = self.visualItemRect(following)
+        viewport_rect = self.viewport().rect()
+        # Include the gap and actual card heights so scene stacks work too.
+        # A short viewport must keep the current row visible first.
+        pair_height = following_rect.bottom() - current_rect.top() + 1
+        if (
+            current_rect.isValid()
+            and following_rect.isValid()
+            and pair_height <= viewport_rect.height()
+            and following_rect.bottom() > viewport_rect.bottom()
+        ):
+            # Move the pixel scrollbar only by the overflow. Qt's
+            # EnsureVisible adds spacing beyond the card, which can clip
+            # the current row when the two cards fit exactly.
+            scroll_bar = self.verticalScrollBar()
+            scroll_bar.setValue(
+                scroll_bar.value()
+                + following_rect.bottom()
+                - viewport_rect.bottom()
+            )
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        """Finish Qt's hit testing before moving cards beneath the pointer."""
+        # Qt changes the current row before finishing position-based selection.
+        # Defer our scrolling so the click still selects the original card.
+        self._handling_mouse_press = True
+        try:
+            super().mousePressEvent(event)
+        finally:
+            self._handling_mouse_press = False
+
+        self._ensure_next_item_visible()
 
     def keyPressEvent(self, event: object) -> None:  # noqa: N802 - Qt API
         """Route Shift+Up/Down through MainWindow before Qt handles it."""
