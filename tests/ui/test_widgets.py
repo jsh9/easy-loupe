@@ -6,7 +6,11 @@ import pytest
 from PySide6.QtCore import QPoint, QPointF, QSize, Qt
 from PySide6.QtGui import QColor, QPixmap, QWheelEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QAbstractItemView, QApplication
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
+    QListWidgetItem,
+)
 
 import easy_loupe.ui.theme as theme_module
 import easy_loupe.ui.widgets as widgets_module
@@ -36,6 +40,163 @@ class _ThumbnailListOwner:
     @staticmethod
     def extend_thumbnail_selection(_direction: int) -> bool:
         return False
+
+
+def _create_scrollable_thumbnail_list() -> tuple[Any, Any]:
+    """Build varied-height rows to exercise card geometry and spacing."""
+    app = QApplication.instance() or QApplication([])
+    widget = widgets_module.ThumbnailListWidget(_ThumbnailListOwner())
+    widget.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+    widget.setSelectionMode(QAbstractItemView.ExtendedSelection)
+    widget.setSpacing(8)
+    widget.resize(260, 360)
+    for row in range(12):
+        item = QListWidgetItem(f'IMG_{row:04d}')
+        item.setSizeHint(QSize(220, 70 if row % 2 == 0 else 90))
+        widget.addItem(item)
+
+    widget.show()
+    app.processEvents()
+    return app, widget
+
+
+@pytest.mark.parametrize('navigation', ['key', 'mouse', 'current', 'scroll'])
+def test_thumbnail_navigation_reveals_next_row(navigation: str) -> None:
+    """
+    Reveal the next card while keeping the intended current row selected.
+
+    Scrolling during Qt's mouse-press handling can select the card that moves
+    under the pointer, even though the current row remains correct.
+    """
+    app, widget = _create_scrollable_thumbnail_list()
+    target = widget.item(6)
+    following = widget.item(7)
+    widget.setCurrentRow(6 if navigation == 'scroll' else 5)
+    widget.scrollToItem(target, QAbstractItemView.PositionAtBottom)
+    app.processEvents()
+    viewport = widget.viewport().rect()
+    assert widget.visualItemRect(following).bottom() > viewport.bottom()
+
+    if navigation == 'key':
+        QTest.keyClick(widget, Qt.Key_Down)
+    elif navigation == 'mouse':
+        QTest.mouseClick(
+            widget.viewport(),
+            Qt.LeftButton,
+            Qt.NoModifier,
+            widget.visualItemRect(target).center(),
+        )
+    elif navigation == 'current':
+        widget.setCurrentRow(6)
+    else:
+        widget.scrollToItem(target)
+
+    app.processEvents()
+    assert widget.currentRow() == 6
+    assert widget.selectedItems() == [target]
+    assert viewport.contains(widget.visualItemRect(target))
+    assert viewport.contains(widget.visualItemRect(following))
+    assert not viewport.intersects(widget.visualItemRect(widget.item(8)))
+    widget.close()
+
+
+def test_thumbnail_navigation_does_not_scroll_visible_successor() -> None:
+    """
+    Preserve position when the following card is already fully visible.
+
+    This prevents lookahead from forcing every selection toward the bottom.
+    """
+    app, widget = _create_scrollable_thumbnail_list()
+    before = widget.verticalScrollBar().value()
+    widget.setCurrentRow(1)
+    app.processEvents()
+
+    assert (
+        widget
+        .viewport()
+        .rect()
+        .contains(widget.visualItemRect(widget.item(2)))
+    )
+    assert widget.verticalScrollBar().value() == before
+    widget.close()
+
+
+@pytest.mark.parametrize(
+    'boundary', ['last-row', 'short-viewport', 'exact-fit']
+)
+def test_thumbnail_navigation_prioritizes_current_row(boundary: str) -> None:
+    """
+    Keep the current card visible at list and viewport boundaries.
+
+    Lookahead must tolerate a missing next row or insufficient space. When two
+    cards fit exactly, Qt's extra scroll padding must not clip the current card
+    or cause repeated scroll requests to move it.
+    """
+    app, widget = _create_scrollable_thumbnail_list()
+    target_row = 11
+    if boundary != 'last-row':
+        height = 140
+        if boundary == 'exact-fit':
+            height = (
+                widget.visualItemRect(widget.item(7)).bottom()
+                - widget.visualItemRect(widget.item(6)).top()
+                + 1
+                + widget.height()
+                - widget.viewport().height()
+            )
+
+        widget.resize(260, height)
+        app.processEvents()
+        target_row = 6
+
+    widget.setCurrentRow(target_row)
+    app.processEvents()
+    target = widget.item(target_row)
+    assert widget.viewport().rect().contains(widget.visualItemRect(target))
+    before = widget.verticalScrollBar().value()
+    widget.scrollToItem(target)
+    app.processEvents()
+    assert widget.verticalScrollBar().value() == before
+    if boundary == 'short-viewport':
+        assert widget.visualItemRect(widget.item(7)).bottom() > (
+            widget.viewport().rect().bottom()
+        )
+    elif boundary == 'exact-fit':
+        assert widget.visualItemRect(target).top() == 0
+        assert widget.visualItemRect(widget.item(7)).bottom() == (
+            widget.viewport().rect().bottom()
+        )
+
+    widget.close()
+
+
+@pytest.mark.parametrize(
+    'hint',
+    [QAbstractItemView.PositionAtTop, QAbstractItemView.PositionAtBottom],
+    ids=['top', 'bottom'],
+)
+def test_thumbnail_scroll_preserves_explicit_position(hint: Any) -> None:
+    """
+    Honor explicit positioning even when the next card stays offscreen.
+
+    Scene edits use explicit scroll anchors, which lookahead must not replace.
+    """
+    app, widget = _create_scrollable_thumbnail_list()
+    widget.setCurrentRow(6)
+    target = widget.currentItem()
+    widget.scrollToItem(target, hint)
+    app.processEvents()
+    rect = widget.visualItemRect(target)
+    viewport = widget.viewport().rect()
+    if hint == QAbstractItemView.PositionAtTop:
+        assert abs(rect.top() - viewport.top()) <= widget.spacing()
+    else:
+        assert abs(rect.bottom() - viewport.bottom()) <= widget.spacing()
+        assert widget.visualItemRect(widget.item(7)).bottom() > (
+            viewport.bottom()
+        )
+
+    widget.close()
 
 
 def _wheel_event(*, pixel_delta: int = 0, angle_delta: int = 0) -> QWheelEvent:

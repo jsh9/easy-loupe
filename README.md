@@ -25,6 +25,8 @@ a photo workflow.
 - Open a folder of photos, including subfolders when needed.
 - Review photos in a focused culling view, a full-folder browse grid, or a
   side-by-side compare view.
+- Peek at the next photo or scene stack as the left thumbnail strip scrolls,
+  with one full row kept visible below the current selection when space allows.
 - Assign ratings, color labels, and picked/rejected flags from the keyboard.
 - Detect and edit scene groups so burst or sequence photos stay together.
 - Inspect focus and exposure with zoom, split view, AF point, EXIF/histogram,
