@@ -12,6 +12,13 @@
     boundaries while navigating. Clicking a thumbnail never scrolls the strip
     to reveal its neighbor.
 
+- Fixed
+
+  - Scene detection on large folders (roughly 500 or more photos) no longer
+    crashes the app or leaves the progress overlay stuck after the scene groups
+    are saved. Progress updates from background work are now handled one at a
+    time, and redundant rapid updates are skipped.
+
 ## [1.4.5] - 2026-09-21
 
 - Added

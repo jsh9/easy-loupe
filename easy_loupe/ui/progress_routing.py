@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -17,6 +18,12 @@ if TYPE_CHECKING:
 
 ProgressCallback = Callable[[str, int], None]
 OperationCallable = Callable[..., object]
+StageSignature = tuple[tuple[object, ...], ...]
+
+# Minimum spacing between forwarded same-stage snapshots. Fast loops such as
+# scene grouping report once per photo within microseconds, and forwarding
+# each one would queue a redundant overlay render per photo on the GUI thread.
+WORKER_SNAPSHOT_MIN_INTERVAL_S = 0.05
 
 
 class WorkerProgressRouter:
@@ -26,10 +33,17 @@ class WorkerProgressRouter:
             self,
             progress_callback: ProgressCallback,
             snapshot_callback: StructuredProgressCallback,
+            *,
+            min_snapshot_interval_s: float = WORKER_SNAPSHOT_MIN_INTERVAL_S,
+            clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._progress_callback = progress_callback
         self._snapshot_callback = snapshot_callback
         self._structured_seen = False
+        self._min_snapshot_interval_s = min_snapshot_interval_s
+        self._clock = clock
+        self._last_snapshot_at: float | None = None
+        self._last_stage_signature: StageSignature | None = None
 
     def emit_progress(self, message: str, progress: int) -> None:
         """Emit scalar progress until a structured snapshot is available."""
@@ -42,10 +56,58 @@ class WorkerProgressRouter:
 
         ``ProgressReporter`` emits snapshots before legacy tuples, so this flag
         prevents one workflow update from rapidly switching the overlay between
-        stage rows and the old aggregate bar.
+        stage rows and the old aggregate bar. The flag is set even when a
+        redundant snapshot is dropped so its paired tuple stays suppressed.
         """
         self._structured_seen = True
+        now = self._clock()
+        signature = _stage_signature(snapshot)
+        if self._is_redundant_snapshot(snapshot, signature, now):
+            return
+
+        self._last_snapshot_at = now
+        self._last_stage_signature = signature
         self._snapshot_callback(snapshot)
+
+    def _is_redundant_snapshot(
+            self,
+            snapshot: ProgressSnapshot,
+            signature: StageSignature | None,
+            now: float,
+    ) -> bool:
+        """
+        Return whether a snapshot only repeats a recent same-stage update.
+
+        The first snapshot, stage status or total changes, and all-complete
+        snapshots always pass, so throttling never hides a stage transition or
+        the workflow's final state.
+        """
+        if self._last_snapshot_at is None:
+            return False
+
+        return (
+            signature == self._last_stage_signature
+            and not _all_stages_complete(snapshot)
+            and now - self._last_snapshot_at < self._min_snapshot_interval_s
+        )
+
+
+def _stage_signature(snapshot: object) -> StageSignature | None:
+    """Return the per-stage state whose changes are always forwarded."""
+    # Worker test doubles may emit placeholder payloads without stages.
+    stages = getattr(snapshot, 'stages', None)
+    if stages is None:
+        return None
+
+    return tuple(
+        (stage.stage_id, stage.status, stage.total) for stage in stages
+    )
+
+
+def _all_stages_complete(snapshot: object) -> bool:
+    """Return whether a snapshot reports every workflow stage complete."""
+    stages = getattr(snapshot, 'stages', None)
+    return bool(stages) and all(stage.status == 'complete' for stage in stages)
 
 
 def call_operation_with_progress(

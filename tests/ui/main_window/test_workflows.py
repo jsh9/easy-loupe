@@ -6,7 +6,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Never
 
 import pytest
-from PySide6.QtCore import QItemSelectionModel, QPoint, Qt, QThread, QTimer
+from PySide6.QtCore import (
+    QItemSelectionModel,
+    QObject,
+    QPoint,
+    Qt,
+    QThread,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import QContextMenuEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
@@ -2909,6 +2917,124 @@ def test_scene_detection_finish_preserves_structured_progress_rows(
     assert '2 of 2' in label_texts
     assert window.progress_overlay.isHidden() is True
 
+    window.close()
+    del app
+
+
+# More queued updates than Python's default recursion limit could nest; the
+# pre-fix handlers failed at roughly 500 nested progress updates.
+QUEUED_PROGRESS_BURST = 1_000
+
+
+class QueuedProgressEmitter(QObject):
+    """Main-thread stand-in for a worker's queued progress signals."""
+
+    progress = Signal(str, int)
+    progress_snapshot = Signal(object)
+
+
+@pytest.mark.parametrize(
+    ('handler_name', 'render_name'),
+    [
+        pytest.param(
+            '_handle_scene_progress_snapshot',
+            '_show_progress_snapshot',
+            id='scene-snapshot',
+        ),
+        pytest.param(
+            '_handle_operation_progress_snapshot',
+            '_show_progress_snapshot',
+            id='operation-snapshot',
+        ),
+        pytest.param(
+            '_handle_scene_progress',
+            '_show_progress',
+            id='scene-scalar',
+        ),
+        pytest.param(
+            '_handle_operation_progress',
+            '_show_progress',
+            id='operation-scalar',
+        ),
+    ],
+)
+def test_queued_worker_progress_burst_does_not_nest_event_processing(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        handler_name: str,
+        render_name: str,
+) -> None:
+    """
+    Verify queued worker progress renders one update at a time.
+
+    Scene grouping emits one progress update per photo in a tight loop, so a
+    large folder queues hundreds of updates before the GUI thread runs any of
+    them. Handlers that pumped events ran each queued update inside the
+    previous one, nesting once per update until Python's recursion limit broke
+    painting and crashed the app at roughly 500 photos. Each handler must
+    return before the event loop dispatches the next update.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_7437', 'dimgray')],
+    )
+    render_depth = 0
+    max_render_depth = 0
+    original_render = getattr(window, render_name)
+
+    def record_render_depth(*args: Any, **kwargs: Any) -> None:
+        nonlocal render_depth, max_render_depth
+        render_depth += 1
+        max_render_depth = max(max_render_depth, render_depth)
+        try:
+            original_render(*args, **kwargs)
+        finally:
+            render_depth -= 1
+
+    # Patch the render helper rather than the connected slot: replacing a
+    # connected QObject method with a plain function changes how PySide
+    # dispatches it.
+    monkeypatch.setattr(window, render_name, record_render_depth)
+    emitter = QueuedProgressEmitter()
+    is_snapshot = render_name == '_show_progress_snapshot'
+    signal = emitter.progress_snapshot if is_snapshot else emitter.progress
+    signal.connect(
+        getattr(window, handler_name), Qt.ConnectionType.QueuedConnection
+    )
+    reporter = workflows_module.ProgressReporter(
+        'Detecting scenes',
+        (
+            workflows_module.ProgressStageDefinition(
+                'grouping', 'Grouping scenes'
+            ),
+        ),
+    )
+    for index in range(1, QUEUED_PROGRESS_BURST + 1):
+        if is_snapshot:
+            emitter.progress_snapshot.emit(
+                reporter.update_stage(
+                    'grouping', current=index, total=QUEUED_PROGRESS_BURST
+                )
+            )
+        else:
+            emitter.progress.emit(
+                f'Grouping scenes, {index} of {QUEUED_PROGRESS_BURST}',
+                index * 100 // QUEUED_PROGRESS_BURST,
+            )
+
+    # Queued deliveries wait for the event loop, like a worker-thread burst.
+    assert max_render_depth == 0
+
+    app.processEvents()
+
+    assert max_render_depth == 1
+    assert window.overlay_message_label.text() == (
+        f'Grouping scenes, {QUEUED_PROGRESS_BURST} of {QUEUED_PROGRESS_BURST}'
+    )
+    assert window._busy is True
+
+    window._hide_progress()
     window.close()
     del app
 

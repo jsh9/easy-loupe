@@ -462,7 +462,8 @@ class MainWindowWorkflowMixin:
         if self._closing:
             return
 
-        self._show_progress(message, progress)
+        # Queued worker update: never pump events; see `_show_progress`.
+        self._show_progress(message, progress, process_events=False)
 
     def _handle_scene_progress_snapshot(
             self: MainWindow, snapshot: ProgressSnapshot
@@ -470,7 +471,8 @@ class MainWindowWorkflowMixin:
         if self._closing:
             return
 
-        self._show_progress_snapshot(snapshot)
+        # Queued worker update: never pump events; see `_show_progress`.
+        self._show_progress_snapshot(snapshot, process_events=False)
 
     def _handle_scene_finished(self: MainWindow) -> None:
         if self._closing:
@@ -543,7 +545,8 @@ class MainWindowWorkflowMixin:
         if self._closing:
             return
 
-        self._show_progress(message, progress)
+        # Queued worker update: never pump events; see `_show_progress`.
+        self._show_progress(message, progress, process_events=False)
 
     def _handle_operation_progress_snapshot(
             self: MainWindow, snapshot: ProgressSnapshot
@@ -551,7 +554,8 @@ class MainWindowWorkflowMixin:
         if self._closing:
             return
 
-        self._show_progress_snapshot(snapshot)
+        # Queued worker update: never pump events; see `_show_progress`.
+        self._show_progress_snapshot(snapshot, process_events=False)
 
     def _handle_operation_finished(self: MainWindow, summary: object) -> None:
         if self._closing:
@@ -839,6 +843,7 @@ class MainWindowWorkflowMixin:
             progress: int,
             *,
             show_bar: bool = True,
+            process_events: bool = True,
     ) -> None:
         # Loading workflows use a two-phase progress scale:
         # 0..100 covers the primary library operation, and 101..200 covers
@@ -857,17 +862,34 @@ class MainWindowWorkflowMixin:
             show_bar=show_bar,
         )
         self._refresh_info_overlay()
-        QApplication.processEvents()
+        if process_events:
+            # Synchronous GUI-thread work (folder loading, list rebuilds, and
+            # worker setup) blocks the event loop, so pump it to paint the
+            # overlay. Worker progress handlers pass False: their updates are
+            # queued events, and pumping would run the next queued update
+            # inside this one, nesting once per update until large scene
+            # detections exceeded Python's recursion limit and crashed.
+            QApplication.processEvents()
 
     def _show_progress_snapshot(
-            self: MainWindow, snapshot: ProgressSnapshot
+            self: MainWindow,
+            snapshot: ProgressSnapshot,
+            *,
+            process_events: bool = True,
     ) -> None:
-        """Show a structured, multi-stage progress snapshot."""
+        """
+        Show a structured, multi-stage progress snapshot.
+
+        ``process_events`` follows the same rule as ``_show_progress``: only
+        synchronous GUI-thread work may pump events, never queued worker
+        progress handlers.
+        """
         self._set_interaction_enabled(enabled=False)
         self._busy = True
         self.progress_overlay_controller.show_snapshot(snapshot)
         self._refresh_info_overlay()
-        QApplication.processEvents()
+        if process_events:
+            QApplication.processEvents()
 
     def _hide_progress(self: MainWindow) -> None:
         self.progress_overlay_controller.hide()
