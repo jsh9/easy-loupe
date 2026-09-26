@@ -358,6 +358,12 @@ Major logic:
   applies to photos and scene stacks in the current sort/filter order. The
   final row scrolls normally. Manual wheel scrolling, explicit positioning, and
   scroll restoration after metadata or scene edits retain their behavior.
+- Mouse lookahead waits until left-button release handling finishes, including
+  releases consumed by thumbnail image children during minimap dragging. This
+  lets Qt collapse a plain-clicked multi-selection before cards move. Right
+  clicks add no lookahead scrolling, so scene menus resolve the clicked stack.
+  Pending mouse lookahead is cancelled by a new gesture, hiding the strip,
+  application deactivation, or explicit scroll positioning.
 - When scene detection is complete, the left strip represents scene stacks, so
   the selected left item is the first photo of the current scene rather than
   necessarily the exact current photo.

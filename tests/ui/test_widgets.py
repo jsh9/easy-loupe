@@ -121,6 +121,66 @@ def test_thumbnail_navigation_does_not_scroll_visible_successor() -> None:
     widget.close()
 
 
+@pytest.mark.parametrize('phase', ['held', 'released'])
+@pytest.mark.parametrize(
+    'interruption', ['hide', 'deactivate', 'right-click', 'explicit-scroll']
+)
+def test_thumbnail_interruption_cancels_mouse_lookahead(
+        phase: str, interruption: str
+) -> None:
+    """
+    Discard interrupted mouse scrolling without disabling later navigation.
+
+    Cancellation must work while the button is held and after release has
+    queued completion, or hidden strips and new context menus can still jump.
+    """
+    app, widget = _create_scrollable_thumbnail_list()
+    widget.setCurrentRow(5)
+    target = widget.item(6)
+    widget.scrollToItem(target, QAbstractItemView.PositionAtBottom)
+    app.processEvents()
+    position = widget.visualItemRect(target).center()
+    before = widget.verticalScrollBar().value()
+    QTest.mousePress(widget.viewport(), Qt.LeftButton, Qt.NoModifier, position)
+    if phase == 'released':
+        QTest.mouseRelease(
+            widget.viewport(), Qt.LeftButton, Qt.NoModifier, position
+        )
+
+    if interruption == 'hide':
+        widget.hide()
+    elif interruption == 'deactivate':
+        app.applicationStateChanged.emit(Qt.ApplicationInactive)
+    elif interruption == 'right-click':
+        QTest.mouseClick(
+            widget.viewport(), Qt.RightButton, Qt.NoModifier, position
+        )
+    else:
+        widget.scrollToItem(target, QAbstractItemView.PositionAtBottom)
+
+    if phase == 'held':
+        QTest.mouseRelease(
+            widget.viewport(), Qt.LeftButton, Qt.NoModifier, position
+        )
+
+    app.processEvents()
+    if interruption == 'hide':
+        widget.show()
+        app.processEvents()
+
+    assert widget.verticalScrollBar().value() == before
+    QTest.keyClick(widget, Qt.Key_Down)
+    app.processEvents()
+    assert widget.currentRow() == 7
+    assert (
+        widget
+        .viewport()
+        .rect()
+        .contains(widget.visualItemRect(widget.item(8)))
+    )
+    widget.close()
+
+
 @pytest.mark.parametrize(
     'boundary', ['last-row', 'short-viewport', 'exact-fit']
 )

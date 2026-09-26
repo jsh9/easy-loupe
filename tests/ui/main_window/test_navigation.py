@@ -1101,6 +1101,66 @@ def test_thumbnail_navigation_keeps_next_card_visible(
     window.close()
 
 
+@pytest.mark.parametrize(
+    ('modifier', 'expected_rows'),
+    [
+        (Qt.NoModifier, [6]),
+        (Qt.ShiftModifier, [5, 6]),
+        (Qt.ControlModifier, [5]),
+    ],
+    ids=['plain', 'shift', 'control'],
+)
+def test_thumbnail_caption_click_finishes_selection_before_scrolling(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        modifier: Qt.KeyboardModifier,
+        expected_rows: list[int],
+) -> None:
+    """
+    Finish selection at the clicked card before revealing its successor.
+
+    Qt collapses a plain click on a selected row during release. Moving the
+    card earlier leaves other photos selected for subsequent culling actions.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[(f'IMG_{index:04d}', 'dimgray') for index in range(12)],
+    )
+    strip = window.thumbnail_list
+    strip.setMinimumHeight(600)
+    app.processEvents()
+    strip.setCurrentRow(5)
+    target = strip.item(6)
+    target.setSelected(True)
+    strip.scrollToItem(target, QAbstractItemView.PositionAtBottom)
+    app.processEvents()
+    caption = strip.itemWidget(target).name_label
+    position = caption.mapTo(strip.viewport(), caption.rect().center())
+    before = strip.verticalScrollBar().value()
+
+    QTest.mousePress(strip.viewport(), Qt.LeftButton, modifier, position)
+    app.processEvents()
+    assert strip.verticalScrollBar().value() == before
+    QTest.mouseRelease(strip.viewport(), Qt.LeftButton, modifier, position)
+    app.processEvents()
+
+    assert strip.currentRow() == 6
+    assert sorted(strip.row(item) for item in strip.selectedItems()) == (
+        expected_rows
+    )
+    if modifier == Qt.NoModifier:
+        assert window._resolved_selection_photo_ids() == ['IMG_0006']
+
+    viewport = strip.viewport().rect()
+    assert viewport.contains(strip.visualItemRect(target))
+    assert viewport.contains(strip.visualItemRect(strip.item(7)))
+    # Synthetic modified mouse events leave Qt's cached modifiers set. Clear
+    # them so later navigation tests do not inherit this gesture's modifiers.
+    QTest.keyClick(strip, Qt.Key_Shift)
+    window.close()
+
+
 def test_thumbnail_shift_down_then_up_releases_rows_below_current(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

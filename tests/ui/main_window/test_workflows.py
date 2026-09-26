@@ -7,8 +7,15 @@ from typing import TYPE_CHECKING, Any, Never
 
 import pytest
 from PySide6.QtCore import QItemSelectionModel, QPoint, Qt, QThread, QTimer
+from PySide6.QtGui import QContextMenuEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QFileDialog, QLabel, QMessageBox
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
+    QFileDialog,
+    QLabel,
+    QMessageBox,
+)
 
 import easy_loupe.ui.main_window.build as build_module
 import easy_loupe.ui.main_window.window as main_window_module
@@ -1751,6 +1758,73 @@ def test_filtered_scene_strip_subset_still_shows_split_notice(
 
     window.close()
     del app
+
+
+@pytest.mark.parametrize('context_phase', ['press', 'release'])
+def test_bottom_scene_context_menu_keeps_clicked_target(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        context_phase: str,
+) -> None:
+    """
+    Keep the clicked scene at the menu position throughout a right-click.
+
+    Platforms dispatch context menus at different phases of the gesture. Extra
+    scrolling at either phase would make Break Scene target the following row.
+    """
+    photo_ids = [f'IMG_{index:04d}' for index in range(24)]
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[(photo_id, 'dimgray') for photo_id in photo_ids],
+        scene_groups=[
+            photo_ids[index : index + 2] for index in range(0, 24, 2)
+        ],
+    )
+    strip = window.thumbnail_list
+    strip.setMinimumHeight(600)
+    app.processEvents()
+    strip.setCurrentRow(5)
+    strip.scrollToItem(strip.item(6), QAbstractItemView.PositionAtBottom)
+    app.processEvents()
+    position = strip.visualItemRect(strip.item(6)).center()
+    scene = window._context_scene_from_thumbnail_position(position)
+    assert scene is not None
+    before = strip.verticalScrollBar().value()
+    break_calls: list[str] = []
+    monkeypatch.setattr(
+        window, '_break_scene_into_singletons', break_calls.append
+    )
+
+    class SelectingMenu(workflows_module.QMenu):
+        def exec(self, *_args: object) -> Any:
+            return self.actions()[0]
+
+    monkeypatch.setattr(workflows_module, 'QMenu', SelectingMenu)
+
+    QTest.mousePress(strip.viewport(), Qt.RightButton, Qt.NoModifier, position)
+    if context_phase == 'release':
+        QTest.mouseRelease(
+            strip.viewport(), Qt.RightButton, Qt.NoModifier, position
+        )
+
+    app.processEvents()
+    assert strip.verticalScrollBar().value() == before
+    event = QContextMenuEvent(
+        QContextMenuEvent.Mouse,
+        position,
+        strip.viewport().mapToGlobal(position),
+    )
+    QApplication.sendEvent(strip.viewport(), event)
+    if context_phase == 'press':
+        QTest.mouseRelease(
+            strip.viewport(), Qt.RightButton, Qt.NoModifier, position
+        )
+
+    app.processEvents()
+    assert break_calls == [scene.scene_id]
+    assert strip.verticalScrollBar().value() == before
+    window.close()
 
 
 def test_break_scene_from_vertical_context_menu_saves_and_undoes(

@@ -27,6 +27,8 @@ a photo workflow.
   side-by-side compare view.
 - Peek at the next photo or scene stack as the left thumbnail strip scrolls,
   with one full row kept visible below the current selection when space allows.
+  Mouse lookahead waits until left-click selection or dragging finishes;
+  right-clicks keep the context-menu target in place.
 - Assign ratings, color labels, and picked/rejected flags from the keyboard.
 - Detect and edit scene groups so burst or sequence photos stay together.
 - Inspect focus and exposure with zoom, split view, AF point, EXIF/histogram,
