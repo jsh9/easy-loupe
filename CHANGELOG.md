@@ -17,7 +17,7 @@
   - Scene detection on large folders (roughly 500 or more photos) no longer
     crashes the app or leaves the progress overlay stuck after the scene groups
     are saved. Progress updates from background work are now handled one at a
-    time, and redundant rapid updates are skipped.
+    time.
 
 ## [1.4.5] - 2026-09-21
 

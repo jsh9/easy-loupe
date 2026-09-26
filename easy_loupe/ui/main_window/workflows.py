@@ -487,7 +487,8 @@ class MainWindowWorkflowMixin:
             self.progress_overlay_controller.set_message_preserving_rows(
                 'Scene detection finished'
             )
-            QApplication.processEvents()
+            # Paint the message before the synchronous list rebuild below.
+            self._process_progress_events()
         else:
             self._show_progress('Scene detection finished', 100)
 
@@ -865,11 +866,9 @@ class MainWindowWorkflowMixin:
         if process_events:
             # Synchronous GUI-thread work (folder loading, list rebuilds, and
             # worker setup) blocks the event loop, so pump it to paint the
-            # overlay. Worker progress handlers pass False: their updates are
-            # queued events, and pumping would run the next queued update
-            # inside this one, nesting once per update until large scene
-            # detections exceeded Python's recursion limit and crashed.
-            QApplication.processEvents()
+            # overlay. Worker progress handlers pass False: the running event
+            # loop already paints between their queued updates.
+            self._process_progress_events()
 
     def _show_progress_snapshot(
             self: MainWindow,
@@ -889,7 +888,26 @@ class MainWindowWorkflowMixin:
         self.progress_overlay_controller.show_snapshot(snapshot)
         self._refresh_info_overlay()
         if process_events:
+            self._process_progress_events()
+
+    def _process_progress_events(self: MainWindow) -> None:
+        """
+        Pump events for progress painting, but never from inside a pump.
+
+        A nested pump dispatches queued events inside the handler that is
+        already being dispatched, so a burst of queued progress updates nests
+        once per update. Large scene detections crashed that way once Python's
+        recursion limit broke painting. Skipping nested pumps lets the
+        outermost pump drain the whole burst one event at a time.
+        """
+        if self._processing_progress_events:
+            return
+
+        self._processing_progress_events = True
+        try:
             QApplication.processEvents()
+        finally:
+            self._processing_progress_events = False
 
     def _hide_progress(self: MainWindow) -> None:
         self.progress_overlay_controller.hide()

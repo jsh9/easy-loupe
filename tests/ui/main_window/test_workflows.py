@@ -2921,8 +2921,8 @@ def test_scene_detection_finish_preserves_structured_progress_rows(
     del app
 
 
-# More queued updates than Python's default recursion limit could nest; the
-# pre-fix handlers failed at roughly 500 nested progress updates.
+# More queued updates than the default recursion limit lets handlers nest, so a
+# handler that dispatches each update inside the previous one cannot pass.
 QUEUED_PROGRESS_BURST = 1_000
 
 
@@ -2933,52 +2933,15 @@ class QueuedProgressEmitter(QObject):
     progress_snapshot = Signal(object)
 
 
-@pytest.mark.parametrize(
-    ('handler_name', 'render_name'),
-    [
-        pytest.param(
-            '_handle_scene_progress_snapshot',
-            '_show_progress_snapshot',
-            id='scene-snapshot',
-        ),
-        pytest.param(
-            '_handle_operation_progress_snapshot',
-            '_show_progress_snapshot',
-            id='operation-snapshot',
-        ),
-        pytest.param(
-            '_handle_scene_progress',
-            '_show_progress',
-            id='scene-scalar',
-        ),
-        pytest.param(
-            '_handle_operation_progress',
-            '_show_progress',
-            id='operation-scalar',
-        ),
-    ],
-)
-def test_queued_worker_progress_burst_does_not_nest_event_processing(
-        tmp_path: Path,
+def _render_queued_progress_burst(
+        app: QApplication,
+        window: Any,
         monkeypatch: pytest.MonkeyPatch,
+        *,
         handler_name: str,
         render_name: str,
-) -> None:
-    """
-    Verify queued worker progress renders one update at a time.
-
-    Scene grouping emits one progress update per photo in a tight loop, so a
-    large folder queues hundreds of updates before the GUI thread runs any of
-    them. Handlers that pumped events ran each queued update inside the
-    previous one, nesting once per update until Python's recursion limit broke
-    painting and crashed the app at roughly 500 photos. Each handler must
-    return before the event loop dispatches the next update.
-    """
-    _, app, window = create_main_window_with_library(
-        tmp_path,
-        monkeypatch,
-        photo_specs=[('IMG_7437', 'dimgray')],
-    )
+) -> int:
+    """Queue a progress burst into a handler and return max render depth."""
     render_depth = 0
     max_render_depth = 0
     original_render = getattr(window, render_name)
@@ -3027,6 +2990,63 @@ def test_queued_worker_progress_burst_does_not_nest_event_processing(
     assert max_render_depth == 0
 
     app.processEvents()
+    return max_render_depth
+
+
+@pytest.mark.parametrize(
+    ('handler_name', 'render_name'),
+    [
+        pytest.param(
+            '_handle_scene_progress_snapshot',
+            '_show_progress_snapshot',
+            id='scene-snapshot',
+        ),
+        pytest.param(
+            '_handle_operation_progress_snapshot',
+            '_show_progress_snapshot',
+            id='operation-snapshot',
+        ),
+        pytest.param(
+            '_handle_scene_progress',
+            '_show_progress',
+            id='scene-scalar',
+        ),
+        pytest.param(
+            '_handle_operation_progress',
+            '_show_progress',
+            id='operation-scalar',
+        ),
+    ],
+)
+def test_queued_worker_progress_burst_does_not_nest_event_processing(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        handler_name: str,
+        render_name: str,
+) -> None:
+    """
+    Verify queued worker progress renders one update at a time.
+
+    Scene grouping emits one progress update per photo in a tight loop, so a
+    large folder queues hundreds of updates before the GUI thread runs any of
+    them. Handlers that pumped events dispatched queued updates inside each
+    other; structured snapshots nested once per update until Python's recursion
+    limit broke painting and crashed the app. Worker handlers must not pump, so
+    each update returns before the next one is dispatched.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_7437', 'dimgray')],
+    )
+
+    max_render_depth = _render_queued_progress_burst(
+        app,
+        window,
+        monkeypatch,
+        handler_name=handler_name,
+        render_name=render_name,
+    )
 
     assert max_render_depth == 1
     assert window.overlay_message_label.text() == (
@@ -3035,6 +3055,127 @@ def test_queued_worker_progress_burst_does_not_nest_event_processing(
     assert window._busy is True
 
     window._hide_progress()
+    window.close()
+    del app
+
+
+@pytest.mark.parametrize(
+    ('handler_name', 'render_name'),
+    [
+        pytest.param(
+            '_handle_load_progress_snapshot',
+            '_show_progress_snapshot',
+            id='load-snapshot',
+        ),
+        pytest.param(
+            '_handle_load_progress',
+            '_show_progress',
+            id='load-scalar',
+        ),
+    ],
+)
+def test_pumping_progress_handler_drains_queued_burst_without_nesting(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        handler_name: str,
+        render_name: str,
+) -> None:
+    """
+    Verify the progress event pump never runs inside itself.
+
+    Folder-load progress handlers still pump events because they run during
+    synchronous GUI-thread work. If one of them is ever connected to queued
+    worker signals, each pump would dispatch the next update inside the current
+    one. The pump guard must let the outermost pump drain the whole burst
+    instead, keeping render nesting bounded for any caller.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_7438', 'dimgray')],
+    )
+
+    max_render_depth = _render_queued_progress_burst(
+        app,
+        window,
+        monkeypatch,
+        handler_name=handler_name,
+        render_name=render_name,
+    )
+
+    # The first handler's pump dispatches the rest of the burst one level
+    # down, where the guard skips any further pumping.
+    assert max_render_depth <= 2
+    assert window.overlay_message_label.text() == (
+        f'Grouping scenes, {QUEUED_PROGRESS_BURST} of {QUEUED_PROGRESS_BURST}'
+    )
+    assert window._processing_progress_events is False
+
+    window._hide_progress()
+    window.close()
+    del app
+
+
+def test_scene_detection_burst_then_finished_restores_interactive_ui(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify a queued scene-progress burst still ends with a usable window.
+
+    Large folders crashed the app or left the progress overlay up with
+    interaction disabled after scene groups were saved. This drives the real
+    worker and progress router through queued connections, as a QThread
+    delivers them, and checks that the finished handler still hides the overlay
+    and re-enables interaction after the burst.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_7439', 'dimgray'), ('IMG_7440', 'blue')],
+    )
+
+    class BurstSceneLibrary:
+        @staticmethod
+        def detect_scenes(
+                *,
+                progress_callback: Any,
+                progress_snapshot_callback: Any = None,
+        ) -> None:
+            reporter = workflows_module.ProgressReporter(
+                'Detecting scenes',
+                (
+                    workflows_module.ProgressStageDefinition(
+                        'grouping', 'Grouping scenes'
+                    ),
+                ),
+                progress_callback=progress_callback,
+                snapshot_callback=progress_snapshot_callback,
+            )
+            for index in range(1, QUEUED_PROGRESS_BURST + 1):
+                reporter.update_stage(
+                    'grouping', current=index, total=QUEUED_PROGRESS_BURST
+                )
+
+            reporter.finish('done', 100)
+            set_scene_detection_result(window, [['IMG_7439', 'IMG_7440']])
+
+    worker = workflows_module.SceneDetectionWorker(BurstSceneLibrary())
+    queued = Qt.ConnectionType.QueuedConnection
+    worker.progress.connect(window._handle_scene_progress, queued)
+    worker.progress_snapshot.connect(
+        window._handle_scene_progress_snapshot, queued
+    )
+    worker.finished.connect(window._handle_scene_finished, queued)
+    window._show_progress('Preparing scene detection...', 0)
+
+    worker.run()
+    app.processEvents()
+
+    assert window.progress_overlay.isHidden() is True
+    assert window._busy is False
+    assert window.detect_button.isEnabled() is True
+    assert window.thumbnail_list.isEnabled() is True
+
     window.close()
     del app
 
