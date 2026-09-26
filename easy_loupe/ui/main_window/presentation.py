@@ -408,16 +408,9 @@ class MainWindowPresentationMixin:
                 self._thumbnail_photo_rows[cover.photo_id] = index - 1
                 self._thumbnail_scene_rows[scene.scene_id] = index - 1
 
-        if scroll_current_item_into_view:
-            self._select_left_item_for_current_photo()
-        else:
-            # Quiet rebuilds restore a captured scroll position afterwards,
-            # so neighbor lookahead would only add a scroll to overwrite.
-            with self.thumbnail_list.suspend_lookahead():
-                self._select_left_item_for_current_photo(
-                    scroll_into_view=False
-                )
-
+        self._select_left_item_for_current_photo(
+            scroll_into_view=scroll_current_item_into_view
+        )
         self.thumbnail_list.blockSignals(False)
 
     def _populate_browse_list(

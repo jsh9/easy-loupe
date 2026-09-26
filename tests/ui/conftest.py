@@ -6,7 +6,6 @@ import pytest
 from PySide6.QtCore import QSettings, Qt
 from PySide6.QtWidgets import QWidget
 
-import easy_loupe.ui.thumbnail_lookahead as thumbnail_lookahead_module
 from easy_loupe.ui.identity import APP_NAME
 from easy_loupe.ui.main_window.build import (
     COMPARE_PHOTO_LIMIT_SETTINGS_KEY,
@@ -43,23 +42,6 @@ def show_windows_without_desktop_activation(
         original_show(widget)
 
     monkeypatch.setattr(QWidget, 'show', show_without_desktop_activation)
-
-
-@pytest.fixture(autouse=True)
-def settle_thumbnail_clicks_immediately(
-        monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """
-    Run click lookahead on the next event-loop turn in UI tests.
-
-    Production waits the platform double-click interval so a quick second click
-    hits the unmoved card. Tests that only check the final scroll use
-    ``processEvents()``, so a zero delay keeps them deterministic. Tests of the
-    delay itself patch a real interval back in.
-    """
-    monkeypatch.setattr(
-        thumbnail_lookahead_module, '_mouse_settle_delay_ms', lambda: 0
-    )
 
 
 @pytest.fixture(autouse=True)

@@ -1101,6 +1101,54 @@ def test_thumbnail_navigation_keeps_next_card_visible(
     window.close()
 
 
+@pytest.mark.parametrize('extend', [False, True], ids=['plain', 'shift'])
+def test_scene_strip_up_down_keeps_next_stack_visible(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        extend: bool,
+) -> None:
+    """
+    Reveal the next stack when scene-strip Up/Down moves the left strip.
+
+    Up/Down in the scene strip is keyboard navigation of the left strip, so it
+    must show the following stack just like keys pressed in the strip itself.
+    """
+    photo_ids = [f'IMG_{index:04d}' for index in range(24)]
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[(photo_id, 'dimgray') for photo_id in photo_ids],
+        scene_groups=[
+            photo_ids[index : index + 2] for index in range(0, 24, 2)
+        ],
+    )
+    strip = window.thumbnail_list
+    strip.setMinimumHeight(600)
+    app.processEvents()
+    strip.setCurrentRow(5)
+    strip.scrollToItem(strip.item(6), QAbstractItemView.PositionAtBottom)
+    app.processEvents()
+    viewport = strip.viewport().rect()
+    # The next stack starts offscreen, so seeing it afterwards proves the
+    # scene-strip key path scrolled, not the initial layout.
+    assert not viewport.contains(strip.visualItemRect(strip.item(7)))
+
+    modifiers = Qt.ShiftModifier if extend else Qt.NoModifier
+    down_event = QKeyEvent(QEvent.KeyPress, Qt.Key_Down, modifiers)
+    window.scene_list.keyPressEvent(down_event)
+    app.processEvents()
+
+    assert down_event.isAccepted() is True
+    assert window.current_photo_id == photo_ids[12]
+    assert strip.currentRow() == 6
+    # The revealed stack is only shown, never selected, so culling actions
+    # do not reach it.
+    assert not strip.item(7).isSelected()
+    assert viewport.contains(strip.visualItemRect(strip.item(6)))
+    assert viewport.contains(strip.visualItemRect(strip.item(7)))
+    window.close()
+
+
 @pytest.mark.parametrize(
     ('modifier', 'expected_rows'),
     [
@@ -1110,17 +1158,18 @@ def test_thumbnail_navigation_keeps_next_card_visible(
     ],
     ids=['plain', 'shift', 'control'],
 )
-def test_thumbnail_caption_click_finishes_selection_before_scrolling(
+def test_thumbnail_caption_click_does_not_scroll_strip(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
         modifier: Qt.KeyboardModifier,
         expected_rows: list[int],
 ) -> None:
     """
-    Finish selection at the clicked card before revealing its successor.
+    Keep the strip still while a click selects the bottom card.
 
-    Qt collapses a plain click on a selected row during release. Moving the
-    card earlier leaves other photos selected for subsequent culling actions.
+    Neighbor lookahead is for keyboard navigation only. A click must finish
+    Qt's normal selection (a plain click collapses to the clicked card) without
+    scrolling the next card into view under the pointer.
     """
     _, app, window = create_main_window_with_library(
         tmp_path,
@@ -1154,8 +1203,9 @@ def test_thumbnail_caption_click_finishes_selection_before_scrolling(
             assert window._resolved_selection_photo_ids() == ['IMG_0006']
 
         viewport = strip.viewport().rect()
+        assert strip.verticalScrollBar().value() == before
         assert viewport.contains(strip.visualItemRect(target))
-        assert viewport.contains(strip.visualItemRect(strip.item(7)))
+        assert not viewport.contains(strip.visualItemRect(strip.item(7)))
     finally:
         # Synthetic modified mouse events leave Qt's cached modifiers set.
         # Clear them even after a failed assertion so later navigation tests

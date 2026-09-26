@@ -3262,8 +3262,8 @@ def test_metadata_tagging_keeps_strip_position_with_offscreen_neighbor(
     Keep tagging in place when the next strip card is offscreen.
 
     Tagging rebuilds the left strip and restores its captured scroll value.
-    Neighbor lookahead must not run during that rebuild, or the restored
-    position would depend on overwriting an extra scroll.
+    Neighbor lookahead is keyboard-only, so the rebuild's current-row change
+    must not scroll the strip to reveal the offscreen next card.
     """
     _, app, window = create_main_window_with_library(
         tmp_path,

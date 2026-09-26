@@ -169,8 +169,9 @@ def test_thumbnail_image_press_drag_continues_after_selection(
     Verify held thumbnail-image drags keep panning after photo selection.
 
     Users should be able to press another thumbnail and immediately drag the
-    red box. Lookahead must wait for release even when the image child consumes
-    that event, so the image stays under the pointer throughout the gesture.
+    red box. Neighbor lookahead is keyboard-only, so the strip must not scroll
+    during the gesture or after the image child consumes its release; the image
+    stays under the pointer throughout.
     """
     _, app, window = create_main_window_with_library(
         tmp_path,
@@ -221,8 +222,9 @@ def test_thumbnail_image_press_drag_continues_after_selection(
         center, abs=0.02
     )
     viewport = strip.viewport().rect()
+    assert strip.verticalScrollBar().value() == before
     assert viewport.contains(strip.visualItemRect(strip.item(6)))
-    assert viewport.contains(strip.visualItemRect(strip.item(7)))
+    assert not viewport.contains(strip.visualItemRect(strip.item(7)))
 
     window.close()
 

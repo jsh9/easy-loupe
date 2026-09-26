@@ -17,20 +17,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from easy_loupe.ui.thumbnail_lookahead import ThumbnailLookahead
+from easy_loupe.ui.thumbnail_lookahead import reveal_neighbor_after_move
 
 if TYPE_CHECKING:
-    from contextlib import AbstractContextManager
     from pathlib import Path
 
-    from PySide6.QtCore import QModelIndex
-    from PySide6.QtGui import (
-        QHideEvent,
-        QMouseEvent,
-        QPaintEvent,
-        QShowEvent,
-    )
-    from PySide6.QtWidgets import QListWidgetItem
+    from PySide6.QtGui import QMouseEvent, QPaintEvent
 
     from easy_loupe.ui.theme import ThemePalette
 
@@ -559,71 +551,31 @@ class ThumbnailListWidget(QListWidget):
         # Lookahead scrolls by pixel overflow, so the strip owns the scroll
         # mode that math depends on instead of relying on its builder.
         self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
-        self._lookahead = ThumbnailLookahead(self)
 
-    def suspend_lookahead(self) -> AbstractContextManager[None]:
-        """Return a context that blocks neighbor reveal during rebuilds."""
-        return self._lookahead.suspend()
+    def reveal_neighbor_after_move(self, previous_row: int) -> None:
+        """
+        Show the next card in the direction of a keyboard move.
 
-    def currentChanged(  # noqa: N802 - Qt API
-            self, current: QModelIndex, previous: QModelIndex
-    ) -> None:
-        """Reveal the neighbor after Qt scrolls the new current row."""
-        super().currentChanged(current, previous)
-        self._lookahead.handle_current_changed(current.row(), previous.row())
-
-    def scrollToItem(  # noqa: N802 - Qt API
-            self,
-            item: QListWidgetItem,
-            hint: QAbstractItemView.ScrollHint = (
-                QAbstractItemView.ScrollHint.EnsureVisible
-            ),
-    ) -> None:
-        """Handle default scrolls even when the current row has not changed."""
-        super().scrollToItem(item, hint)
-        self._lookahead.handle_scroll_request(item, hint)
-
-    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
-        """Keep cards stationary until Qt finishes the mouse gesture."""
-        self._lookahead.begin_mouse_press(event)
-        with self._lookahead.handle_mouse_event():
-            super().mousePressEvent(event)
-
-    def mouseDoubleClickEvent(  # noqa: N802 - Qt API
-            self, event: QMouseEvent
-    ) -> None:
-        """Treat a second click as a new gesture on the unmoved card."""
-        # Qt skips mousePressEvent when both clicks hit the same row, so
-        # restart the gesture here to cancel the first click's pending
-        # scroll and hold lookahead until this release.
-        self._lookahead.begin_mouse_press(event)
-        with self._lookahead.handle_mouse_event():
-            super().mouseDoubleClickEvent(event)
-
-    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
-        """Let Qt finish selection without scrolling right-click targets."""
-        with self._lookahead.handle_mouse_event():
-            super().mouseReleaseEvent(event)
-
-    def hideEvent(self, event: QHideEvent) -> None:  # noqa: N802 - Qt API
-        """Cancel gestures so showing the strip cannot revive stale scrolls."""
-        self._lookahead.cancel_mouse_gesture()
-        super().hideEvent(event)
-
-    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 - Qt API
-        """Reveal the current card when the app reshows a hidden strip."""
-        super().showEvent(event)
-        # Restoring a minimized window is spontaneous and must keep the
-        # user's manual scroll position.
-        if not event.spontaneous():
-            self._lookahead.reveal_current_after_show()
+        ``previous_row`` is the current row before the move.
+        """
+        reveal_neighbor_after_move(self, previous_row)
 
     def keyPressEvent(self, event: object) -> None:  # noqa: N802 - Qt API
+        """Route navigation keys, then reveal the neighbor card."""
+        # Capture the row first so lookahead can tell whether this key moved
+        # the current card and in which direction; Qt has scrolled the new
+        # current card into view by the time routing returns. Lookahead runs
+        # only here (and for scene-strip Up/Down), so mouse clicks and list
+        # rebuilds keep plain Qt scrolling.
+        previous_row = self.currentRow()
+        self._route_key_press(event)
+        self.reveal_neighbor_after_move(previous_row)
+
+    def _route_key_press(self, event: object) -> None:
         """Route Shift+Up/Down through MainWindow before Qt handles it."""
         from PySide6.QtCore import Qt as _Qt  # noqa: PLC0415
         from PySide6.QtGui import QKeyEvent  # noqa: PLC0415
 
-        self._lookahead.handle_key_press()
         if not isinstance(event, QKeyEvent):
             super().keyPressEvent(event)  # type: ignore[arg-type]
             return

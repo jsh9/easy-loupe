@@ -682,6 +682,10 @@ class MainWindowNavigationMixin:
                     QItemSelectionModel.SelectionFlag.ClearAndSelect,
                 )
 
+        # Up/Down here is keyboard navigation of the left strip, so it gets
+        # the same neighbor lookahead as keys pressed in the strip itself.
+        # ``current_row`` still holds the row from before this move.
+        self.thumbnail_list.reveal_neighbor_after_move(current_row)
         self.thumbnail_list.setFocus(Qt.OtherFocusReason)
         return True
 
