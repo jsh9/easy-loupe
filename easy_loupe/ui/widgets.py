@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Protocol
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QWheelEvent
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QFrame,
     QGraphicsColorizeEffect,
@@ -15,6 +16,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from easy_loupe.ui.thumbnail_lookahead import reveal_neighbor_after_move
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -545,8 +548,30 @@ class ThumbnailListWidget(QListWidget):
         super().__init__()
         self._owner = owner
         self._wheel_scroll_remainder = 0.0
+        # Lookahead scrolls by pixel overflow, so the strip owns the scroll
+        # mode that math depends on instead of relying on its builder.
+        self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+
+    def reveal_neighbor_after_move(self, previous_row: int) -> None:
+        """
+        Show the next card in the direction of a keyboard move.
+
+        ``previous_row`` is the current row before the move.
+        """
+        reveal_neighbor_after_move(self, previous_row)
 
     def keyPressEvent(self, event: object) -> None:  # noqa: N802 - Qt API
+        """Route navigation keys, then reveal the neighbor card."""
+        # Capture the row first so lookahead can tell whether this key moved
+        # the current card and in which direction; Qt has scrolled the new
+        # current card into view by the time routing returns. Lookahead runs
+        # only here (and for scene-strip Up/Down), so mouse clicks and list
+        # rebuilds keep plain Qt scrolling.
+        previous_row = self.currentRow()
+        self._route_key_press(event)
+        self.reveal_neighbor_after_move(previous_row)
+
+    def _route_key_press(self, event: object) -> None:
         """Route Shift+Up/Down through MainWindow before Qt handles it."""
         from PySide6.QtCore import Qt as _Qt  # noqa: PLC0415
         from PySide6.QtGui import QKeyEvent  # noqa: PLC0415

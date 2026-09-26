@@ -344,15 +344,33 @@ Major logic:
 Primary files:
 
 - `easy_loupe/ui/widgets.py`
+- `easy_loupe/ui/thumbnail_lookahead.py`
 - `easy_loupe/ui/main_window/navigation.py`
 - `easy_loupe/ui/main_window/presentation.py`
 - `tests/ui/main_window/test_navigation.py`
 - `tests/ui/main_window/test_workflows.py`
+- `tests/ui/test_thumbnail_lookahead.py`
 - `tests/ui/test_widgets.py`
 
 Major logic:
 
 - In normal view mode, the left strip selection tracks the current photo.
+- Keyboard navigation reveals the neighbor of the current left-strip item in
+  the direction of travel: the next row after moving down, the previous row
+  after moving up. `reveal_neighbor_after_move` (`ui/thumbnail_lookahead.py`)
+  takes the direction from the row change and scrolls only by the overflow,
+  only when the neighbor is not fully visible and both rows fit in the
+  viewport. This applies to photos and scene stacks in the current sort/filter
+  order, and the first or last row scrolls normally.
+- Only two entry points trigger lookahead: `ThumbnailListWidget.keyPressEvent`
+  (arrows, Page Up/Down, Home/End, type-to-search, and Shift+Up/Down through
+  `extend_thumbnail_selection`) and `navigate_global_from_scene` (Up/Down in
+  the scene strip). Mouse clicks, double-clicks, minimap drags, context menus,
+  list rebuilds, scroll restoration, and reshowing the strip (such as after
+  compare mode) keep plain Qt scrolling, so a clicked card never moves to make
+  room for its neighbor.
+- `ThumbnailListWidget` sets `ScrollPerPixel` itself because lookahead scrolls
+  by pixel overflow.
 - When scene detection is complete, the left strip represents scene stacks, so
   the selected left item is the first photo of the current scene rather than
   necessarily the exact current photo.

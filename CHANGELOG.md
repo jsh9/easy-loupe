@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+- Changed
+
+  - When you navigate the main view's left thumbnail strip with the keyboard
+    (Up/Down, Page Up/Down, Shift+Up/Down, or Up/Down from the scene strip),
+    the strip now keeps the neighboring photo or scene stack fully visible in
+    the direction you are moving, below the current selection going down and
+    above it going up, when space allows. This makes it easier to judge scene
+    boundaries while navigating. Clicking a thumbnail never scrolls the strip
+    to reveal its neighbor.
+
 ## [1.4.5] - 2026-09-21
 
 - Added

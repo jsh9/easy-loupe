@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QAbstractItemView, QApplication
 
 import easy_loupe.ui.main_window.window as main_window_module
 from easy_loupe.core.photo_library import PhotoLibrary
@@ -161,31 +161,37 @@ def test_thumbnail_image_click_spatially_recenters_new_current_photo(
     window.close()
 
 
+@pytest.mark.parametrize('drag', [False, True], ids=['click', 'drag'])
 def test_thumbnail_image_press_drag_continues_after_selection(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, drag: bool
 ) -> None:
     """
     Verify held thumbnail-image drags keep panning after photo selection.
 
     Users should be able to press another thumbnail and immediately drag the
-    red box without releasing and clicking the newly selected minimap again.
+    red box. Neighbor lookahead is keyboard-only, so the strip must not scroll
+    during the gesture or after the image child consumes its release; the image
+    stays under the pointer throughout.
     """
     _, app, window = create_main_window_with_library(
         tmp_path,
         monkeypatch,
-        photo_specs=[
-            ('IMG_8110', 'dimgray'),
-            ('IMG_8111', 'blue'),
-        ],
+        photo_specs=[(f'IMG_{index:04d}', 'dimgray') for index in range(12)],
     )
 
+    strip = window.thumbnail_list
+    strip.setMinimumHeight(600)
+    app.processEvents()
+    strip.setCurrentRow(5)
+    strip.scrollToItem(strip.item(6), QAbstractItemView.PositionAtBottom)
     # Minimap tests need a crop; initial 100% can show the whole small image.
     window.viewer.apply_manual_view(4.0, None)
     app.processEvents()
 
-    widget = thumbnail_item_widget(window.thumbnail_list, 1)
+    widget = thumbnail_item_widget(strip, 6)
     image_widget = widget._front_image_widget
     assert image_widget is not None
+    before = strip.verticalScrollBar().value()
 
     QTest.mousePress(
         image_widget,
@@ -195,20 +201,30 @@ def test_thumbnail_image_press_drag_continues_after_selection(
     )
     app.processEvents()
 
-    assert window.current_photo_id == 'IMG_8111'
+    assert window.current_photo_id == 'IMG_0006'
+    assert strip.verticalScrollBar().value() == before
 
-    QTest.mouseMove(image_widget, _minimap_point(image_widget, 0.58, 0.42))
-    app.processEvents()
+    center = (0.58, 0.42) if drag else (0.5, 0.5)
+    if drag:
+        QTest.mouseMove(image_widget, _minimap_point(image_widget, *center))
+        app.processEvents()
+        assert strip.verticalScrollBar().value() == before
+
     QTest.mouseRelease(
         image_widget,
         Qt.MouseButton.LeftButton,
         Qt.KeyboardModifier.NoModifier,
-        _minimap_point(image_widget, 0.58, 0.42),
+        _minimap_point(image_widget, *center),
     )
+    app.processEvents()
 
     assert window.viewer.normalized_viewport_center() == pytest.approx(
-        (0.58, 0.42), abs=0.02
+        center, abs=0.02
     )
+    viewport = strip.viewport().rect()
+    assert strip.verticalScrollBar().value() == before
+    assert viewport.contains(strip.visualItemRect(strip.item(6)))
+    assert not viewport.contains(strip.visualItemRect(strip.item(7)))
 
     window.close()
 

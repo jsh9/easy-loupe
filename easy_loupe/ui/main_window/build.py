@@ -271,9 +271,6 @@ class MainWindowBuildMixin:
         self.thumbnail_list.setSelectionMode(
             QAbstractItemView.ExtendedSelection
         )
-        self.thumbnail_list.setVerticalScrollMode(
-            QAbstractItemView.ScrollPerPixel
-        )
         self.thumbnail_list.viewport().setFocusPolicy(Qt.StrongFocus)
         self.thumbnail_list.currentItemChanged.connect(
             self._left_list_selection_changed
