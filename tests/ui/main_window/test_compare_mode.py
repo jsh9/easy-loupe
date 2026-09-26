@@ -113,6 +113,44 @@ def test_compare_mode_opens_default_limit_and_esc_restores_view(
     window.close()
 
 
+def test_compare_exit_reveals_current_strip_card_and_neighbor(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify leaving compare shows the current strip card and its neighbor.
+
+    Compare hides the left strip, so Qt skips its current-row auto-scroll and
+    the strip can return scrolled away from the active photo. The reshown strip
+    must catch up so the current and next cards are visible again.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[(f'IMG_{index:04d}', 'dimgray') for index in range(24)],
+    )
+    strip = window.thumbnail_list
+    strip.setMinimumHeight(600)
+    app.processEvents()
+    _select_rows_with_current(strip, [10, 11], 10)
+    app.processEvents()
+
+    window.compare_mode_shortcut.activated.emit()
+    app.processEvents()
+    assert window._compare_mode is True
+    # Model a strip left scrolled away from the active photo while hidden.
+    strip.verticalScrollBar().setValue(0)
+
+    window.exit_compare_shortcut.activated.emit()
+    app.processEvents()
+
+    viewport = strip.viewport().rect()
+    assert strip.currentRow() == 10
+    assert viewport.contains(strip.visualItemRect(strip.item(10)))
+    assert viewport.contains(strip.visualItemRect(strip.item(11)))
+
+    window.close()
+
+
 def test_compare_mode_esc_reloads_viewer_and_overlay_for_active_photo(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

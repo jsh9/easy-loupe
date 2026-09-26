@@ -4,10 +4,11 @@
 
 - Changed
 
-  - The main view's left thumbnail strip now keeps the next photo or scene
-    stack fully visible below the current selection when space allows, making
-    it easier to judge scene boundaries while navigating. Mouse-driven
-    lookahead waits until the click or minimap drag finishes, and
+  - The main view's left thumbnail strip now keeps the neighboring photo or
+    scene stack fully visible in the direction you are moving, below the
+    current selection going down and above it going up, when space allows. This
+    makes it easier to judge scene boundaries while navigating. After a click,
+    the strip waits briefly so a quick second click lands on the same card, and
     right-clicking a thumbnail does not scroll the strip.
 
 ## [1.4.5] - 2026-09-21

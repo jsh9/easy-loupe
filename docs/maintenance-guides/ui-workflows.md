@@ -344,26 +344,47 @@ Major logic:
 Primary files:
 
 - `easy_loupe/ui/widgets.py`
+- `easy_loupe/ui/thumbnail_lookahead.py`
 - `easy_loupe/ui/main_window/navigation.py`
 - `easy_loupe/ui/main_window/presentation.py`
 - `tests/ui/main_window/test_navigation.py`
 - `tests/ui/main_window/test_workflows.py`
+- `tests/ui/test_thumbnail_lookahead.py`
 - `tests/ui/test_widgets.py`
 
 Major logic:
 
 - In normal view mode, the left strip selection tracks the current photo.
-- When navigating or scrolling to the current left-strip item, reveal the next
-  displayed row below it if needed and both rows fit in the viewport. This
-  applies to photos and scene stacks in the current sort/filter order. The
-  final row scrolls normally. Manual wheel scrolling, explicit positioning, and
-  scroll restoration after metadata or scene edits retain their behavior.
-- Mouse lookahead waits until left-button release handling finishes, including
-  releases consumed by thumbnail image children during minimap dragging. This
-  lets Qt collapse a plain-clicked multi-selection before cards move. Right
-  clicks add no lookahead scrolling, so scene menus resolve the clicked stack.
-  Pending mouse lookahead is cancelled by a new gesture, hiding the strip,
-  application deactivation, or explicit scroll positioning.
+- `ThumbnailLookahead` (`ui/thumbnail_lookahead.py`) reveals the neighbor of
+  the current left-strip item in the direction of travel: the next row after
+  moving down, the previous row after moving up. It scrolls only when the
+  neighbor is not fully visible and both rows fit in the viewport. This applies
+  to photos and scene stacks in the current sort/filter order, and the first or
+  last row scrolls normally. Rebuilds with no previous row keep the last
+  direction, which starts as down.
+- Lookahead hooks `currentChanged`, following Qt's auto-scroll setting, and
+  default `EnsureVisible` calls to `scrollToItem` for the current item.
+  Explicit scroll hints, direct scrollbar changes, and manual wheel scrolling
+  bypass it. `_populate_thumbnail_list(scroll_current_item_into_view=False)`
+  suspends lookahead because metadata and scene refreshes restore a captured
+  scroll position afterwards.
+- `ThumbnailListWidget` sets `ScrollPerPixel` itself because lookahead scrolls
+  by pixel overflow.
+- Mouse lookahead waits for the left-button release, then the platform
+  double-click interval. The wait covers releases consumed by thumbnail image
+  children during minimap dragging. It lets Qt collapse a plain-clicked
+  multi-selection, and a quick second click still hits the unmoved card. The
+  release is observed with event filters on the viewport and the pressed child
+  only, never application-wide. Right clicks add no lookahead scrolling, so
+  scene menus resolve the clicked stack.
+- Pending mouse lookahead is cancelled by a new press, hiding the strip, the
+  application leaving the active state, or explicit scroll positioning.
+  Activation does not cancel it. A strip key press applies a pending click
+  scroll immediately. If the button is up but no release reached the strip, the
+  next lookahead request drops the stale gesture.
+- When a hidden strip is shown again, such as after compare mode, the current
+  item and its neighbor are scrolled into view. Spontaneous shows, such as
+  restoring a minimized window, keep the manual scroll position.
 - When scene detection is complete, the left strip represents scene stacks, so
   the selected left item is the first photo of the current scene rather than
   necessarily the exact current photo.

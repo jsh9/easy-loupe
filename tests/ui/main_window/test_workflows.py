@@ -3255,6 +3255,43 @@ def test_metadata_tagging_preserves_thumbnail_strip_scroll_position(
     del app
 
 
+def test_metadata_tagging_keeps_strip_position_with_offscreen_neighbor(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Keep tagging in place when the next strip card is offscreen.
+
+    Tagging rebuilds the left strip and restores its captured scroll value.
+    Neighbor lookahead must not run during that rebuild, or the restored
+    position would depend on overwriting an extra scroll.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[(f'IMG_{index:04d}', 'dimgray') for index in range(30)],
+    )
+    strip = window.thumbnail_list
+    strip.setMinimumHeight(600)
+    app.processEvents()
+    strip.setCurrentRow(12)
+    strip.scrollToItem(strip.item(12), QAbstractItemView.PositionAtBottom)
+    app.processEvents()
+    scrollbar = strip.verticalScrollBar()
+    before_scroll = scrollbar.value()
+    viewport = strip.viewport().rect()
+    assert not viewport.contains(strip.visualItemRect(strip.item(13)))
+
+    window.flag_actions['picked'].trigger()
+    app.processEvents()
+
+    assert window.current_photo_id == 'IMG_0012'
+    assert strip.currentRow() == 12
+    assert scrollbar.value() == before_scroll
+    assert not viewport.contains(strip.visualItemRect(strip.item(13)))
+
+    window.close()
+
+
 def test_metadata_tagging_preserves_browse_grid_scroll_position(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

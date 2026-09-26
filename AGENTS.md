@@ -125,6 +125,9 @@ Notes:
     prompts used by photo-viewer startup before scanning neighboring files.
   - `ui/launch.py` defines `CullingLaunchRequest`, the handoff payload used
     when a photo-viewer window opens the full culling workspace.
+  - `ui/thumbnail_lookahead.py` owns left-strip neighbor lookahead: the
+    direction-of-travel reveal, the mouse-gesture settle delay, and
+    cancellation. `ThumbnailListWidget` only forwards Qt hooks to it.
   - The UI is split primarily across `ui/main_window/`, `ui/viewers/`,
     `ui/photo_viewer/`, `ui/widgets.py`, `ui/theme.py`, `ui/workers.py`, and
     `ui/app.py`.

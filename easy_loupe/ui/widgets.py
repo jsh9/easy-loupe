@@ -4,15 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import (
-    QColor,
-    QMouseEvent,
-    QPainter,
-    QPen,
-    QPixmap,
-    QWheelEvent,
-)
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QWheelEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -24,11 +17,19 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from easy_loupe.ui.thumbnail_lookahead import ThumbnailLookahead
+
 if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
     from pathlib import Path
 
-    from PySide6.QtCore import QModelIndex, QObject
-    from PySide6.QtGui import QHideEvent, QPaintEvent
+    from PySide6.QtCore import QModelIndex
+    from PySide6.QtGui import (
+        QHideEvent,
+        QMouseEvent,
+        QPaintEvent,
+        QShowEvent,
+    )
     from PySide6.QtWidgets import QListWidgetItem
 
     from easy_loupe.ui.theme import ThemePalette
@@ -555,25 +556,21 @@ class ThumbnailListWidget(QListWidget):
         super().__init__()
         self._owner = owner
         self._wheel_scroll_remainder = 0.0
-        self._handling_mouse_event = False
-        self._mouse_lookahead_pending = False
-        self._mouse_lookahead_timer = QTimer(self)
-        self._mouse_lookahead_timer.setSingleShot(True)
-        self._mouse_lookahead_timer.timeout.connect(
-            self._finish_mouse_lookahead
-        )
-        # Deactivation can arrive after release removes the temporary filter,
-        # so keep cancellation connected while completion is still queued.
-        QApplication.instance().applicationStateChanged.connect(
-            self._cancel_mouse_lookahead
-        )
+        # Lookahead scrolls by pixel overflow, so the strip owns the scroll
+        # mode that math depends on instead of relying on its builder.
+        self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self._lookahead = ThumbnailLookahead(self)
+
+    def suspend_lookahead(self) -> AbstractContextManager[None]:
+        """Return a context that blocks neighbor reveal during rebuilds."""
+        return self._lookahead.suspend()
 
     def currentChanged(  # noqa: N802 - Qt API
             self, current: QModelIndex, previous: QModelIndex
     ) -> None:
-        """Keep the next thumbnail visible after Qt updates the current row."""
+        """Reveal the neighbor after Qt scrolls the new current row."""
         super().currentChanged(current, previous)
-        self._ensure_next_item_visible()
+        self._lookahead.handle_current_changed(current.row(), previous.row())
 
     def scrollToItem(  # noqa: N802 - Qt API
             self,
@@ -583,121 +580,50 @@ class ThumbnailListWidget(QListWidget):
             ),
     ) -> None:
         """Handle default scrolls even when the current row has not changed."""
-        if hint != QAbstractItemView.ScrollHint.EnsureVisible:
-            self._cancel_mouse_lookahead()
-
         super().scrollToItem(item, hint)
-        if (
-            hint == QAbstractItemView.ScrollHint.EnsureVisible
-            and item is self.currentItem()
-        ):
-            self._ensure_next_item_visible()
-
-    def _ensure_next_item_visible(self) -> None:
-        """Reveal the following row when both it and the current row fit."""
-        if (
-            not self.isVisible()
-            or self._handling_mouse_event
-            or self._mouse_lookahead_pending
-        ):
-            return
-
-        current = self.currentItem()
-        if current is None:
-            return
-
-        following = self.item(self.currentRow() + 1)
-        if following is None:
-            return
-
-        current_rect = self.visualItemRect(current)
-        following_rect = self.visualItemRect(following)
-        viewport_rect = self.viewport().rect()
-        # Include the gap and actual card heights so scene stacks work too.
-        # A short viewport must keep the current row visible first.
-        pair_height = following_rect.bottom() - current_rect.top() + 1
-        if (
-            current_rect.isValid()
-            and following_rect.isValid()
-            and pair_height <= viewport_rect.height()
-            and following_rect.bottom() > viewport_rect.bottom()
-        ):
-            # Move the pixel scrollbar only by the overflow. Qt's
-            # EnsureVisible adds spacing beyond the card, which can clip
-            # the current row when the two cards fit exactly.
-            scroll_bar = self.verticalScrollBar()
-            scroll_bar.setValue(
-                scroll_bar.value()
-                + following_rect.bottom()
-                - viewport_rect.bottom()
-            )
+        self._lookahead.handle_scroll_request(item, hint)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         """Keep cards stationary until Qt finishes the mouse gesture."""
-        self._cancel_mouse_lookahead()
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._mouse_lookahead_pending = True
-            # Image children consume releases during minimap gestures, so
-            # observe application delivery instead of relying on propagation.
-            QApplication.instance().installEventFilter(self)
-
-        self._handling_mouse_event = True
-        try:
+        self._lookahead.begin_mouse_press(event)
+        with self._lookahead.handle_mouse_event():
             super().mousePressEvent(event)
-        finally:
-            self._handling_mouse_event = False
+
+    def mouseDoubleClickEvent(  # noqa: N802 - Qt API
+            self, event: QMouseEvent
+    ) -> None:
+        """Treat a second click as a new gesture on the unmoved card."""
+        # Qt skips mousePressEvent when both clicks hit the same row, so
+        # restart the gesture here to cancel the first click's pending
+        # scroll and hold lookahead until this release.
+        self._lookahead.begin_mouse_press(event)
+        with self._lookahead.handle_mouse_event():
+            super().mouseDoubleClickEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         """Let Qt finish selection without scrolling right-click targets."""
-        self._handling_mouse_event = True
-        try:
+        with self._lookahead.handle_mouse_event():
             super().mouseReleaseEvent(event)
-        finally:
-            self._handling_mouse_event = False
-
-    def eventFilter(  # noqa: N802 - Qt API
-            self, watched: QObject, event: QEvent
-    ) -> bool:
-        """Observe a held gesture without consuming child-widget events."""
-        if self._mouse_lookahead_pending:
-            if event.type() in {
-                QEvent.Type.MouseButtonPress,
-                QEvent.Type.MouseButtonDblClick,
-            }:
-                self._cancel_mouse_lookahead()
-            elif (
-                event.type() == QEvent.Type.MouseButtonRelease
-                and isinstance(event, QMouseEvent)
-                and event.button() == Qt.MouseButton.LeftButton
-            ):
-                QApplication.instance().removeEventFilter(self)
-                # Filters run before the receiver. Wait one event-loop turn
-                # so Qt can collapse multi-selection at the original position.
-                self._mouse_lookahead_timer.start(0)
-
-        return super().eventFilter(watched, event)
-
-    def _cancel_mouse_lookahead(self) -> None:
-        """Discard delayed scrolling when its gesture no longer applies."""
-        self._mouse_lookahead_timer.stop()
-        self._mouse_lookahead_pending = False
-        QApplication.instance().removeEventFilter(self)
-
-    def _finish_mouse_lookahead(self) -> None:
-        """Reveal the next card after mouse-release selection has settled."""
-        self._cancel_mouse_lookahead()
-        self._ensure_next_item_visible()
 
     def hideEvent(self, event: QHideEvent) -> None:  # noqa: N802 - Qt API
         """Cancel gestures so showing the strip cannot revive stale scrolls."""
-        self._cancel_mouse_lookahead()
+        self._lookahead.cancel_mouse_gesture()
         super().hideEvent(event)
+
+    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 - Qt API
+        """Reveal the current card when the app reshows a hidden strip."""
+        super().showEvent(event)
+        # Restoring a minimized window is spontaneous and must keep the
+        # user's manual scroll position.
+        if not event.spontaneous():
+            self._lookahead.reveal_current_after_show()
 
     def keyPressEvent(self, event: object) -> None:  # noqa: N802 - Qt API
         """Route Shift+Up/Down through MainWindow before Qt handles it."""
         from PySide6.QtCore import Qt as _Qt  # noqa: PLC0415
         from PySide6.QtGui import QKeyEvent  # noqa: PLC0415
 
+        self._lookahead.handle_key_press()
         if not isinstance(event, QKeyEvent):
             super().keyPressEvent(event)  # type: ignore[arg-type]
             return

@@ -1139,26 +1139,29 @@ def test_thumbnail_caption_click_finishes_selection_before_scrolling(
     position = caption.mapTo(strip.viewport(), caption.rect().center())
     before = strip.verticalScrollBar().value()
 
-    QTest.mousePress(strip.viewport(), Qt.LeftButton, modifier, position)
-    app.processEvents()
-    assert strip.verticalScrollBar().value() == before
-    QTest.mouseRelease(strip.viewport(), Qt.LeftButton, modifier, position)
-    app.processEvents()
+    try:
+        QTest.mousePress(strip.viewport(), Qt.LeftButton, modifier, position)
+        app.processEvents()
+        assert strip.verticalScrollBar().value() == before
+        QTest.mouseRelease(strip.viewport(), Qt.LeftButton, modifier, position)
+        app.processEvents()
 
-    assert strip.currentRow() == 6
-    assert sorted(strip.row(item) for item in strip.selectedItems()) == (
-        expected_rows
-    )
-    if modifier == Qt.NoModifier:
-        assert window._resolved_selection_photo_ids() == ['IMG_0006']
+        assert strip.currentRow() == 6
+        assert sorted(strip.row(item) for item in strip.selectedItems()) == (
+            expected_rows
+        )
+        if modifier == Qt.NoModifier:
+            assert window._resolved_selection_photo_ids() == ['IMG_0006']
 
-    viewport = strip.viewport().rect()
-    assert viewport.contains(strip.visualItemRect(target))
-    assert viewport.contains(strip.visualItemRect(strip.item(7)))
-    # Synthetic modified mouse events leave Qt's cached modifiers set. Clear
-    # them so later navigation tests do not inherit this gesture's modifiers.
-    QTest.keyClick(strip, Qt.Key_Shift)
-    window.close()
+        viewport = strip.viewport().rect()
+        assert viewport.contains(strip.visualItemRect(target))
+        assert viewport.contains(strip.visualItemRect(strip.item(7)))
+    finally:
+        # Synthetic modified mouse events leave Qt's cached modifiers set.
+        # Clear them even after a failed assertion so later navigation tests
+        # do not inherit this gesture's modifiers.
+        QTest.keyClick(strip, Qt.Key_Shift)
+        window.close()
 
 
 def test_thumbnail_shift_down_then_up_releases_rows_below_current(
