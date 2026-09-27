@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QKeyEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QCheckBox, QFileDialog, QPushButton
 
@@ -806,8 +807,8 @@ def test_filter_change_hiding_scene_tail_stays_in_scene(
     Verify confirming a filter keeps a hidden current photo in its scene.
 
     Filter confirmation shares the hidden-current-photo fallback with metadata
-    edits. Hiding the tail of the current scene must land on the nearest
-    remaining photo in that scene rather than the next scene.
+    edits. Hiding the tail of the current scene must step back to the last
+    remaining photo in that scene rather than jump to the next scene.
     """
     app, window = _create_scene_window(tmp_path, monkeypatch, SCENE_GROUPS)
     for photo_id in ('IMG_2803', 'IMG_2804'):
@@ -978,6 +979,56 @@ def test_filter_rejection_restarts_scene_strip_shift_range(
 
     trigger_scene_shortcut(window, 'Shift+Left')
     app.processEvents()
+
+    # The stale anchor row now holds IMG_2804, which was never selected.
+    assert window._resolved_selection_photo_ids() == ['IMG_2800', 'IMG_2803']
+
+    window.close()
+
+
+def _press_shift_up_in_left_strip(window: Any, app: Any) -> None:
+    """Send Shift+Up through the left strip's own key routing."""
+    event = QKeyEvent(QEvent.KeyPress, Qt.Key_Up, Qt.ShiftModifier)
+    window.thumbnail_list.keyPressEvent(event)
+    app.processEvents()
+    assert event.isAccepted() is True
+
+
+def test_filter_rejection_restarts_left_strip_shift_range(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify left-strip Shift ranges restart after a filtered edit.
+
+    Shift+Up/Down ranges in the left strip are anchored by row number too, and
+    they keep a separate anchor from the scene strip. After rejected photos
+    disappear, the old anchor row can hold a photo the user never selected, so
+    the next range must start from the replacement photo.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[
+            ('IMG_2800', 'red'),
+            ('IMG_2801', 'green'),
+            ('IMG_2802', 'blue'),
+            ('IMG_2803', 'yellow'),
+            ('IMG_2804', 'purple'),
+        ],
+    )
+    window._apply_photo_filter(HIDE_REJECTED_FILTER)
+    app.processEvents()
+    window.thumbnail_list.setCurrentRow(
+        window._thumbnail_photo_rows['IMG_2802']
+    )
+    app.processEvents()
+    _press_shift_up_in_left_strip(window, app)
+    assert window._resolved_selection_photo_ids() == ['IMG_2801', 'IMG_2802']
+    window.flag_actions['rejected'].trigger()
+    app.processEvents()
+    assert window.current_photo_id == 'IMG_2803'
+
+    _press_shift_up_in_left_strip(window, app)
 
     # The stale anchor row now holds IMG_2804, which was never selected.
     assert window._resolved_selection_photo_ids() == ['IMG_2800', 'IMG_2803']
