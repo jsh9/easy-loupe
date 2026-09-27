@@ -82,6 +82,17 @@ Major logic:
   progress rows cannot show impossible labels such as `4 of 3`. Standalone
   photo-viewer culling handoff shows scalar hydration progress until the first
   structured hydration snapshot is available.
+- Progress helpers pump events only for synchronous GUI-thread work: folder
+  loading, loaded-view rebuilds, and worker setup. Handlers connected to worker
+  signals (`_handle_scene_progress*()` and `_handle_operation_progress*()`)
+  render with `process_events=False`. Worker updates arrive as queued events
+  while the event loop is already running, so pumping inside a handler runs the
+  next queued update inside the current one. Scene detection's per-photo burst
+  then nested once per update until Python's recursion limit broke painting and
+  crashed the app on large folders. Every progress pump goes through
+  `_process_progress_events()`, which skips pumping while a pump is already
+  running, so even a pumping handler connected to worker signals drains a burst
+  from the outermost pump instead of nesting.
 - Folder-load scanning reports discovered grouped-photo and supported-file
   counts after discovery finishes. Do not add fake scan item counts; the total
   is not known until the filesystem walk is done. The EXIF row counts ExifTool
@@ -435,6 +446,10 @@ Major logic:
 - Scene detection runs asynchronously through `SceneDetectionWorker`,
   `QThread`, `_handle_scene_progress()`, and `_handle_scene_finished()` /
   `_handle_scene_failed()`.
+- Both scene loops, feature extraction and grouping, report one progress update
+  per photo. Grouping runs in microseconds per photo, so large folders produce
+  a burst of queued worker updates. Scene progress handlers must not pump
+  events (see Main Window Flow).
 - While the overlay is active, interaction and assignment actions are disabled,
   and keyboard shortcut handlers are effectively blocked.
 - On successful scene detection, the left strip is rebuilt as scene stacks, the
@@ -592,6 +607,13 @@ issuing another interruptible Quit request.
   handoff, scene detection, organizer/XMP work, and undo. Worker workflows must
   connect legacy scalar progress as a fallback, but paired scalar updates must
   not clear structured stage rows after a snapshot has been emitted.
+- If worker progress handling or progress event pumping changes, keep the
+  queued-burst tests in `tests/ui/main_window/test_workflows.py` passing:
+  worker handlers render a burst larger than Python's recursion limit one
+  update at a time, the pump guard keeps pumping handlers from nesting, and a
+  burst followed by `finished` still leaves the window interactive. Also run
+  scene detection manually on a folder with 500+ photos in both a source run
+  and the packaged app.
 - If `MainWindow` selection/display logic changes, verify which preview kind is
   requested and verify action shortcuts plus enable/disable states where
   relevant.

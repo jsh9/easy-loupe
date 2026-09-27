@@ -58,6 +58,9 @@ class MainWindow(
         self.current_photo_id: str | None = None
         self.current_theme = THEMES['light']
         self._busy = False
+        # True while a progress helper is pumping events; see
+        # `_process_progress_events()`.
+        self._processing_progress_events = False
         self._main_view_frozen_after_move_organize = False
         self._browse_mode = False
         self._compare_mode = False
