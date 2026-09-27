@@ -18,6 +18,13 @@
     crashes the app or leaves the progress overlay stuck after the scene groups
     are saved. Progress updates from background work are now handled one at a
     time.
+  - When a filter hides rejected photos (or any other filtered-out photos),
+    tagging the last photos of a scene in the scene strip no longer jumps the
+    main view to the next scene. The main view now moves to the nearest
+    remaining photo in the same scene, and moves on to the next scene only when
+    every photo in that scene is hidden. The same applies when changing the
+    filter hides the photo you are viewing. Browse mode still moves to the next
+    photo in the grid.
 
 ## [1.4.5] - 2026-09-21
 

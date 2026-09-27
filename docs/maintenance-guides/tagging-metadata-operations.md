@@ -83,6 +83,10 @@ Major logic:
 - Under an active filter, metadata edits can make the current photo disappear
   from the visible lists. The UI should rebuild from matching photos and move
   to the next visible photo, or clear the viewer when no photos still match.
+  When scene stacks are shown outside browse mode, the replacement stays in the
+  current scene while any of its photos remain visible, so rejecting the last
+  photos of a scene does not jump to the next scene. See the filter rules in
+  `ui-workflows.md`.
 - Explicit multi-selection is restored after repopulation. Single-item
   selection is left to `setCurrentRow` in populate methods so it integrates
   cleanly with Qt's selection model and does not create sticky selection state.

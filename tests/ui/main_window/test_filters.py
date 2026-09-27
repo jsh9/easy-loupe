@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QCheckBox, QFileDialog, QPushButton
@@ -22,12 +23,11 @@ from tests.ui._helpers import (
     create_jpeg,
     create_main_window_with_library,
     make_photo_record,
+    trigger_scene_shortcut,
 )
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import pytest
 
 
 def _collect_photo_ids_from_list(list_widget: Any) -> list[str]:
@@ -579,6 +579,204 @@ def test_filter_metadata_change_hides_newly_non_matching_photo(
     assert _collect_photo_ids_from_list(window.browse_list) == ['IMG_2501']
     assert window.current_photo_id == 'IMG_2501'
     assert window.filter_button.text() == 'Filter (1/2)'
+
+    window.close()
+
+
+# Two scenes in library order: a five-photo scene whose tail can be hidden
+# while earlier members stay visible, followed by the next scene.
+SCENE_TAIL_FIRST_SCENE = [
+    'IMG_2800',
+    'IMG_2801',
+    'IMG_2802',
+    'IMG_2803',
+    'IMG_2804',
+]
+SCENE_TAIL_SECOND_SCENE = ['IMG_2805', 'IMG_2806']
+HIDE_REJECTED_FILTER = PhotoFilterSelection(
+    allowed_flags=frozenset({None, 'picked'})
+)
+
+
+def _create_scene_tail_window(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Any, Any]:
+    """Build a shown scene-mode window with the two scene-tail scenes."""
+    colors = ['red', 'green', 'blue', 'yellow', 'purple', 'orange', 'dimgray']
+    photo_ids = [*SCENE_TAIL_FIRST_SCENE, *SCENE_TAIL_SECOND_SCENE]
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=list(zip(photo_ids, colors, strict=True)),
+        scene_groups=[SCENE_TAIL_FIRST_SCENE, SCENE_TAIL_SECOND_SCENE],
+    )
+    return app, window
+
+
+@pytest.mark.parametrize(
+    (
+        'start_photo_id',
+        'end_photo_id',
+        'expected_photo_id',
+        'expected_scene_photo_ids',
+    ),
+    [
+        pytest.param(
+            'IMG_2803',
+            'IMG_2804',
+            'IMG_2802',
+            ['IMG_2800', 'IMG_2801', 'IMG_2802'],
+            id='tail-selected-forward',
+        ),
+        pytest.param(
+            'IMG_2804',
+            'IMG_2803',
+            'IMG_2802',
+            ['IMG_2800', 'IMG_2801', 'IMG_2802'],
+            id='tail-selected-backward',
+        ),
+        pytest.param(
+            'IMG_2802',
+            'IMG_2803',
+            'IMG_2804',
+            ['IMG_2800', 'IMG_2801', 'IMG_2804'],
+            id='middle-moves-forward',
+        ),
+        pytest.param(
+            'IMG_2800',
+            'IMG_2804',
+            'IMG_2805',
+            SCENE_TAIL_SECOND_SCENE,
+            id='whole-scene-moves-to-next-scene',
+        ),
+    ],
+)
+def test_filter_scene_strip_rejection_keeps_view_in_scene(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        start_photo_id: str,
+        end_photo_id: str,
+        expected_photo_id: str,
+        expected_scene_photo_ids: list[str],
+) -> None:
+    """
+    Verify hiding scene-strip photos keeps the main view in that scene.
+
+    Rejecting the last photos of a scene under a hide-rejected filter used to
+    jump the viewer to the next scene because the replacement photo was chosen
+    in library order. The viewer must move to the nearest remaining photo in
+    the same scene, trying later photos first, and leave the scene only when
+    every photo in it is hidden.
+    """
+    app, window = _create_scene_tail_window(tmp_path, monkeypatch)
+    window._apply_photo_filter(HIDE_REJECTED_FILTER)
+    app.processEvents()
+
+    # Select the start photo, then Shift+Left/Right to the end photo, the
+    # same way a user range-selects inside the horizontal scene strip.
+    start_row = window._scene_photo_rows[start_photo_id]
+    end_row = window._scene_photo_rows[end_photo_id]
+    window.scene_list.setCurrentRow(start_row)
+    app.processEvents()
+    shortcut = 'Shift+Right' if end_row > start_row else 'Shift+Left'
+    for _ in range(abs(end_row - start_row)):
+        trigger_scene_shortcut(window, shortcut)
+        app.processEvents()
+
+    first_row, last_row = sorted((start_row, end_row))
+    rejected_photo_ids = SCENE_TAIL_FIRST_SCENE[first_row : last_row + 1]
+    assert window.current_photo_id == end_photo_id
+    assert window._resolved_selection_photo_ids() == rejected_photo_ids
+
+    window.flag_actions['rejected'].trigger()
+    app.processEvents()
+
+    assert all(
+        window.library.get_photo(photo_id).flag == 'rejected'
+        for photo_id in rejected_photo_ids
+    )
+    assert window.current_photo_id == expected_photo_id
+    assert window.viewer._current_image_path == (
+        window.library.get_preview_path(expected_photo_id, 'viewer')
+    )
+    assert _collect_photo_ids_from_list(window.scene_list) == (
+        expected_scene_photo_ids
+    )
+    assert window.scene_list.currentItem().data(Qt.UserRole) == (
+        expected_photo_id
+    )
+    # The left strip stays on the scene stack that owns the new photo, whose
+    # cover is that scene's first visible photo.
+    assert (
+        window.thumbnail_list.currentItem().data(Qt.UserRole)
+        == (expected_scene_photo_ids[0])
+    )
+
+    window.close()
+
+
+def test_filter_browse_mode_rejection_keeps_grid_order(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify browse mode still replaces a hidden photo in grid order.
+
+    Browse mode shows every photo in one flat grid without scene boundaries, so
+    hiding the last photo of a scene there advances to the next grid photo
+    instead of stepping back inside the hidden photo's scene.
+    """
+    app, window = _create_scene_tail_window(tmp_path, monkeypatch)
+    window._apply_photo_filter(HIDE_REJECTED_FILTER)
+    app.processEvents()
+    window.browse_mode_shortcut.activated.emit()
+    app.processEvents()
+    window.browse_list.setCurrentRow(window._browse_photo_rows['IMG_2804'])
+    app.processEvents()
+    assert window._browse_mode is True
+    assert window.current_photo_id == 'IMG_2804'
+
+    window.flag_actions['rejected'].trigger()
+    app.processEvents()
+
+    assert window.library.get_photo('IMG_2804').flag == 'rejected'
+    assert window._browse_mode is True
+    assert window.current_photo_id == 'IMG_2805'
+    assert window.browse_list.currentItem().data(Qt.UserRole) == 'IMG_2805'
+
+    window.close()
+
+
+def test_filter_change_hiding_scene_tail_stays_in_scene(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify confirming a filter keeps a hidden current photo in its scene.
+
+    Filter confirmation shares the hidden-current-photo fallback with metadata
+    edits. Hiding the tail of the current scene must land on the nearest
+    remaining photo in that scene rather than the next scene.
+    """
+    app, window = _create_scene_tail_window(tmp_path, monkeypatch)
+    for photo_id in ('IMG_2803', 'IMG_2804'):
+        window.library.get_photo(photo_id).flag = 'rejected'
+
+    window.scene_list.setCurrentRow(window._scene_photo_rows['IMG_2804'])
+    app.processEvents()
+    assert window.current_photo_id == 'IMG_2804'
+
+    window._apply_photo_filter(HIDE_REJECTED_FILTER)
+    app.processEvents()
+
+    assert window.current_photo_id == 'IMG_2802'
+    assert window.viewer._current_image_path == (
+        window.library.get_preview_path('IMG_2802', 'viewer')
+    )
+    assert _collect_photo_ids_from_list(window.scene_list) == [
+        'IMG_2800',
+        'IMG_2801',
+        'IMG_2802',
+    ]
+    assert window.scene_list.currentItem().data(Qt.UserRole) == 'IMG_2802'
 
     window.close()
 

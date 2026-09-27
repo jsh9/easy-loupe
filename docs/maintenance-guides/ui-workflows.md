@@ -128,10 +128,18 @@ Major logic:
   state until `Confirm` is clicked. Pressing `Enter` in the open popup uses the
   same confirmation path.
 - Active filters rebuild the thumbnail strip, browse grid, and scene strip from
-  visible matching photos only. If the current photo becomes hidden, the
-  workspace moves to the next visible photo in library order, then the previous
-  visible photo, then the first visible photo. If nothing matches, the viewer
-  is cleared and the selection label reports that no photos match.
+  visible matching photos only. If the current photo becomes hidden while scene
+  stacks are shown outside browse mode, the workspace stays in that photo's
+  scene when any of its photos remain visible: it moves to the next visible
+  photo in scene-strip order, then the previous one, so hiding a scene's last
+  photos does not jump to the next scene. Otherwise, including browse mode and
+  non-scene view, it moves to the next visible photo in library order, then the
+  previous visible photo, then the first visible photo. The same rule applies
+  whether a metadata edit, metadata undo/redo, or a filter change hides the
+  photo. The replacement search uses the library's unfiltered scene groups
+  because the visible scene lookup is rebuilt only after the replacement is
+  chosen. If nothing matches, the viewer is cleared and the selection label
+  reports that no photos match.
 - Metadata edits in compare mode update the existing hidden thumbnail, browse,
   and scene-strip cards in place when every changed photo keeps the same filter
   membership. They must preserve row-widget identity, selection, geometry, and
@@ -661,6 +669,11 @@ issuing another interruptible Quit request.
   and horizontal scene strip: full horizontal-scene selection may merge with
   selected vertical stacks, but partial horizontal-scene selection remains
   blocked as an attempted split.
+- If the hidden-current-photo replacement changes, keep the scene cases in
+  `tests/ui/main_window/test_filters.py` passing: hiding a scene's last photos
+  stays in that scene, hiding middle photos moves forward within it, hiding a
+  whole scene moves to the next scene, filter changes follow the same rule, and
+  browse mode keeps grid order.
 - If thumbnail visible-region overlay rendering changes, preserve the
   normalized visible-region geometry contract from
   `PhotoViewer.visible_region_rect()`.

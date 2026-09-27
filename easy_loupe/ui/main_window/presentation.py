@@ -37,6 +37,35 @@ if TYPE_CHECKING:
 MULTI_PHOTO_SELECTION_COUNT = 2
 
 
+def _find_nearest_visible_photo_id(
+        ordered_photo_ids: list[str],
+        preferred_photo_id: str | None,
+        visible_photo_ids: set[str],
+) -> str | None:
+    """
+    Return the closest visible photo after, then before, a hidden photo.
+
+    ``None`` means ``preferred_photo_id`` is not in ``ordered_photo_ids`` or no
+    other photo there is visible, so callers can widen the search.
+    """
+    if (
+        preferred_photo_id is None
+        or preferred_photo_id not in ordered_photo_ids
+    ):
+        return None
+
+    preferred_index = ordered_photo_ids.index(preferred_photo_id)
+    for photo_id in ordered_photo_ids[preferred_index + 1 :]:
+        if photo_id in visible_photo_ids:
+            return photo_id
+
+    for photo_id in reversed(ordered_photo_ids[:preferred_index]):
+        if photo_id in visible_photo_ids:
+            return photo_id
+
+    return None
+
+
 class MainWindowPresentationMixin:
     """List population, presentation refresh, and theming helpers."""
 
@@ -82,22 +111,47 @@ class MainWindowPresentationMixin:
         if preferred_photo_id in visible_photo_ids:
             return preferred_photo_id
 
-        ordered_photos = self.library.get_photos()
-        ordered_photo_ids = [photo.photo_id for photo in ordered_photos]
-        try:
-            preferred_index = ordered_photo_ids.index(preferred_photo_id or '')
-        except ValueError:
-            return visible_photos[0].photo_id
+        # The scene strip is the user's working set in scene view. Search the
+        # hidden photo's own scene first so hiding a scene's last photos steps
+        # back to a remaining member instead of jumping to the next scene.
+        scene_photo_id = _find_nearest_visible_photo_id(
+            self._find_scene_photo_ids(preferred_photo_id),
+            preferred_photo_id,
+            visible_photo_ids,
+        )
+        if scene_photo_id is not None:
+            return scene_photo_id
 
-        for photo in ordered_photos[preferred_index + 1 :]:
-            if photo.photo_id in visible_photo_ids:
-                return photo.photo_id
+        library_photo_id = _find_nearest_visible_photo_id(
+            [photo.photo_id for photo in self.library.get_photos()],
+            preferred_photo_id,
+            visible_photo_ids,
+        )
+        return library_photo_id or visible_photos[0].photo_id
 
-        for photo in reversed(ordered_photos[:preferred_index]):
-            if photo.photo_id in visible_photo_ids:
-                return photo.photo_id
+    def _find_scene_photo_ids(
+            self: MainWindow, photo_id: str | None
+    ) -> list[str]:
+        """
+        Return every photo in ``photo_id``'s scene, in scene-strip order.
 
-        return visible_photos[0].photo_id
+        The library's unfiltered scene groups are used because the visible
+        scene lookup still reflects the previous filter state while a hidden
+        photo's replacement is chosen. Browse mode gets no scene because its
+        flat grid shows no scene boundaries, so it keeps grid order.
+        """
+        if (
+            photo_id is None
+            or self._browse_mode
+            or not self.library.scene_detection_done
+        ):
+            return []
+
+        for scene in self.library.get_scene_groups():
+            if photo_id in scene.photo_ids:
+                return list(scene.photo_ids)
+
+        return []
 
     def _build_photo_filter_menu(self: MainWindow) -> QMenu:
         return create_photo_filter_menu(
