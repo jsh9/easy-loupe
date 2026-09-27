@@ -82,14 +82,20 @@ Major logic:
   saved metadata, undo history, organizer inputs, or XMP sidecar output.
 - Under an active filter, metadata edits can make the current photo disappear
   from the visible lists. The UI should rebuild from matching photos and move
-  to the next visible photo, or clear the viewer when no photos still match.
-  When scene stacks are shown outside browse mode, the replacement stays in the
-  current scene while any of its photos remain visible, so rejecting the last
-  photos of a scene does not jump to the next scene. See the filter rules in
-  `ui-workflows.md`.
-- Explicit multi-selection is restored after repopulation. Single-item
-  selection is left to `setCurrentRow` in populate methods so it integrates
-  cleanly with Qt's selection model and does not create sticky selection state.
+  to the next visible photo, or clear the viewer when no photos still match. In
+  scene view, the replacement stays in the current scene while any of its
+  photos remain visible, so rejecting the last photos of a scene does not jump
+  to the next scene. See the filter rules in `ui-workflows.md`.
+- Explicit multi-selection is restored after repopulation when at least two of
+  its rows are still visible. Single-item selection is left to `setCurrentRow`
+  in populate methods so it integrates cleanly with Qt's selection model and
+  does not create sticky selection state. When a filtered edit hides the
+  selected rows, the rebuilt lists therefore keep the replacement photo as the
+  single selection, so the next assignment targets the photo shown instead of
+  falling back to the scene cover.
+- Filtered edits that add or remove list rows restart Shift-range anchors, as
+  filter changes do, because anchors are row numbers that could otherwise point
+  at photos the user never selected.
 - Navigating within the scene strip without Shift/Ctrl gives the left thumbnail
   strip a clean single-item selection. Only Shift/Ctrl navigation preserves
   accumulated thumbnail selection across scene-strip moves.
@@ -197,7 +203,9 @@ Major logic:
   selection. Navigating away after tagging should show only the navigated-to
   photo as selected, and subsequent tagging should apply only to that photo.
 - Verify multi-selection tagging still applies to all selected photos and
-  preserves the extended selection after refresh.
+  preserves the extended selection after refresh. Under an active filter, when
+  the tagged selection disappears, verify that the next tag targets the
+  replacement photo shown in the main view.
 - If organizer, XMP, or undo behavior changes, test dialog defaults and typed
   option mapping when UI-facing behavior changes.
 - When organizer controls change, verify accepted choices persist, canceled or

@@ -48,13 +48,11 @@ def _find_nearest_visible_photo_id(
     ``None`` means ``preferred_photo_id`` is not in ``ordered_photo_ids`` or no
     other photo there is visible, so callers can widen the search.
     """
-    if (
-        preferred_photo_id is None
-        or preferred_photo_id not in ordered_photo_ids
-    ):
+    try:
+        preferred_index = ordered_photo_ids.index(preferred_photo_id or '')
+    except ValueError:
         return None
 
-    preferred_index = ordered_photo_ids.index(preferred_photo_id)
     for photo_id in ordered_photo_ids[preferred_index + 1 :]:
         if photo_id in visible_photo_ids:
             return photo_id
@@ -111,47 +109,63 @@ class MainWindowPresentationMixin:
         if preferred_photo_id in visible_photo_ids:
             return preferred_photo_id
 
-        # The scene strip is the user's working set in scene view. Search the
-        # hidden photo's own scene first so hiding a scene's last photos steps
-        # back to a remaining member instead of jumping to the next scene.
-        scene_photo_id = _find_nearest_visible_photo_id(
-            self._find_scene_photo_ids(preferred_photo_id),
-            preferred_photo_id,
-            visible_photo_ids,
-        )
-        if scene_photo_id is not None:
-            return scene_photo_id
-
-        library_photo_id = _find_nearest_visible_photo_id(
-            [photo.photo_id for photo in self.library.get_photos()],
-            preferred_photo_id,
-            visible_photo_ids,
-        )
-        return library_photo_id or visible_photos[0].photo_id
-
-    def _find_scene_photo_ids(
-            self: MainWindow, photo_id: str | None
-    ) -> list[str]:
-        """
-        Return every photo in ``photo_id``'s scene, in scene-strip order.
-
-        The library's unfiltered scene groups are used because the visible
-        scene lookup still reflects the previous filter state while a hidden
-        photo's replacement is chosen. Browse mode gets no scene because its
-        flat grid shows no scene boundaries, so it keeps grid order.
-        """
-        if (
-            photo_id is None
-            or self._browse_mode
-            or not self.library.scene_detection_done
+        for ordered_photo_ids in self._build_replacement_search_orders(
+            preferred_photo_id
         ):
-            return []
+            replacement_photo_id = _find_nearest_visible_photo_id(
+                ordered_photo_ids, preferred_photo_id, visible_photo_ids
+            )
+            if replacement_photo_id is not None:
+                return replacement_photo_id
 
-        for scene in self.library.get_scene_groups():
-            if photo_id in scene.photo_ids:
-                return list(scene.photo_ids)
+        return visible_photos[0].photo_id
 
-        return []
+    def _build_replacement_search_orders(
+            self: MainWindow, hidden_photo_id: str | None
+    ) -> list[list[str]]:
+        """
+        Return the photo orders searched, in turn, to replace a hidden photo.
+
+        Scene view searches the hidden photo's own scene first, so hiding the
+        last photos of a scene steps back inside it instead of leaving. When
+        the whole scene is hidden, the search continues in left-strip scene
+        order because unfiltered merges can leave a scene split around other
+        stacks in library order. Library order is the final fallback, and the
+        only order outside scene view.
+        """
+        library_order = [photo.photo_id for photo in self.library.get_photos()]
+        if not self._should_replace_hidden_photo_in_scene_order():
+            return [library_order]
+
+        # Use the library's unfiltered groups: the visible scene lookup is
+        # rebuilt only after the replacement is chosen, so it still reflects
+        # the previous filter state here.
+        scene_groups = self.library.scene_group_photo_ids()
+        hidden_photo_scene = next(
+            (group for group in scene_groups if hidden_photo_id in group), []
+        )
+        scene_order = [
+            photo_id for group in scene_groups for photo_id in group
+        ]
+        return [hidden_photo_scene, scene_order, library_order]
+
+    def _should_replace_hidden_photo_in_scene_order(
+            self: MainWindow,
+    ) -> bool:
+        """
+        Return whether a hidden current photo is replaced in scene order.
+
+        Browse mode is one flat grid without scene boundaries, so it keeps
+        library order. Compare mode clears ``_browse_mode`` while it is open
+        and stores the mode it returns to, so it follows that mode instead.
+        """
+        if not self.library.scene_detection_done:
+            return False
+
+        returns_to_browse = (
+            self._compare_mode and self._compare_restore_browse_mode
+        )
+        return not (self._browse_mode or returns_to_browse)
 
     def _build_photo_filter_menu(self: MainWindow) -> QMenu:
         return create_photo_filter_menu(

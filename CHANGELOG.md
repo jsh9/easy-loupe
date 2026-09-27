@@ -20,11 +20,15 @@
     time.
   - When a filter hides rejected photos (or any other filtered-out photos),
     tagging the last photos of a scene in the scene strip no longer jumps the
-    main view to the next scene. The main view now moves to the nearest
-    remaining photo in the same scene, and moves on to the next scene only when
-    every photo in that scene is hidden. The same applies when changing the
-    filter hides the photo you are viewing. Browse mode still moves to the next
-    photo in the grid.
+    main view to the next scene. The main view now moves to the next remaining
+    photo in the same scene, or the previous one if none come after it. Only
+    when every photo in the scene is hidden does it move on, to the next scene
+    stack in the left strip. The same applies to undo/redo and to changing the
+    filter. Browse mode still moves to the next photo in the grid.
+  - After tagged photos disappear under a filter, the next tag and the next
+    Shift+Left/Right range now start from the photo shown in the main view.
+    Previously, the next tag could apply to the scene's first photo, and a
+    Shift range could include a photo you never picked.
 
 ## [1.4.5] - 2026-09-21
 
