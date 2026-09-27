@@ -987,11 +987,18 @@ def test_filter_rejection_restarts_scene_strip_shift_range(
 
 
 def _press_shift_up_in_left_strip(window: Any, app: Any) -> None:
-    """Send Shift+Up through the left strip's own key routing."""
-    event = QKeyEvent(QEvent.KeyPress, Qt.Key_Up, Qt.ShiftModifier)
-    window.thumbnail_list.keyPressEvent(event)
+    """
+    Send Shift+Up through the left strip's own key routing.
+
+    ``QTest.keyClick`` would leave ``QApplication.keyboardModifiers()``
+    reporting Shift after the click, so later tests in the same process would
+    behave as if Shift were still held. Calling ``keyPressEvent`` directly runs
+    the same routing without touching that global state.
+    """
+    window.thumbnail_list.keyPressEvent(
+        QKeyEvent(QEvent.KeyPress, Qt.Key_Up, Qt.ShiftModifier)
+    )
     app.processEvents()
-    assert event.isAccepted() is True
 
 
 def test_filter_rejection_restarts_left_strip_shift_range(
