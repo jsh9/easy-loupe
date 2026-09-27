@@ -128,10 +128,23 @@ Major logic:
   state until `Confirm` is clicked. Pressing `Enter` in the open popup uses the
   same confirmation path.
 - Active filters rebuild the thumbnail strip, browse grid, and scene strip from
-  visible matching photos only. If the current photo becomes hidden, the
-  workspace moves to the next visible photo in library order, then the previous
-  visible photo, then the first visible photo. If nothing matches, the viewer
-  is cleared and the selection label reports that no photos match.
+  visible matching photos only. If the current photo becomes hidden in scene
+  view (scenes detected, outside browse mode), the workspace first stays in
+  that photo's scene: it moves to the next visible photo in scene-strip order,
+  then the previous one, so hiding a scene's last photos does not jump to the
+  next scene. When the whole scene is hidden, it moves to the first visible
+  photo of the next scene stack in left-strip order, or else the last visible
+  photo of the previous stack. This follows left-strip order rather than
+  library order because unfiltered merges can split a scene around other stacks
+  in library order. Browse mode and non-scene view instead move to the next
+  visible photo in library order, then the previous visible photo. Compare mode
+  clears the browse flag while open, so it follows the mode it returns to. The
+  first visible photo is the final fallback. The same rules apply whether a
+  metadata edit, metadata undo/redo, or a filter change hides the photo. The
+  replacement search uses the library's unfiltered scene groups because the
+  visible scene lookup is rebuilt only after the replacement is chosen. If
+  nothing matches, the viewer is cleared and the selection label reports that
+  no photos match.
 - Metadata edits in compare mode update the existing hidden thumbnail, browse,
   and scene-strip cards in place when every changed photo keeps the same filter
   membership. They must preserve row-widget identity, selection, geometry, and
@@ -661,6 +674,14 @@ issuing another interruptible Quit request.
   and horizontal scene strip: full horizontal-scene selection may merge with
   selected vertical stacks, but partial horizontal-scene selection remains
   blocked as an attempted split.
+- If the hidden-current-photo replacement changes, keep the scene cases in
+  `tests/ui/main_window/test_filters.py` passing: hiding a scene's last photos
+  stays in that scene, hiding middle photos moves forward within it, and hiding
+  a whole scene moves to the next scene stack in left-strip order, even when
+  that scene is split around other stacks in library order. Redo and filter
+  changes follow the same rules, browse mode and compare opened from browse
+  keep grid order, and the next tag and Shift range start from the photo now
+  shown.
 - If thumbnail visible-region overlay rendering changes, preserve the
   normalized visible-region geometry contract from
   `PhotoViewer.visible_region_rect()`.

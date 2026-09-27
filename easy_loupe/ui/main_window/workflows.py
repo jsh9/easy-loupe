@@ -1869,10 +1869,12 @@ class MainWindowWorkflowMixin:
             if changed_photo_ids is not None
             else [photo.photo_id for photo in self.library.get_photos()]
         )
-        if (
-            self._compare_mode
-            and not self._metadata_change_requires_filtered_rebuild(photo_ids)
-        ):
+        # Compute this before the rebuild: it compares the old visible rows
+        # with the edited metadata to see whether list membership changed.
+        membership_changed = self._metadata_change_requires_filtered_rebuild(
+            photo_ids
+        )
+        if self._compare_mode and not membership_changed:
             self._refresh_metadata_items_in_place(photo_ids)
             self._refresh_compare_metadata_labels()
             self._refresh_ui()
@@ -1904,9 +1906,30 @@ class MainWindowWorkflowMixin:
         self._populate_thumbnail_list(scroll_current_item_into_view=False)
         self._populate_browse_list(scroll_current_item_into_view=False)
         self._populate_scene_list()
+        rebuilt_rows = {
+            self.thumbnail_list: self._thumbnail_photo_rows,
+            self.browse_list: self._browse_photo_rows,
+            self.scene_list: self._scene_photo_rows,
+        }
         for list_widget, selected_ids in selection_states.items():
-            if len(selected_ids) >= MIN_SCENE_MERGE_PHOTO_COUNT:
-                self._restore_selected_item_ids(list_widget, selected_ids)
+            # A filtered edit can hide every selected row. Restoring that set
+            # would deselect the replacement row the populate call just made
+            # current, and scene-mode tags would then fall back to the scene
+            # cover. Restore only multi-selections that are still visible.
+            surviving_ids = {
+                photo_id
+                for photo_id in selected_ids
+                if photo_id in rebuilt_rows[list_widget]
+            }
+            if len(surviving_ids) >= MIN_SCENE_MERGE_PHOTO_COUNT:
+                self._restore_selected_item_ids(list_widget, surviving_ids)
+
+        if membership_changed:
+            # Shift ranges are anchored by row number, and this rebuild added
+            # or removed rows, so an old anchor could now hold a photo the
+            # user never selected. Restart ranges, as filter changes do.
+            self._scene_selection_anchor_row = None
+            self._thumbnail_selection_anchor_row = None
 
         for list_widget, scroll_state in scroll_states.items():
             self._restore_scroll_state(list_widget, scroll_state)
