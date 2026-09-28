@@ -18,8 +18,9 @@
 
   - The About dialog now shows EasyLoupe's copyright and license, states that
     it comes with no warranty, and links to the source code, the license, and
-    the new third-party notices. Packaged apps also include the license files
-    of the components they bundle.
+    the new third-party notices. Packaged apps also include EasyLoupe's
+    license, the third-party notices, and the license texts of the components
+    they bundle.
 
   - When you navigate the main view's left thumbnail strip with the keyboard
     (Up/Down, Page Up/Down, Shift+Up/Down, or Up/Down from the scene strip),

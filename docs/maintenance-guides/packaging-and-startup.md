@@ -26,9 +26,11 @@ Primary files:
 
 - `scripts/build_app/build_app_macos.py`
 - `scripts/build_app/build_app_windows.py`
-- `scripts/build_app/common.py`
+- `scripts/build_app/utils.py`
 - `tests/scripts/`
 - `README.md`
+- `THIRD_PARTY_NOTICES.md`
+- `third_party_licenses/`
 
 Major logic:
 
@@ -54,15 +56,23 @@ Major logic:
   cache/staging directories and bundle them under
   `easy_loupe/vendor/exiftool/...` inside the PyInstaller artifact. Do not
   commit downloaded ExifTool payloads.
-- Packaged apps carry their license notices through package metadata.
-  `pyproject.toml` lists `LICENSE` and `THIRD_PARTY_NOTICES.md` as
-  `license-files`, so `--copy-metadata easy-loupe` ships both.
-  `utils.runtime_metadata_args()` adds `--copy-metadata` for every installed
-  runtime dependency, computed from package metadata, so each dependency's
-  license files ship too.
+- Packaged apps must carry every bundled component's license text.
+  `utils.license_data_args()` bundles `LICENSE`, `THIRD_PARTY_NOTICES.md`, and
+  `third_party_licenses/` (texts for components whose Python package metadata
+  lacks them: the Python runtime, Qt, ExifTool, and native libraries inside
+  dependency wheels). `utils.runtime_metadata_args()` adds `--copy-metadata`
+  for every installed runtime dependency, computed from package metadata, so
+  each package's own license files ship too.
+- After PyInstaller finishes, `utils.verify_bundled_licenses()` inspects the
+  built app's data folder (`Contents/Resources` on macOS, `_internal` for
+  Windows one-folder builds) and fails the build if any of those files or
+  metadata folders are missing. Windows `--onefile` builds pack data inside the
+  executable, so verify licenses with a one-folder build.
 - When adding, removing, or swapping a runtime dependency, update the component
-  table in `THIRD_PARTY_NOTICES.md`, including any native libraries the
-  dependency's wheels bundle.
+  table in `THIRD_PARTY_NOTICES.md`. If the dependency's wheels bundle native
+  libraries whose licenses are not in its package metadata, add their texts to
+  `third_party_licenses/` with a header naming the component and text source; a
+  test keeps that folder and the notices table in sync.
 
 ## 2. App Identity And Assets
 

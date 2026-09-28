@@ -81,8 +81,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     subprocess.run(command, cwd=REPO_ROOT, check=True)  # noqa: S603
     if args.onefile:
+        # One-file builds pack data files inside the executable, so only the
+        # one-folder layout can be inspected for bundled license files. Both
+        # layouts share the same PyInstaller data arguments.
         print(ONEFILE_PATH)
     else:
+        utils.verify_bundled_licenses(APP_DIR / '_internal')
         print(APP_DIR)
         print(f'Run {APP_PATH} from inside this folder.')
 

@@ -59,6 +59,15 @@ def test_pyinstaller_command_prefers_module_when_binary_missing(
         'easy-loupe',
         '--copy-metadata',
         'pillow',
+        '--add-data',
+        f'{build_app.utils.LICENSE_PATH}{os.pathsep}.',
+        '--add-data',
+        f'{build_app.utils.THIRD_PARTY_NOTICES_PATH}{os.pathsep}.',
+        '--add-data',
+        (
+            f'{build_app.utils.THIRD_PARTY_LICENSES_DIR}{os.pathsep}'
+            'third_party_licenses'
+        ),
         '--osx-bundle-identifier',
         'com.easyloupe.EasyLoupe',
         '--add-binary',
@@ -112,6 +121,15 @@ def test_pyinstaller_command_uses_binary_when_available(
         'easy-loupe',
         '--copy-metadata',
         'pillow',
+        '--add-data',
+        f'{build_app.utils.LICENSE_PATH}{os.pathsep}.',
+        '--add-data',
+        f'{build_app.utils.THIRD_PARTY_NOTICES_PATH}{os.pathsep}.',
+        '--add-data',
+        (
+            f'{build_app.utils.THIRD_PARTY_LICENSES_DIR}{os.pathsep}'
+            'third_party_licenses'
+        ),
         '--osx-bundle-identifier',
         'com.easyloupe.EasyLoupe',
         '--add-binary',
@@ -186,6 +204,11 @@ def test_main_signs_and_verifies_after_metadata_injection(
     )
     monkeypatch.setattr(
         build_app,
+        'verify_app_licenses',
+        lambda: calls.append('licenses'),
+    )
+    monkeypatch.setattr(
+        build_app,
         'inject_info_plist_metadata',
         lambda: calls.append('plist'),
     )
@@ -206,6 +229,7 @@ def test_main_signs_and_verifies_after_metadata_injection(
         'pyinstaller',
         'chmod',
         'cleanup',
+        'licenses',
         'plist',
         'sign',
         'verify',

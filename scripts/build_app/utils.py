@@ -19,6 +19,9 @@ BUNDLE_IDENTIFIER = 'com.easyloupe.EasyLoupe'
 EXIFTOOL_VERSION = '13.58'
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ENTRYPOINT = REPO_ROOT / 'easy_loupe' / '__main__.py'
+LICENSE_PATH = REPO_ROOT / 'LICENSE'
+THIRD_PARTY_NOTICES_PATH = REPO_ROOT / 'THIRD_PARTY_NOTICES.md'
+THIRD_PARTY_LICENSES_DIR = REPO_ROOT / 'third_party_licenses'
 EXIFTOOL_CACHE_DIR = REPO_ROOT / 'build' / 'exiftool-cache'
 
 
@@ -53,6 +56,7 @@ def common_pyinstaller_args(
         '--copy-metadata',
         'easy-loupe',
         *runtime_metadata_args(),
+        *license_data_args(),
         str(ENTRYPOINT),
     ]
     if windowed:
@@ -115,6 +119,69 @@ def runtime_metadata_args() -> list[str]:
         args.extend(['--copy-metadata', name])
 
     return args
+
+
+def license_data_args() -> list[str]:
+    """
+    Return PyInstaller args that bundle EasyLoupe's license notices.
+
+    ``third_party_licenses/`` holds license texts for bundled components whose
+    Python package metadata does not carry them, such as the Python runtime,
+    Qt, ExifTool, and native libraries inside dependency wheels.
+    """
+    return [
+        '--add-data',
+        pyinstaller_source_and_dest(LICENSE_PATH, '.'),
+        '--add-data',
+        pyinstaller_source_and_dest(THIRD_PARTY_NOTICES_PATH, '.'),
+        '--add-data',
+        pyinstaller_source_and_dest(
+            THIRD_PARTY_LICENSES_DIR, THIRD_PARTY_LICENSES_DIR.name
+        ),
+    ]
+
+
+def verify_bundled_licenses(data_dir: Path) -> None:
+    """
+    Fail the build when a packaged app is missing license files.
+
+    ``data_dir`` is where PyInstaller placed data files: ``Contents/Resources``
+    in the macOS app, or ``_internal`` in the Windows one-folder app.
+    Inspecting the built artifact, rather than trusting the PyInstaller
+    arguments, catches files that were never copied into the app.
+
+    Raises
+    ------
+    RuntimeError
+        If any expected license file or package metadata folder is missing.
+    """
+    expected_files = [
+        data_dir / LICENSE_PATH.name,
+        data_dir / THIRD_PARTY_NOTICES_PATH.name,
+        *(
+            data_dir / THIRD_PARTY_LICENSES_DIR.name / path.name
+            for path in sorted(THIRD_PARTY_LICENSES_DIR.iterdir())
+            if path.is_file()
+        ),
+    ]
+    missing = [
+        str(path.relative_to(data_dir))
+        for path in expected_files
+        if not path.is_file()
+    ]
+    bundled_metadata = {
+        canonicalize_name(path.name.split('-', 1)[0])
+        for path in data_dir.glob('*.dist-info')
+    }
+    missing.extend(
+        f'{name} package metadata'
+        for name in ['easy-loupe', *runtime_dependency_names()]
+        if name not in bundled_metadata
+    )
+    if missing:
+        raise RuntimeError(
+            'Packaged app is missing license files: ' + ', '.join(missing)
+        )
 
 
 def download_file(url: str, destination: Path, *, message: str) -> None:

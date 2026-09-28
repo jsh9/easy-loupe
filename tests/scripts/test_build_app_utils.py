@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import re
+import shutil
 from importlib import metadata as importlib_metadata
 from typing import TYPE_CHECKING
+
+import pytest
 
 from scripts.build_app import utils
 
 if TYPE_CHECKING:
-    import pytest
+    from pathlib import Path
 
 _FAKE_REQUIREMENTS = {
     'easy-loupe': [
@@ -62,3 +66,76 @@ def test_runtime_dependency_names_walks_installed_runtime_closure(
         '--copy-metadata',
         'rawpy',
     ]
+
+
+def _write_complete_license_bundle(data_dir: Path) -> None:
+    """Populate ``data_dir`` like a packaged app's data folder."""
+    data_dir.mkdir()
+    shutil.copy2(utils.LICENSE_PATH, data_dir)
+    shutil.copy2(utils.THIRD_PARTY_NOTICES_PATH, data_dir)
+    shutil.copytree(
+        utils.THIRD_PARTY_LICENSES_DIR, data_dir / 'third_party_licenses'
+    )
+    for dist_info in ('easy_loupe-1.0.dist-info', 'Pillow-12.0.dist-info'):
+        (data_dir / dist_info).mkdir()
+
+
+def test_verify_bundled_licenses_accepts_complete_bundle(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify a packaged app with every license file passes the build check.
+
+    Metadata folder names are matched after name normalization, because wheels
+    spell distribution names inconsistently (``Pillow``, ``easy_loupe``).
+    """
+    monkeypatch.setattr(utils, 'runtime_dependency_names', lambda: ['pillow'])
+    data_dir = tmp_path / 'Resources'
+    _write_complete_license_bundle(data_dir)
+
+    utils.verify_bundled_licenses(data_dir)
+
+
+def test_verify_bundled_licenses_reports_every_missing_file(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify the build fails and names each missing license file.
+
+    The check inspects the built app rather than the PyInstaller arguments, so
+    a license text or package metadata folder that never reached the app must
+    stop the build instead of shipping an incomplete app.
+    """
+    monkeypatch.setattr(utils, 'runtime_dependency_names', lambda: ['pillow'])
+    data_dir = tmp_path / 'Resources'
+    _write_complete_license_bundle(data_dir)
+    (data_dir / 'third_party_licenses' / 'Python.txt').unlink()
+    shutil.rmtree(data_dir / 'Pillow-12.0.dist-info')
+
+    with pytest.raises(RuntimeError) as error:
+        utils.verify_bundled_licenses(data_dir)
+
+    message = str(error.value)
+    assert 'third_party_licenses/Python.txt' in message
+    assert 'pillow package metadata' in message
+
+
+def test_third_party_notices_reference_every_bundled_license_text() -> None:
+    """
+    Verify ``THIRD_PARTY_NOTICES.md`` and ``third_party_licenses/`` agree.
+
+    Every curated license text must be listed in the notices, and every text
+    the notices point to must exist, so users are never sent to a file the
+    packaged app does not contain.
+    """
+    notices = utils.THIRD_PARTY_NOTICES_PATH.read_text(encoding='utf-8')
+    referenced = set(
+        re.findall(r'third_party_licenses/([\w.-]+\.txt)', notices)
+    )
+    bundled = {
+        path.name
+        for path in utils.THIRD_PARTY_LICENSES_DIR.iterdir()
+        if path.is_file()
+    }
+
+    assert referenced == bundled
