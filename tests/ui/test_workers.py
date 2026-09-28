@@ -459,9 +459,13 @@ def test_photo_viewer_exif_worker_emits_current_photo_focus_point(
     metadata_source = tmp_path / 'A.CR3'
     preview_source = tmp_path / 'A.JPG'
     heif_source = tmp_path / 'A.HEIC'
+    jxl_source = tmp_path / 'A.JXL'
+    png_source = tmp_path / 'A.PNG'
     metadata_source.write_bytes(b'raw')
     preview_source.write_bytes(b'jpeg')
     heif_source.write_bytes(b'heif')
+    jxl_source.write_bytes(b'jxl')
+    png_source.write_bytes(b'png')
     monkeypatch.setattr(
         photo_viewer_workers_module.exif_module,
         'read_exif_metadata',
@@ -489,7 +493,13 @@ def test_photo_viewer_exif_worker_emits_current_photo_focus_point(
         'A',
         metadata_source,
         preview_source,
-        [metadata_source, preview_source, heif_source],
+        [
+            metadata_source,
+            preview_source,
+            heif_source,
+            jxl_source,
+            png_source,
+        ],
     )
     worker.finished.connect(
         lambda request_id, photo_id, focus_point: finished_events.append((
@@ -525,7 +535,7 @@ def test_photo_viewer_exif_worker_emits_current_photo_focus_point(
         'Exposure Compensation': '-1/3',
         'ISO': '800',
         'Resolution': '1000 x 500 pixels (0.5 MP)',
-        'File Size': 'JPG: 1 KB, HEIF: 1 KB, RAW: 1 KB',
+        'File Size': 'JPG: 1 KB, HEIF: 1 KB, JXL: 1 KB, PNG: 1 KB, RAW: 1 KB',
     }
 
 

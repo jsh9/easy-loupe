@@ -15,10 +15,10 @@ ______________________________________________________________________
 
 <!--TOC-->
 
-EasyLoupe is a desktop photo culling app for JPEG, HEIC/HEIF, and RAW folders.
-It is built for quickly reviewing a shoot, marking keepers and rejects,
-comparing similar frames, and carrying ratings or labels into the next step of
-a photo workflow.
+EasyLoupe is a desktop photo culling app for JPEG, HEIC/HEIF, JPEG XL, PNG, and
+RAW folders. It is built for quickly reviewing a shoot, marking keepers and
+rejects, comparing similar frames, and carrying ratings or labels into the next
+step of a photo workflow.
 
 ## 1. What It Helps With
 

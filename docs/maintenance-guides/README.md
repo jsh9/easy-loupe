@@ -27,8 +27,8 @@ workflow slices, important invariants, and manual verification pointers.
   identity, direct-file-open startup routing, macOS folder access, and
   platform-specific verification.
 - [Previews, EXIF, And Autofocus](previews-exif-autofocus.md): preview cache
-  semantics, RAW/HEIF runtime dependencies, ExifTool lookup, EXIF display, and
-  brand-specific AF-point extraction.
+  semantics, RAW/HEIF/JPEG XL runtime dependencies, ExifTool lookup, EXIF
+  display, and brand-specific AF-point extraction.
 - [Recursive Loading](recursive-loading.md): culling-folder subfolder scanning,
   folder-relative photo IDs, metadata migration, recursive operation paths, and
   photo-viewer-to-culling handoff boundaries.

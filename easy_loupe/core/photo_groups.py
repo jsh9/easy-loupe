@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 from easy_loupe.core.records import (
     HEIF_EXTENSIONS,
     JPEG_EXTENSIONS,
+    JXL_EXTENSIONS,
+    PNG_EXTENSIONS,
     RASTER_EXTENSIONS,
     RAW_EXTENSIONS,
 )
@@ -23,6 +25,8 @@ class PhotoGroupSources:
     sorted_group_files: list[Path]
     jpeg_files: list[Path]
     heif_files: list[Path]
+    jxl_files: list[Path]
+    png_files: list[Path]
     raw_files: list[Path]
     preview_source: Path
     metadata_source: Path
@@ -52,6 +56,12 @@ def select_photo_group_sources(
     heif_files = [
         path for path in raster_files if path.suffix.lower() in HEIF_EXTENSIONS
     ]
+    jxl_files = [
+        path for path in raster_files if path.suffix.lower() in JXL_EXTENSIONS
+    ]
+    png_files = [
+        path for path in raster_files if path.suffix.lower() in PNG_EXTENSIONS
+    ]
     raw_files = [
         path
         for path in sorted_group_files
@@ -59,12 +69,18 @@ def select_photo_group_sources(
     ]
 
     # Preserve alphabetical file listing, but choose previews by format
-    # priority. JPEG is the safest raster source; HEIF is still preferred over
-    # RAW because it avoids the slower RAW render path.
+    # priority. JPEG is the safest raster source; every other raster is still
+    # preferred over RAW because it avoids the slower RAW render path. PNG
+    # comes last among rasters because it is usually a graphic or screenshot
+    # and decodes slowly at photo sizes.
     if jpeg_files:
         preview_source = jpeg_files[0]
     elif heif_files:
         preview_source = heif_files[0]
+    elif jxl_files:
+        preview_source = jxl_files[0]
+    elif png_files:
+        preview_source = png_files[0]
     else:
         preview_source = raw_files[0]
 
@@ -73,6 +89,8 @@ def select_photo_group_sources(
         sorted_group_files=sorted_group_files,
         jpeg_files=jpeg_files,
         heif_files=heif_files,
+        jxl_files=jxl_files,
+        png_files=png_files,
         raw_files=raw_files,
         preview_source=preview_source,
         metadata_source=metadata_source,

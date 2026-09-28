@@ -109,7 +109,7 @@ def test_document_type_entry_registers_supported_photo_extensions() -> None:
 
     assert entry['CFBundleTypeRole'] == 'Viewer'
     assert entry['LSHandlerRank'] == 'Alternate'
-    assert {'jpg', 'heic', 'arw', 'rw2'} <= set(
+    assert {'jpg', 'heic', 'jxl', 'png', 'arw', 'rw2'} <= set(
         entry['CFBundleTypeExtensions']
     )
 

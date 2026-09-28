@@ -95,7 +95,14 @@ def test_load_folder_groups_jpeg_and_raw_files_by_stem(
 
 
 def test_supported_extensions_include_major_viewer_formats() -> None:
-    assert {'.jpg', '.jpeg', '.heic', '.heif'} <= SUPPORTED_EXTENSIONS
+    assert {
+        '.jpg',
+        '.jpeg',
+        '.heic',
+        '.heif',
+        '.jxl',
+        '.png',
+    } <= SUPPORTED_EXTENSIONS
     assert {
         '.crw',
         '.cr2',
@@ -172,6 +179,83 @@ def test_load_folder_prefers_jpeg_preview_over_heif_with_shared_stem(
     assert photo.exif_display == {
         'File Size': 'JPG: 5 KB, HEIF: 1 KB, RAW: 1 KB'
     }
+
+
+@pytest.mark.parametrize(
+    (
+        'filenames',
+        'expected_preview',
+        'expected_metadata',
+        'expected_file_size',
+    ),
+    [
+        pytest.param(
+            ['IMG_0102.png'],
+            'IMG_0102.png',
+            'IMG_0102.png',
+            'PNG: 1 KB',
+            id='png-only',
+        ),
+        pytest.param(
+            ['IMG_0102.PNG', 'IMG_0102.ARW'],
+            'IMG_0102.PNG',
+            'IMG_0102.ARW',
+            'PNG: 1 KB, RAW: 1 KB',
+            id='png-over-raw',
+        ),
+        pytest.param(
+            ['IMG_0102.PNG', 'IMG_0102.JXL'],
+            'IMG_0102.JXL',
+            'IMG_0102.JXL',
+            'JXL: 1 KB, PNG: 1 KB',
+            id='jxl-over-png',
+        ),
+        pytest.param(
+            ['IMG_0102.JXL', 'IMG_0102.HEIC'],
+            'IMG_0102.HEIC',
+            'IMG_0102.HEIC',
+            'HEIF: 1 KB, JXL: 1 KB',
+            id='heif-over-jxl',
+        ),
+        pytest.param(
+            ['IMG_0102.JXL', 'IMG_0102.JPG', 'IMG_0102.ARW'],
+            'IMG_0102.JPG',
+            'IMG_0102.ARW',
+            'JPG: 1 KB, JXL: 1 KB, RAW: 1 KB',
+            id='jpeg-over-jxl-with-raw',
+        ),
+    ],
+)
+def test_load_folder_picks_jxl_and_png_previews_by_format_priority(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        filenames: list[str],
+        expected_preview: str,
+        expected_metadata: str,
+        expected_file_size: str,
+) -> None:
+    """
+    Verify JPEG XL and PNG files join shared-stem records as rasters.
+
+    Preview priority is JPEG > HEIF > JXL > PNG > RAW, and RAW stays the
+    metadata source whenever present. This guards the new formats against being
+    skipped by folder scans, outranking faster preview sources, or dropping out
+    of the EXIF file-size summary.
+    """
+    for filename in filenames:
+        (tmp_path / filename).write_bytes(b'data')
+
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+
+    assert [photo.photo_id for photo in library.photos] == ['IMG_0102']
+    photo = library.photos[0]
+    assert photo.preview_source == tmp_path / expected_preview
+    assert photo.metadata_source == tmp_path / expected_metadata
+    assert photo.has_raster is True
+    assert photo.exif_display == {'File Size': expected_file_size}
 
 
 def test_load_viewer_folder_uses_filename_order_and_can_open_single_file(

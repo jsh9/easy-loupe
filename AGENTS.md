@@ -2,8 +2,9 @@
 
 ## 1. Purpose
 
-This repository is a local desktop photo culling app for JPEG, HEIC/HEIF, and
-RAW folders. It is organized around a small set of top-level packages:
+This repository is a local desktop photo culling app for JPEG, HEIC/HEIF, JPEG
+XL, PNG, and RAW folders. It is organized around a small set of top-level
+packages:
 
 - `easy_loupe/core/`: non-UI application logic for the photo library, records,
   EXIF, metadata, previews, and scene detection.
@@ -209,8 +210,9 @@ maintenance guide before editing behavior.
 ## 6. External Dependencies And Runtime Assumptions
 
 - `PySide6` powers the desktop UI.
-- `Pillow`, `pillow-heif`, `rawpy`, `imagehash`, and `exiftool` support image
-  loading, RAW/HEIF rendering, scene detection, and metadata extraction. See
+- `Pillow`, `pillow-heif`, `pillow-jxl-plugin`, `rawpy`, `imagehash`, and
+  `exiftool` support image loading, RAW/HEIF/JPEG XL rendering, scene
+  detection, and metadata extraction. See
   `docs/maintenance-guides/previews-exif-autofocus.md` for runtime behavior and
   fallback contracts.
 - Packaged builds bundle ExifTool payloads. Source/development runs rely on

@@ -284,6 +284,8 @@ def _build_photo_record(
     sorted_group_files = sources.sorted_group_files
     jpeg_files = sources.jpeg_files
     heif_files = sources.heif_files
+    jxl_files = sources.jxl_files
+    png_files = sources.png_files
     raw_files = sources.raw_files
     preview_source = sources.preview_source
     metadata_source = sources.metadata_source
@@ -310,6 +312,8 @@ def _build_photo_record(
         source_metadata,
         jpeg_files=jpeg_files,
         heif_files=heif_files,
+        jxl_files=jxl_files,
+        png_files=png_files,
         raw_files=raw_files,
     )
     focus_point = exif_module.extract_focus_point(
@@ -328,7 +332,7 @@ def _build_photo_record(
         metadata_source=metadata_source,
         focus_point=focus_point,
         has_heif=bool(heif_files),
-        has_raster=bool(jpeg_files or heif_files),
+        has_raster=bool(jpeg_files or heif_files or jxl_files or png_files),
         focus_point_pending=focus_point_pending,
         capture_at=exif_display.capture_at,
         scene_id=None,
@@ -372,6 +376,8 @@ def build_photo_exif_display(
         *,
         jpeg_files: list[Path],
         heif_files: list[Path] | None = None,
+        jxl_files: list[Path] | None = None,
+        png_files: list[Path] | None = None,
         raw_files: list[Path],
 ) -> PhotoExifDisplay:
     """Build culling-compatible formatted EXIF rows for one photo group."""
@@ -383,9 +389,13 @@ def build_photo_exif_display(
     _add_resolution_display(exif_display, image_width, image_height)
     _add_file_size_display(
         exif_display,
-        jpeg_files,
-        heif_files or [],
-        raw_files,
+        [
+            ('JPG', jpeg_files),
+            ('HEIF', heif_files or []),
+            ('JXL', jxl_files or []),
+            ('PNG', png_files or []),
+            ('RAW', raw_files),
+        ],
     )
     return PhotoExifDisplay(
         capture_at=capture_at,
@@ -422,22 +432,13 @@ def _add_resolution_display(
 
 def _add_file_size_display(
         exif_display: dict[str, str],
-        jpeg_files: list[Path],
-        heif_files: list[Path],
-        raw_files: list[Path],
+        labeled_files: list[tuple[str, list[Path]]],
 ) -> None:
     parts: list[str] = []
-    jpeg_size = sum(path.stat().st_size for path in jpeg_files)
-    heif_size = sum(path.stat().st_size for path in heif_files)
-    raw_size = sum(path.stat().st_size for path in raw_files)
-    if jpeg_size:
-        parts.append(f'JPG: {_format_file_size(jpeg_size)}')
-
-    if heif_size:
-        parts.append(f'HEIF: {_format_file_size(heif_size)}')
-
-    if raw_size:
-        parts.append(f'RAW: {_format_file_size(raw_size)}')
+    for label, files in labeled_files:
+        size = sum(path.stat().st_size for path in files)
+        if size:
+            parts.append(f'{label}: {_format_file_size(size)}')
 
     if parts:
         exif_display['File Size'] = ', '.join(parts)

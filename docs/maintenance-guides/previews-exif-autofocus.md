@@ -40,6 +40,17 @@ Major logic:
   thumbnail when available.
 - RAW `"full"` render is intentionally separate from the viewer/thumbnail
   pipeline.
+- Shared-stem groups choose their preview source by format priority: JPEG, then
+  HEIC/HEIF, then JPEG XL, then PNG, then RAW. Any raster beats RAW because it
+  avoids the slower RAW render path.
+- Raster sources are flattened to opaque 8-bit RGB before JPEG caching.
+  Transparent pixels (RGBA, LA, and palette transparency) are composited onto
+  white, and 16-bit or float grayscale is scaled to 8 bits instead of clipping
+  to white.
+- JPEG XL orientation comes from the codestream, which libjxl applies while
+  decoding pixels, so EXIF orientation is not applied again. Losslessly
+  transcoded JPEG XL files are the exception: the plugin reconstructs the
+  original JPEG, so EXIF orientation still applies.
 - Rendered JPEG previews are cached under a cache directory derived from the
   current folder, resolved preview source path, source mtime via
   `preview_version`, and requested preview kind.
@@ -63,12 +74,16 @@ Major logic:
 
 - `Pillow` handles image loading/transforms.
 - `pillow-heif` registers HEIC/HEIF image support for Pillow.
+- `pillow-jxl-plugin` (GPL-3.0-or-later) registers JPEG XL support for Pillow
+  when `easy_loupe/core/preview.py` imports `pillow_jxl`. Pillow reads PNG
+  natively.
 - `rawpy` is required to render RAW previews.
 - `imagehash` is required for scene detection.
 - If `rawpy` or `imagehash` is unavailable and the corresponding feature path
   is exercised, the library raises a runtime error.
 - If `pillow-heif` is unavailable, HEIC/HEIF preview rendering raises a runtime
-  error instead of silently producing an invalid preview.
+  error instead of silently producing an invalid preview. JPEG XL rendering
+  does the same when `pillow-jxl-plugin` is unavailable.
 
 ## 3. ExifTool Metadata
 

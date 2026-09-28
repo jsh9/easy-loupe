@@ -226,6 +226,245 @@ def test_heic_preview_uses_pillow_heif_opener(
         )
 
 
+@pytest.mark.parametrize(
+    ('filename', 'save_options'),
+    [
+        pytest.param('IMG_6002.PNG', {'format': 'PNG'}, id='png'),
+        pytest.param(
+            'IMG_6002.JXL', {'format': 'JXL', 'lossless': True}, id='jxl'
+        ),
+    ],
+)
+def test_png_and_jxl_previews_render_source_pixels(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        filename: str,
+        save_options: dict[str, Any],
+) -> None:
+    """
+    Verify PNG and JPEG XL files render through the raster preview path.
+
+    PNG decodes with stock Pillow and JPEG XL relies on the opener that
+    ``pillow-jxl-plugin`` registers, so this catches a missing plugin import or
+    a format that falls through to the RAW renderer.
+    """
+    Image.new('RGB', (32, 24), color='teal').save(
+        tmp_path / filename, **save_options
+    )
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+
+    viewer_path = library.get_preview_path('IMG_6002', 'viewer')
+
+    with Image.open(viewer_path) as image:
+        assert image.size == (32, 24)
+        assert_color_close(
+            image.convert('RGB').getpixel((0, 0)), (0, 128, 128)
+        )
+
+
+def _half_transparent_image(
+        mode: str,
+        transparent_color: Any,
+        opaque_color: Any,
+) -> Image.Image:
+    """Return a 32x16 image: left half transparent, right half opaque."""
+    image = Image.new(mode, (32, 16), transparent_color)
+    image.paste(opaque_color, (16, 0, 32, 16))
+    return image
+
+
+def _half_transparent_palette_image() -> Image.Image:
+    """Return a palette image whose index 0 (left half) is transparent."""
+    image = _half_transparent_image('P', 0, 1)
+    image.putpalette([255, 0, 0, 0, 0, 255])
+    image.info['transparency'] = 0
+    return image
+
+
+@pytest.mark.parametrize(
+    ('filename', 'image_factory', 'save_options', 'opaque_rgb'),
+    [
+        pytest.param(
+            'IMG_6003.PNG',
+            lambda: _half_transparent_image(
+                'RGBA', (255, 0, 0, 0), (0, 0, 255, 255)
+            ),
+            {'format': 'PNG'},
+            (0, 0, 255),
+            id='png-rgba',
+        ),
+        pytest.param(
+            'IMG_6003.PNG',
+            lambda: _half_transparent_image('LA', (0, 0), (0, 255)),
+            {'format': 'PNG'},
+            (0, 0, 0),
+            id='png-la',
+        ),
+        pytest.param(
+            'IMG_6003.PNG',
+            _half_transparent_palette_image,
+            {'format': 'PNG', 'transparency': 0},
+            (0, 0, 255),
+            id='png-palette-trns',
+        ),
+        pytest.param(
+            'IMG_6003.JXL',
+            lambda: _half_transparent_image(
+                'RGBA', (255, 0, 0, 0), (0, 0, 255, 255)
+            ),
+            {'format': 'JXL', 'lossless': True},
+            (0, 0, 255),
+            id='jxl-rgba',
+        ),
+    ],
+)
+def test_transparent_raster_previews_flatten_onto_white(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        filename: str,
+        image_factory: Any,
+        save_options: dict[str, Any],
+        opaque_rgb: tuple[int, int, int],
+) -> None:
+    """
+    Verify transparent pixels render white while opaque pixels keep color.
+
+    Preview caches are JPEG, so alpha must be flattened. A plain
+    ``convert('RGB')`` drops alpha and shows the color hidden under transparent
+    pixels (red here), which would mislead culling decisions.
+    """
+    image_factory().save(tmp_path / filename, **save_options)
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+
+    viewer_path = library.get_preview_path('IMG_6003', 'viewer')
+
+    with Image.open(viewer_path) as image:
+        rgb = image.convert('RGB')
+        assert_color_close(rgb.getpixel((2, 8)), (255, 255, 255))
+        assert_color_close(rgb.getpixel((29, 8)), opaque_rgb)
+
+
+@pytest.mark.parametrize(
+    ('filename', 'save_options'),
+    [
+        pytest.param('IMG_6004.PNG', {'format': 'PNG'}, id='png'),
+        pytest.param(
+            'IMG_6004.JXL', {'format': 'JXL', 'lossless': True}, id='jxl'
+        ),
+    ],
+)
+def test_sixteen_bit_grayscale_previews_scale_to_eight_bits(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        filename: str,
+        save_options: dict[str, Any],
+) -> None:
+    """
+    Verify 16-bit grayscale sources keep their tones in 8-bit previews.
+
+    Pillow decodes these as ``I;16``, and converting that straight to RGB clips
+    every value above 255 to white. A mid-gray 16-bit value must stay mid-gray
+    in the cached JPEG preview.
+    """
+    Image.new('I;16', (16, 16), 32768).save(
+        tmp_path / filename, **save_options
+    )
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+
+    viewer_path = library.get_preview_path('IMG_6004', 'viewer')
+
+    with Image.open(viewer_path) as image:
+        assert_color_close(
+            image.convert('RGB').getpixel((8, 8)), (128, 128, 128)
+        )
+
+
+def _red_left_blue_right_image() -> Image.Image:
+    """Return a landscape image whose orientation is visible in pixels."""
+    image = Image.new('RGB', (40, 20), 'red')
+    image.paste((0, 0, 255), (20, 0, 40, 20))
+    return image
+
+
+def _rotate_90_cw_exif() -> bytes:
+    exif = Image.Exif()
+    exif[0x0112] = 6  # EXIF Orientation: rotate 90 degrees clockwise.
+    return exif.tobytes()
+
+
+def test_jxl_pixel_preview_ignores_exif_orientation(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify decoded JPEG XL pixels are not rotated again from EXIF.
+
+    JPEG XL's codestream orientation is authoritative and libjxl applies it
+    while decoding. This file's codestream says "identity" while its EXIF blob
+    says "rotate 90 CW", so honoring EXIF would rotate the preview away from
+    what spec-conforming decoders show, or double-rotate files whose EXIF and
+    codestream orientations agree.
+    """
+    _red_left_blue_right_image().save(
+        tmp_path / 'IMG_6005.JXL',
+        format='JXL',
+        lossless=True,
+        exif=_rotate_90_cw_exif(),
+    )
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+
+    viewer_path = library.get_preview_path('IMG_6005', 'viewer')
+
+    with Image.open(viewer_path) as image:
+        assert image.size == (40, 20)
+        assert_color_close(image.convert('RGB').getpixel((2, 10)), (254, 0, 0))
+
+
+def test_transcoded_jxl_preview_honors_jpeg_exif_orientation(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify losslessly transcoded JPEG XL files keep JPEG EXIF orientation.
+
+    The plugin reconstructs the original JPEG bytes for these files, so the
+    pixels are unrotated sensor data exactly like the source JPEG. Skipping
+    EXIF orientation here would show portrait shots sideways.
+    """
+    source_jpeg = tmp_path / 'IMG_6006.JPG'
+    photo_folder = tmp_path / 'photos'
+    photo_folder.mkdir()
+    _red_left_blue_right_image().save(
+        source_jpeg, format='JPEG', quality=95, exif=_rotate_90_cw_exif()
+    )
+    with Image.open(source_jpeg) as opened:
+        opened.save(
+            photo_folder / 'IMG_6006.JXL', format='JXL', lossless_jpeg=True
+        )
+
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(photo_folder)
+
+    viewer_path = library.get_preview_path('IMG_6006', 'viewer')
+
+    with Image.open(viewer_path) as image:
+        assert image.size == (20, 40)
+        # Rotating 90 degrees clockwise moves the red left half to the top.
+        assert_color_close(image.convert('RGB').getpixel((10, 2)), (254, 0, 0))
+
+
 def test_preview_cache_is_reused_and_invalidated_when_source_mtime_changes(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

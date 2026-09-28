@@ -571,9 +571,9 @@ per-window close path as the window control.
 `Ctrl+C`/`Cmd+C` copies the whole underlying photo image in standalone
 photo-viewer mode and the culling workspace's normal single/split main viewer.
 It does not copy a file path, zoom crop, or overlay pixels. JPEG-backed records
-copy the original JPEG source; RAW-only and HEIC/HEIF-only records copy the
-rendered `"viewer"` preview. Browse and compare views do not expose this
-shortcut because multiple photos may be visible.
+copy the original JPEG source; RAW-only, HEIC/HEIF-only, JPEG XL-only, and
+PNG-only records copy the rendered `"viewer"` preview. Browse and compare views
+do not expose this shortcut because multiple photos may be visible.
 
 Window close while scene detection or organizer/undo work is active must hide
 the visible window immediately, request best-effort worker shutdown, and defer

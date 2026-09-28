@@ -140,8 +140,9 @@ Major logic:
   `Untagged` checkbox.
 - Reorganize mode can optionally split JPG/JPEG and RAW outputs when both
   formats exist in the loaded folder. The split keeps metadata buckets first,
-  then writes files under `jpg` or `raw` child folders. Shared XMP sidecars for
-  RAW-backed photos follow the RAW output.
+  then writes files under `jpg` or `raw` child folders. HEIC/HEIF, JPEG XL, and
+  PNG files are not split and stay directly in the metadata bucket. Shared XMP
+  sidecars for RAW-backed photos follow the RAW output.
 - Starting an organizer workflow remembers its mode, criterion-specific
   controls, action, JPG/RAW split, conflict policy, and XMP merge policy across
   sessions. Canceling does not replace those choices, and the output parent

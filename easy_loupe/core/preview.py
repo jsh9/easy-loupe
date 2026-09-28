@@ -15,6 +15,8 @@ from PIL import Image, ImageOps
 
 from easy_loupe.core.records import (
     FIT_MAX_SIZE,
+    HEIF_EXTENSIONS,
+    JXL_EXTENSIONS,
     RASTER_EXTENSIONS,
     THUMB_MAX_SIZE,
     PhotoRecord,
@@ -31,6 +33,19 @@ except ImportError:  # pragma: no cover - handled by dependency installation
     register_heif_opener = cast('Any', None)
 else:
     register_heif_opener()
+
+try:
+    # Importing the plugin registers Pillow's JPEG XL opener as a side effect.
+    import pillow_jxl
+except ImportError:  # pragma: no cover - handled by dependency installation
+    pillow_jxl = cast('Any', None)
+
+# 16-bit and 32-bit grayscale modes need explicit scaling because Pillow's
+# plain ``convert('RGB')`` clips them instead of mapping them to 8 bits.
+_HIGH_BIT_DEPTH_GRAY_MODES = {'I', 'I;16', 'I;16B', 'I;16L', 'I;16N'}
+_SIXTEEN_BIT_TO_EIGHT_BIT_DIVISOR = 256
+_FLOAT_TO_EIGHT_BIT_SCALE = 255
+_TRANSPARENCY_BACKGROUND = 'white'
 
 
 _PREVIEW_LOCKS_GUARD = threading.Lock()
@@ -104,16 +119,20 @@ def get_preview_path(
 
 def render_source_image(source: Path, kind: str) -> Image.Image:
     """Open and optionally resize a source image for the requested kind."""
-    if source.suffix.lower() in RASTER_EXTENSIONS:
-        if source.suffix.lower() in {'.heic', '.heif'} and (
-            register_heif_opener is None
-        ):
+    suffix = source.suffix.lower()
+    if suffix in RASTER_EXTENSIONS:
+        if suffix in HEIF_EXTENSIONS and register_heif_opener is None:
             raise RuntimeError(
                 'pillow-heif is required to render HEIC/HEIF previews'
             )
 
+        if suffix in JXL_EXTENSIONS and pillow_jxl is None:
+            raise RuntimeError(
+                'pillow-jxl-plugin is required to render JPEG XL previews'
+            )
+
         with Image.open(source) as opened:
-            image = ImageOps.exif_transpose(opened).convert('RGB')
+            image = _flatten_to_rgb(_orient_raster(opened))
     else:
         image = _render_raw_image(source, kind)
 
@@ -127,6 +146,56 @@ def render_source_image(source: Path, kind: str) -> Image.Image:
         image.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
 
     return image
+
+
+def _orient_raster(opened: Image.Image) -> Image.Image:
+    """
+    Return raster pixels in display orientation.
+
+    JPEG XL stores orientation in its codestream, and libjxl applies it while
+    decoding pixels, so honoring an EXIF orientation too would rotate twice.
+    Losslessly transcoded JPEGs are the exception: the plugin reconstructs the
+    original JPEG bytes (``jpeg`` is true), whose pixels still need EXIF
+    orientation like any other JPEG.
+    """
+    if opened.format == 'JXL' and not getattr(opened, 'jpeg', False):
+        return opened
+
+    return ImageOps.exif_transpose(opened)
+
+
+def _flatten_to_rgb(image: Image.Image) -> Image.Image:
+    """
+    Convert any decoded raster mode to opaque 8-bit RGB for JPEG caching.
+
+    Preview caches are JPEG, which has no alpha channel. A plain
+    ``convert('RGB')`` discards alpha and exposes whatever color hides under
+    transparent pixels, so transparency is composited onto white instead.
+    """
+    if image.mode in _HIGH_BIT_DEPTH_GRAY_MODES:
+        return (
+            image
+            .convert('I')
+            .point(lambda value: value / _SIXTEEN_BIT_TO_EIGHT_BIT_DIVISOR)
+            .convert('L')
+            .convert('RGB')
+        )
+
+    if image.mode == 'F':
+        return (
+            image
+            .point(lambda value: value * _FLOAT_TO_EIGHT_BIT_SCALE)
+            .convert('L')
+            .convert('RGB')
+        )
+
+    if image.has_transparency_data:
+        rgba = image.convert('RGBA')
+        background = Image.new('RGB', rgba.size, _TRANSPARENCY_BACKGROUND)
+        background.paste(rgba, mask=rgba.getchannel('A'))
+        return background
+
+    return image.convert('RGB')
 
 
 def _render_raw_image(source: Path, kind: str) -> Image.Image:

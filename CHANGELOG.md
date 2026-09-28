@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- Added
+
+  - EasyLoupe now opens JPEG XL (`.jxl`) and PNG (`.png`) photos alongside
+    JPEG, HEIC/HEIF, and RAW files, in folder loads and when you open a single
+    file. When a JPEG XL or PNG file shares a name with other formats, JPEG and
+    HEIC/HEIF previews are still preferred, and RAW is still used for metadata.
+    Transparent areas in PNG and JPEG XL images show as white, and 16-bit
+    grayscale PNGs now display their real tones instead of pure white.
+
 - Changed
 
   - When you navigate the main view's left thumbnail strip with the keyboard
