@@ -43,10 +43,16 @@ Major logic:
 - Shared-stem groups choose their preview source by format priority: JPEG, then
   HEIC/HEIF, then JPEG XL, then PNG, then RAW. Any raster beats RAW because it
   avoids the slower RAW render path.
-- Raster sources are flattened to opaque 8-bit RGB before JPEG caching.
-  Transparent pixels (RGBA, LA, and palette transparency) are composited onto
-  white, and 16-bit or float grayscale is scaled to 8 bits instead of clipping
-  to white.
+- `PHOTO_FORMATS` in `easy_loupe/core/photo_groups.py` is the single ordered
+  table of format labels and extensions. Preview selection and the EXIF
+  `File Size` row in both culling and photo-viewer modes classify files only
+  through it via `classify_photo_files(...)`, so a new format needs its
+  extension set in `easy_loupe/core/records.py` plus one table entry.
+- Raster sources are flattened to opaque 8-bit RGB before JPEG caching. Colors
+  and transparency are resolved separately: 16-bit or float grayscale is scaled
+  to 8 bits instead of clipping to white, then any transparency (alpha bands,
+  palette transparency, or `tRNS` color keys, including 16-bit keys) is
+  composited onto white.
 - JPEG XL orientation comes from the codestream, which libjxl applies while
   decoding pixels, so EXIF orientation is not applied again. Losslessly
   transcoded JPEG XL files are the exception: the plugin reconstructs the

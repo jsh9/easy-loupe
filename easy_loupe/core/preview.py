@@ -171,7 +171,29 @@ def _flatten_to_rgb(image: Image.Image) -> Image.Image:
     Preview caches are JPEG, which has no alpha channel. A plain
     ``convert('RGB')`` discards alpha and exposes whatever color hides under
     transparent pixels, so transparency is composited onto white instead.
+    Colors and transparency are resolved separately so high-bit-depth sources,
+    such as 16-bit grayscale PNGs with a ``tRNS`` key, get both tone scaling
+    and white compositing.
     """
+    rgb = _convert_to_eight_bit_rgb(image)
+    if not image.has_transparency_data:
+        return rgb
+
+    # Pillow derives alpha from alpha bands, palette transparency, and
+    # ``tRNS`` color keys (including 16-bit keys) when converting to RGBA.
+    # Reuse an existing alpha band directly to avoid copying large images.
+    alpha = (
+        image.getchannel('A')
+        if 'A' in image.getbands()
+        else image.convert('RGBA').getchannel('A')
+    )
+    background = Image.new('RGB', rgb.size, _TRANSPARENCY_BACKGROUND)
+    background.paste(rgb, mask=alpha)
+    return background
+
+
+def _convert_to_eight_bit_rgb(image: Image.Image) -> Image.Image:
+    """Convert decoded pixels to 8-bit RGB, ignoring transparency."""
     if image.mode in _HIGH_BIT_DEPTH_GRAY_MODES:
         return (
             image
@@ -188,12 +210,6 @@ def _flatten_to_rgb(image: Image.Image) -> Image.Image:
             .convert('L')
             .convert('RGB')
         )
-
-    if image.has_transparency_data:
-        rgba = image.convert('RGBA')
-        background = Image.new('RGB', rgba.size, _TRANSPARENCY_BACKGROUND)
-        background.paste(rgba, mask=rgba.getchannel('A'))
-        return background
 
     return image.convert('RGB')
 

@@ -13,13 +13,6 @@ from easy_loupe.core.folder_loading import (
     build_photo_exif_display,
 )
 from easy_loupe.core.photo_library import PhotoLibrary
-from easy_loupe.core.records import (
-    HEIF_EXTENSIONS,
-    JPEG_EXTENSIONS,
-    JXL_EXTENSIONS,
-    PNG_EXTENSIONS,
-    RAW_EXTENSIONS,
-)
 from easy_loupe.core.recursive_loading import (
     exif_metadata_for_path,
 )
@@ -129,38 +122,8 @@ class PhotoViewerExifWorker(QObject):
             focus_point = exif_module.extract_focus_point(
                 metadata, image_width, image_height
             )
-            jpeg_files = [
-                path
-                for path in self._photo_files
-                if path.suffix.lower() in JPEG_EXTENSIONS
-            ]
-            heif_files = [
-                path
-                for path in self._photo_files
-                if path.suffix.lower() in HEIF_EXTENSIONS
-            ]
-            jxl_files = [
-                path
-                for path in self._photo_files
-                if path.suffix.lower() in JXL_EXTENSIONS
-            ]
-            png_files = [
-                path
-                for path in self._photo_files
-                if path.suffix.lower() in PNG_EXTENSIONS
-            ]
-            raw_files = [
-                path
-                for path in self._photo_files
-                if path.suffix.lower() in RAW_EXTENSIONS
-            ]
             exif_display = build_photo_exif_display(
-                metadata,
-                jpeg_files=jpeg_files,
-                heif_files=heif_files,
-                jxl_files=jxl_files,
-                png_files=png_files,
-                raw_files=raw_files,
+                metadata, photo_files=self._photo_files
             )
             result = PhotoViewerExifResult(
                 focus_point=focus_point,

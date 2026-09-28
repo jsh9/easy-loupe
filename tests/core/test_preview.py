@@ -272,7 +272,9 @@ def _half_transparent_image(
 ) -> Image.Image:
     """Return a 32x16 image: left half transparent, right half opaque."""
     image = Image.new(mode, (32, 16), transparent_color)
-    image.paste(opaque_color, (16, 0, 32, 16))
+    # Paste a filled image rather than a bare color: Pillow silently ignores
+    # bare integer colors when pasting into ``I;16`` images.
+    image.paste(Image.new(mode, (16, 16), opaque_color), (16, 0))
     return image
 
 
@@ -311,6 +313,13 @@ def _half_transparent_palette_image() -> Image.Image:
             id='png-palette-trns',
         ),
         pytest.param(
+            'IMG_6003.PNG',
+            lambda: _half_transparent_image('I;16', 0, 32768),
+            {'format': 'PNG', 'transparency': 0},
+            (128, 128, 128),
+            id='png-16-bit-gray-trns',
+        ),
+        pytest.param(
             'IMG_6003.JXL',
             lambda: _half_transparent_image(
                 'RGBA', (255, 0, 0, 0), (0, 0, 255, 255)
@@ -334,7 +343,9 @@ def test_transparent_raster_previews_flatten_onto_white(
 
     Preview caches are JPEG, so alpha must be flattened. A plain
     ``convert('RGB')`` drops alpha and shows the color hidden under transparent
-    pixels (red here), which would mislead culling decisions.
+    pixels (red here), which would mislead culling decisions. The 16-bit
+    grayscale case also guards against tone scaling bypassing transparency
+    compositing.
     """
     image_factory().save(tmp_path / filename, **save_options)
     stub_read_exif(monkeypatch, {})
