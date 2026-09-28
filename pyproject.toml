@@ -16,7 +16,7 @@ dependencies = [
 requires-python = ">=3.12"
 description = "Desktop photo culling app with RAW preview support."
 license = "GPL-3.0-or-later"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 readme = "README.md"
 
 [project.optional-dependencies]

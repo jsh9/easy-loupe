@@ -30,8 +30,8 @@ def test_classify_photo_files_keeps_priority_labels_and_input_order() -> None:
     Verify classification output shape relied on by its callers.
 
     Callers take the first non-empty label as the preview format and render
-    file-size rows by iterating the result, so every label must be present
-    in table order, files must keep their input order within a label, and
+    file-size rows by iterating the result, so every label must be present in
+    table order, files must keep their input order within a label, and
     unsupported files must be ignored rather than raising.
     """
     files = [

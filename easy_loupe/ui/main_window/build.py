@@ -46,7 +46,7 @@ from easy_loupe.ui.defaults import (
     DEFAULT_SHOW_AF_POINT,
     DEFAULT_SHOW_CLIPPING,
 )
-from easy_loupe.ui.identity import APP_NAME, APP_VERSION
+from easy_loupe.ui.identity import APP_NAME, about_dialog_html
 from easy_loupe.ui.photo_clipboard import copy_photo_pixels_to_clipboard
 from easy_loupe.ui.progress_overlay import (
     ProgressOverlayController,
@@ -1034,15 +1034,7 @@ class MainWindowBuildMixin:
             QTimer.singleShot(0, self._finish_compare_limit_refresh)
 
     def _show_about_dialog(self: MainWindow) -> None:
-        QMessageBox.about(
-            self,
-            f'About {APP_NAME}',
-            (
-                f'{APP_NAME}\n\n'
-                f'Version {APP_VERSION}\n\n'
-                'Photo culling made easy.'
-            ),
-        )
+        QMessageBox.about(self, f'About {APP_NAME}', about_dialog_html())
 
     def _build_shortcuts(self: MainWindow) -> None:
         # Lifecycle shortcuts bypass normal UI shortcut blocking so users can

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from PySide6 import QtGui
 from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtTest import QTest
@@ -1838,9 +1839,17 @@ def test_main_window_photo_sort_preserves_selected_compare_photo_view(
     del app
 
 
-def test_about_action_shows_easy_loupe_version(
+def test_about_action_shows_version_license_and_source_links(
         monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """
+    Verify the About box shows the version plus the GPL legal notices.
+
+    GPLv3 asks interactive programs to show a copyright notice, disclaim
+    warranty, and tell users how to view the license; the third-party link
+    credits bundled components. Qt must detect the text as rich text, or the
+    links would render as raw HTML instead of clickable links.
+    """
     app = QApplication.instance() or QApplication([])
     window = main_window_module.MainWindow()
     window._initial_folder_prompt_pending = False
@@ -1854,18 +1863,22 @@ def test_about_action_shows_easy_loupe_version(
 
     window.about_action.trigger()
 
-    assert about_calls == [
-        (
-            window,
-            'About EasyLoupe',
-            (
-                'EasyLoupe\n\n'
-                f'Version {identity_module.APP_VERSION}\n\n'
-                'Photo culling made easy.'
-            ),
-        )
-    ]
-    assert f'Version {identity_module.APP_VERSION}' in about_calls[0][2]
+    assert len(about_calls) == 1
+    parent, title, text = about_calls[0]
+    assert parent is window
+    assert title == 'About EasyLoupe'
+    assert QtGui.Qt.mightBeRichText(text)
+    for expected in (
+        f'Version {identity_module.APP_VERSION}',
+        'Photo culling made easy.',
+        'Copyright (C) 2026 jsh9',
+        'GNU General Public License, version 3 or later',
+        'absolutely no warranty',
+        f'href="{identity_module.APP_SOURCE_URL}"',
+        f'href="{identity_module.APP_LICENSE_URL}"',
+        f'href="{identity_module.APP_THIRD_PARTY_NOTICES_URL}"',
+    ):
+        assert expected in text
 
     window.close()
     del app

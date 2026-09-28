@@ -14,6 +14,13 @@ def test_windows_pyinstaller_command_prefers_module_when_binary_missing(
         monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(build_app.shutil, 'which', lambda _name: None)
+    # Pin the dependency-metadata args so the exact command does not
+    # depend on which packages this test environment has installed.
+    monkeypatch.setattr(
+        build_app.utils,
+        'runtime_metadata_args',
+        lambda: ['--copy-metadata', 'pillow'],
+    )
     monkeypatch.setattr(
         build_app,
         'ensure_exiftool_payload',
@@ -47,6 +54,8 @@ def test_windows_pyinstaller_command_prefers_module_when_binary_missing(
         'easy_loupe.ui.assets',
         '--copy-metadata',
         'easy-loupe',
+        '--copy-metadata',
+        'pillow',
         '--add-binary',
         exiftool_binary,
         '--add-data',
@@ -59,6 +68,13 @@ def test_windows_pyinstaller_command_supports_onefile(
         monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(build_app.shutil, 'which', lambda _name: 'pyinstaller')
+    # Pin the dependency-metadata args so the exact command does not
+    # depend on which packages this test environment has installed.
+    monkeypatch.setattr(
+        build_app.utils,
+        'runtime_metadata_args',
+        lambda: ['--copy-metadata', 'pillow'],
+    )
     monkeypatch.setattr(
         build_app,
         'ensure_exiftool_payload',
@@ -90,6 +106,8 @@ def test_windows_pyinstaller_command_supports_onefile(
         'easy_loupe.ui.assets',
         '--copy-metadata',
         'easy-loupe',
+        '--copy-metadata',
+        'pillow',
         '--add-binary',
         exiftool_binary,
         '--add-data',
@@ -102,6 +120,13 @@ def test_windows_pyinstaller_command_supports_console_debug_build(
         monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(build_app.shutil, 'which', lambda _name: 'pyinstaller')
+    # Pin the dependency-metadata args so the exact command does not
+    # depend on which packages this test environment has installed.
+    monkeypatch.setattr(
+        build_app.utils,
+        'runtime_metadata_args',
+        lambda: ['--copy-metadata', 'pillow'],
+    )
     monkeypatch.setattr(
         build_app,
         'ensure_exiftool_payload',

@@ -80,3 +80,11 @@ version. See [LICENSE](LICENSE) for the full license text.
 EasyLoupe is distributed in the hope that it will be useful, but WITHOUT ANY
 WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
 PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+Packaged EasyLoupe apps include third-party components under their own
+licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+The GPL covers EasyLoupe's code and files, including the icon files. As allowed
+by section 7(e) of the GPL, it does not grant rights to use the EasyLoupe name
+or icon as trademarks. If you distribute a modified version, give it a
+different name and icon so it is not mistaken for the official app.

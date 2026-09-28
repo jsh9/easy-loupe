@@ -8,7 +8,11 @@ import shutil
 import subprocess  # noqa: S404 - explicit PyInstaller/ExifTool integration
 import sys
 import urllib.request
+from importlib import metadata as importlib_metadata
 from pathlib import Path
+
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 
 APP_NAME = 'EasyLoupe'
 BUNDLE_IDENTIFIER = 'com.easyloupe.EasyLoupe'
@@ -48,10 +52,67 @@ def common_pyinstaller_args(
         'easy_loupe.ui.assets',
         '--copy-metadata',
         'easy-loupe',
+        *runtime_metadata_args(),
         str(ENTRYPOINT),
     ]
     if windowed:
         args.insert(1, '--windowed')
+
+    return args
+
+
+def runtime_dependency_names(root: str = 'easy-loupe') -> list[str]:
+    """
+    Return the installed runtime dependency closure of ``root``, sorted.
+
+    Requirements guarded by markers that do not apply to this build, such as
+    the ``dev`` extra or another platform, are skipped, and so are dependencies
+    that are not installed. Deriving the list from installed metadata keeps
+    packaged license files in sync with ``pyproject.toml`` without a
+    hand-maintained list.
+    """
+    names: set[str] = set()
+    pending = [root]
+    while pending:
+        try:
+            requirements = importlib_metadata.requires(pending.pop()) or []
+        except importlib_metadata.PackageNotFoundError:
+            continue
+
+        for spec in requirements:
+            requirement = Requirement(spec)
+            if requirement.marker is not None and (
+                not requirement.marker.evaluate({'extra': ''})
+            ):
+                continue
+
+            name = canonicalize_name(requirement.name)
+            if name not in names:
+                names.add(name)
+                pending.append(name)
+
+    return sorted(name for name in names if _is_installed_distribution(name))
+
+
+def _is_installed_distribution(name: str) -> bool:
+    try:
+        importlib_metadata.distribution(name)
+    except importlib_metadata.PackageNotFoundError:
+        return False
+
+    return True
+
+
+def runtime_metadata_args() -> list[str]:
+    """
+    Return PyInstaller args that bundle runtime dependency metadata.
+
+    Each copied ``.dist-info`` folder carries that package's license files,
+    which ``THIRD_PARTY_NOTICES.md`` points packaged-app users to.
+    """
+    args: list[str] = []
+    for name in runtime_dependency_names():
+        args.extend(['--copy-metadata', name])
 
     return args
 

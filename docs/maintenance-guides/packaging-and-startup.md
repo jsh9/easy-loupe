@@ -54,6 +54,15 @@ Major logic:
   cache/staging directories and bundle them under
   `easy_loupe/vendor/exiftool/...` inside the PyInstaller artifact. Do not
   commit downloaded ExifTool payloads.
+- Packaged apps carry their license notices through package metadata.
+  `pyproject.toml` lists `LICENSE` and `THIRD_PARTY_NOTICES.md` as
+  `license-files`, so `--copy-metadata easy-loupe` ships both.
+  `utils.runtime_metadata_args()` adds `--copy-metadata` for every installed
+  runtime dependency, computed from package metadata, so each dependency's
+  license files ship too.
+- When adding, removing, or swapping a runtime dependency, update the component
+  table in `THIRD_PARTY_NOTICES.md`, including any native libraries the
+  dependency's wheels bundle.
 
 ## 2. App Identity And Assets
 
@@ -69,6 +78,9 @@ Major logic:
 
 - `ui/identity.py` owns the user-facing app name, packaged icon lookup, Qt app
   identity, and best-effort macOS process/app-switcher identity hooks.
+- `about_dialog_html()` in `ui/identity.py` builds the About dialog body. Keep
+  its GPL notices intact: the copyright line, the no-warranty statement, and
+  links to the source code, `LICENSE`, and `THIRD_PARTY_NOTICES.md`.
 - Keep package-data configuration aligned when adding or renaming assets under
   `easy_loupe/ui/assets/`.
 - The active app icon artifacts are committed as `EasyLoupe.png`,

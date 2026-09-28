@@ -16,6 +16,11 @@
   - EasyLoupe is now free software licensed under the GNU General Public
     License, version 3 or (at your option) any later version. See `LICENSE`.
 
+  - The About dialog now shows EasyLoupe's copyright and license, states that
+    it comes with no warranty, and links to the source code, the license, and
+    the new third-party notices. Packaged apps also include the license files
+    of the components they bundle.
+
   - When you navigate the main view's left thumbnail strip with the keyboard
     (Up/Down, Page Up/Down, Shift+Up/Down, or Up/Down from the scene strip),
     the strip now keeps the neighboring photo or scene stack fully visible in
