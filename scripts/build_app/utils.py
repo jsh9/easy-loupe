@@ -164,8 +164,9 @@ def verify_bundled_licenses(data_dir: Path) -> None:
             if path.is_file()
         ),
     ]
+    # Report POSIX-style paths so build errors read the same on every OS.
     missing = [
-        str(path.relative_to(data_dir))
+        path.relative_to(data_dir).as_posix()
         for path in expected_files
         if not path.is_file()
     ]

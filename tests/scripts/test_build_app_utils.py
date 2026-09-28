@@ -104,7 +104,8 @@ def test_verify_bundled_licenses_reports_every_missing_file(
 
     The check inspects the built app rather than the PyInstaller arguments, so
     a license text or package metadata folder that never reached the app must
-    stop the build instead of shipping an incomplete app.
+    stop the build instead of shipping an incomplete app. Paths use forward
+    slashes on every OS so Windows build errors read the same.
     """
     monkeypatch.setattr(utils, 'runtime_dependency_names', lambda: ['pillow'])
     data_dir = tmp_path / 'Resources'

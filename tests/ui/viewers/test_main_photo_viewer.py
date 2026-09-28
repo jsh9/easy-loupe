@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from easy_loupe.ui.main_window.build import VIEWER_KEYBOARD_PAN_STEP
 from easy_loupe.ui.viewers.main_photo_viewer import MainPhotoViewer
 from tests.ui._helpers import (
+    CLIPPING_OVERLAY_TIMEOUT_MS,
     create_jpeg,
     create_main_window_with_library,
     process_events_until,
@@ -66,6 +67,7 @@ def test_main_photo_viewer_clipping_warning_applies_to_split_panes(
     process_events_until(
         app,
         viewer.single_viewer._clipping_overlay_item.isVisible,
+        timeout_ms=CLIPPING_OVERLAY_TIMEOUT_MS,
     )
 
     viewer.toggle_split_view()
@@ -80,6 +82,7 @@ def test_main_photo_viewer_clipping_warning_applies_to_split_panes(
             viewer.split_fit_viewer._clipping_overlay_item.isVisible()
             and viewer.split_zoom_viewer._clipping_overlay_item.isVisible()
         ),
+        timeout_ms=CLIPPING_OVERLAY_TIMEOUT_MS,
     )
     assert viewer.split_fit_viewer._clipping_overlay_item.isVisible() is True
     assert viewer.split_zoom_viewer._clipping_overlay_item.isVisible() is True
