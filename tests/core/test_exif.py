@@ -5,8 +5,11 @@ from pathlib import Path
 from typing import Any, Never
 
 import pytest
+from PIL import Image
 
 import easy_loupe.core.exif as core_exif_module
+import easy_loupe.core.preview  # noqa: F401 - registers the JPEG XL plugin
+from easy_loupe.core.jxl_metadata import extract_compressed_jxl_exif
 
 
 def test_exif_module_exports_read_exif_metadata() -> None:
@@ -594,6 +597,141 @@ def test_read_exif_metadata_batches_files_and_reports_batch_progress(
     ]
     assert metadata['IMG_6200.JPG']['SourceFile'] == str(first)
     assert metadata['IMG_6201.JPG']['SourceFile'] == str(second)
+
+
+_BROTLI_WARNING = (
+    'Install IO::Uncompress::Brotli to decode Brotli-compressed metadata'
+)
+
+
+def _write_compressed_exif_jxl(path: Path) -> None:
+    exif = Image.Exif()
+    exif[0x010F] = 'Canon'  # Make
+    Image.new('RGB', (8, 8), 'red').save(
+        path,
+        format='JXL',
+        lossless=True,
+        exif=exif.tobytes(),
+        compress_metadata=True,
+    )
+
+
+def _use_fake_exiftool(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(core_exif_module.EXIFTOOL_ENV_VAR, raising=False)
+    monkeypatch.setattr(
+        core_exif_module, '_resolve_bundled_exiftool_path', lambda: None
+    )
+    monkeypatch.setattr(
+        core_exif_module.shutil, 'which', lambda _name: '/usr/bin/exiftool'
+    )
+
+
+def test_read_exif_metadata_fills_brotli_compressed_jxl_exif(
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+) -> None:
+    """
+    Verify JPEG XL EXIF that ExifTool cannot decompress is recovered.
+
+    Packaged macOS ExifTool runs on system Perl without Brotli support, so
+    ``cjxl`` files come back with only a warning. The fallback must pass the
+    decompressed TIFF stream to one extra ExifTool batch and merge the tags,
+    while keeping the real file's SourceFile, type, and codestream size.
+    """
+    jxl = tmp_path / 'IMG_6400.JXL'
+    jpeg = tmp_path / 'IMG_6401.JPG'
+    _write_compressed_exif_jxl(jxl)
+    jpeg.write_bytes(b'jpeg')
+    expected_tiff = extract_compressed_jxl_exif(jxl)
+    commands: list[list[str]] = []
+    _use_fake_exiftool(monkeypatch)
+
+    def fake_run(command: list[str], **_kwargs: Any) -> object:
+        commands.append(command)
+        if len(commands) == 1:
+            records = [
+                {
+                    'SourceFile': str(jxl),
+                    'FileType': 'JXL',
+                    'ImageWidth': 8,
+                    'Warning': _BROTLI_WARNING,
+                },
+                {'SourceFile': str(jpeg), 'ExifByteOrder': 'II'},
+            ]
+        else:
+            blob_path = Path(command[-1])
+            assert blob_path.suffix == '.tif'
+            assert blob_path.read_bytes() == expected_tiff
+            records = [
+                {
+                    'SourceFile': command[-1],
+                    'FileType': 'TIFF',
+                    'ExifByteOrder': 'MM',
+                    'ImageWidth': 4000,
+                    'Make': 'Canon',
+                }
+            ]
+
+        return type(
+            'Result', (), {'stdout': core_exif_module.json.dumps(records)}
+        )()
+
+    monkeypatch.setattr(core_exif_module.subprocess, 'run', fake_run)
+
+    metadata = core_exif_module.read_exif_metadata([jxl, jpeg])
+
+    assert expected_tiff is not None
+    assert len(commands) == 2
+    assert metadata['IMG_6400.JXL'] == {
+        'SourceFile': str(jxl),
+        'FileType': 'JXL',
+        'ExifByteOrder': 'MM',
+        'ImageWidth': 8,
+        'Make': 'Canon',
+    }
+    assert metadata['IMG_6401.JPG'] == {
+        'SourceFile': str(jpeg),
+        'ExifByteOrder': 'II',
+    }
+
+
+def test_read_exif_metadata_keeps_jxl_record_when_fallback_fails(
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+) -> None:
+    """
+    Verify a failing fallback read keeps the primary JPEG XL record.
+
+    The fallback is best effort: an ExifTool error there must not split the
+    configured batch or drop metadata the primary read already returned.
+    """
+    jxl = tmp_path / 'IMG_6402.JXL'
+    _write_compressed_exif_jxl(jxl)
+    primary_record = {
+        'SourceFile': str(jxl),
+        'FileType': 'JXL',
+        'Warning': _BROTLI_WARNING,
+    }
+    calls: list[list[str]] = []
+    _use_fake_exiftool(monkeypatch)
+
+    def fake_run(command: list[str], **_kwargs: Any) -> object:
+        calls.append(command)
+        if len(calls) > 1:
+            raise core_exif_module.subprocess.CalledProcessError(1, command)
+
+        return type(
+            'Result',
+            (),
+            {'stdout': core_exif_module.json.dumps([primary_record])},
+        )()
+
+    monkeypatch.setattr(core_exif_module.subprocess, 'run', fake_run)
+
+    metadata = core_exif_module.read_exif_metadata([jxl])
+
+    assert len(calls) == 2
+    assert metadata['IMG_6402.JXL'] == primary_record
 
 
 @pytest.mark.parametrize(

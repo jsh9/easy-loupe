@@ -7,7 +7,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Container
+    from collections.abc import Container, Iterable, Mapping
 
 DEFAULT_LOAD_RECURSIVELY = True
 WINDOWS_DRIVE_PART_LENGTH = 2
@@ -180,12 +180,33 @@ def relative_photo_group_key(folder: Path, path: Path) -> tuple[str, str]:
         Raised by :func:`relative_photo_id` if ``path`` is not under
         ``folder``.
     """
-    photo_id = PurePosixPath(relative_photo_id(folder, path))
-    parent = photo_id.parent.as_posix()
+    return photo_id_group_key(relative_photo_id(folder, path))
+
+
+def photo_id_group_key(photo_id: str) -> tuple[str, str]:
+    """
+    Return the companion-grouping key for an extensionless photo ID.
+
+    This is the ID form of :func:`relative_photo_group_key`: the relative
+    parent stays exact while the final stem is case-folded.
+
+    Parameters
+    ----------
+    photo_id : str
+        Folder-relative POSIX photo ID, such as ``Trip/IMG_1000``.
+
+    Returns
+    -------
+    tuple[str, str]
+        ``(relative_parent, casefolded_stem)``. Root-level IDs use an empty
+        string for ``relative_parent``.
+    """
+    pure_id = PurePosixPath(photo_id)
+    parent = pure_id.parent.as_posix()
     if parent == '.':
         parent = ''
 
-    return parent, photo_id.name.casefold()
+    return parent, pure_id.name.casefold()
 
 
 def normalize_photo_identifier(value: object) -> str | None:
@@ -250,6 +271,81 @@ def normalize_photo_identifier_for_valid_ids(
     legacy = normalize_photo_identifier(value)
     if legacy is not None and legacy in valid_photo_ids:
         return legacy
+
+    return None
+
+
+def build_photo_id_group_index(
+        photo_ids: Iterable[str],
+) -> dict[tuple[str, str], str]:
+    """
+    Map each loaded photo's companion-grouping key to its photo ID.
+
+    A photo ID is the stem of whichever companion file wins preview priority,
+    so its case can change when a companion with a differently cased stem
+    appears, for example ``DSC01234.ARW`` gaining ``dsc01234.png``. Saved
+    metadata keyed by the old ID can then be found through this index.
+
+    Parameters
+    ----------
+    photo_ids : Iterable[str]
+        Current loaded photo IDs.
+
+    Returns
+    -------
+    dict[tuple[str, str], str]
+        Grouping key to loaded photo ID. Keys shared by more than one loaded ID
+        are omitted so a fallback match is never ambiguous.
+    """
+    index: dict[tuple[str, str], str] = {}
+    ambiguous: set[tuple[str, str]] = set()
+    for photo_id in photo_ids:
+        key = photo_id_group_key(photo_id)
+        if key in index and index[key] != photo_id:
+            ambiguous.add(key)
+
+        index[key] = photo_id
+
+    for key in ambiguous:
+        del index[key]
+
+    return index
+
+
+def resolve_photo_identifier_by_group_key(
+        value: object, photo_id_group_index: Mapping[tuple[str, str], str]
+) -> str | None:
+    """
+    Resolve a persisted photo identifier that differs only in stem case.
+
+    This is the last resort after
+    :func:`normalize_photo_identifier_for_valid_ids` finds no exact match. It
+    tries the unstripped value before the suffix-stripped legacy form, for the
+    same dotted-stem reason, and keeps the parent folder exact so
+    ``Trip/IMG_1000`` never resolves to ``trip/IMG_1000``.
+
+    Parameters
+    ----------
+    value : object
+        Persisted photo ID, legacy filename key, or scene photo ID to resolve.
+    photo_id_group_index : Mapping[tuple[str, str], str]
+        Index from :func:`build_photo_id_group_index`.
+
+    Returns
+    -------
+    str | None
+        Matching loaded photo ID, or ``None`` when no unique match exists.
+    """
+    for candidate in (
+        _normalize_posix_path(value, strip_suffix=False),
+        normalize_photo_identifier(value),
+    ):
+        if candidate is None:
+            continue
+
+        photo_id = photo_id_group_index.get(photo_id_group_key(candidate))
+        if photo_id is not None:
+            return photo_id
 
     return None
 

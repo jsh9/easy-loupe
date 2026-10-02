@@ -17,6 +17,7 @@ from easy_loupe.ui.launch import CullingLaunchRequest
 from easy_loupe.ui.photo_viewer.window import PhotoViewerWindow
 from easy_loupe.ui.photo_viewer.workers import PhotoViewerExifResult
 from tests.ui._helpers import (
+    CLIPPING_OVERLAY_TIMEOUT_MS,
     create_jpeg,
     image_pixel_rgb,
     process_events_until,
@@ -481,6 +482,38 @@ def test_photo_viewer_shortcut_help_toggles_and_esc_closes_first(
     app.processEvents()
 
     assert window.transient_message_overlay.isHidden() is True
+    window.close()
+    app.processEvents()
+
+
+def test_photo_viewer_help_menu_shows_about_dialog(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Verify standalone viewer windows expose the About dialog.
+
+    Opening a photo from Finder or Explorer shows only this window, so it is
+    the only interface where users can reach the copyright, no-warranty, and
+    license notices that GPLv3 expects interactive programs to display.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'green')
+    app, window = _open_viewer(tmp_path, monkeypatch, startup_name='A.JPG')
+    about_calls: list[tuple[object, str, str]] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        'about',
+        lambda parent, title, text: about_calls.append((parent, title, text)),
+    )
+
+    assert window.about_action in window.help_menu.actions()
+    assert window.about_action.text() == 'About EasyLoupe'
+    assert window.about_action.menuRole() == QAction.AboutRole
+    window.about_action.trigger()
+
+    assert about_calls == [
+        (window, 'About EasyLoupe', identity_module.build_about_dialog_html())
+    ]
     window.close()
     app.processEvents()
 
@@ -1094,7 +1127,11 @@ def test_photo_viewer_shortcuts_toggle_inspection_overlays(
     assert window.viewer.single_viewer._clipping_warning_enabled is True
     # Clipping work is intentionally delayed and backgrounded; Windows can
     # deliver it slowly after long UI-order runs, so wait for the real paint.
-    process_events_until(app, clipping_overlay.isVisible, timeout_ms=5_000)
+    process_events_until(
+        app,
+        clipping_overlay.isVisible,
+        timeout_ms=CLIPPING_OVERLAY_TIMEOUT_MS,
+    )
     assert clipping_overlay.isVisible() is True
 
     window.show_af_point_shortcut.activated.emit()

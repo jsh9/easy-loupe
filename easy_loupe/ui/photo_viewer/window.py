@@ -48,7 +48,11 @@ from easy_loupe.ui.defaults import (
     DEFAULT_SHOW_CLIPPING,
 )
 from easy_loupe.ui.folder_access import FolderAccessManager
-from easy_loupe.ui.identity import APP_NAME, easy_loupe_icon
+from easy_loupe.ui.identity import (
+    APP_NAME,
+    easy_loupe_icon,
+    show_about_dialog,
+)
 from easy_loupe.ui.launch import CullingLaunchRequest
 from easy_loupe.ui.main_window.build import (
     PHOTO_LOAD_RECURSIVELY_SETTINGS_KEY,
@@ -370,6 +374,14 @@ class PhotoViewerWindow(QMainWindow):
         )
         self.addAction(self.shortcut_help_action)
         self.help_menu.addAction(self.shortcut_help_action)
+
+        # Photo-viewer windows are their own interactive interface, so they
+        # need the same About entry and GPL notices as the culling window.
+        # AboutRole moves it into the macOS application menu.
+        self.about_action = QAction(f'About {APP_NAME}', self)
+        self.about_action.setMenuRole(QAction.AboutRole)
+        self.about_action.triggered.connect(lambda *_: show_about_dialog(self))
+        self.help_menu.addAction(self.about_action)
 
     def _refresh_shortcut_help_action(self) -> None:
         """

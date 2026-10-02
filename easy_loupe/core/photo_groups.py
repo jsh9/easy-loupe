@@ -10,7 +10,6 @@ from easy_loupe.core.records import (
     JPEG_EXTENSIONS,
     JXL_EXTENSIONS,
     PNG_EXTENSIONS,
-    RASTER_EXTENSIONS,
     RAW_EXTENSIONS,
 )
 
@@ -41,7 +40,7 @@ class PhotoGroupSources:
     sorted_group_files: list[Path]
     jpeg_files: list[Path]
     heif_files: list[Path]
-    raster_files: list[Path]
+    has_raster: bool
     raw_files: list[Path]
     preview_source: Path
     metadata_source: Path
@@ -96,11 +95,9 @@ def select_photo_group_sources(
         sorted_group_files=sorted_group_files,
         jpeg_files=files_by_format['JPG'],
         heif_files=files_by_format['HEIF'],
-        raster_files=[
-            path
-            for path in sorted_group_files
-            if path.suffix.lower() in RASTER_EXTENSIONS
-        ],
+        has_raster=any(
+            files for label, files in files_by_format.items() if label != 'RAW'
+        ),
         raw_files=raw_files,
         preview_source=preview_source,
         metadata_source=metadata_source,

@@ -40,7 +40,7 @@ def _fake_distribution(name: str) -> object:
     return object()
 
 
-def test_runtime_dependency_names_walks_installed_runtime_closure(
+def test_collect_runtime_dependency_names_walks_installed_runtime_closure(
         monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
@@ -57,8 +57,12 @@ def test_runtime_dependency_names_walks_installed_runtime_closure(
         utils.importlib_metadata, 'distribution', _fake_distribution
     )
 
-    assert utils.runtime_dependency_names() == ['numpy', 'pillow', 'rawpy']
-    assert utils.runtime_metadata_args() == [
+    assert utils.collect_runtime_dependency_names() == [
+        'numpy',
+        'pillow',
+        'rawpy',
+    ]
+    assert utils.build_runtime_metadata_args() == [
         '--copy-metadata',
         'numpy',
         '--copy-metadata',
@@ -89,7 +93,9 @@ def test_verify_bundled_licenses_accepts_complete_bundle(
     Metadata folder names are matched after name normalization, because wheels
     spell distribution names inconsistently (``Pillow``, ``easy_loupe``).
     """
-    monkeypatch.setattr(utils, 'runtime_dependency_names', lambda: ['pillow'])
+    monkeypatch.setattr(
+        utils, 'collect_runtime_dependency_names', lambda: ['pillow']
+    )
     data_dir = tmp_path / 'Resources'
     _write_complete_license_bundle(data_dir)
 
@@ -107,7 +113,9 @@ def test_verify_bundled_licenses_reports_every_missing_file(
     stop the build instead of shipping an incomplete app. Paths use forward
     slashes on every OS so Windows build errors read the same.
     """
-    monkeypatch.setattr(utils, 'runtime_dependency_names', lambda: ['pillow'])
+    monkeypatch.setattr(
+        utils, 'collect_runtime_dependency_names', lambda: ['pillow']
+    )
     data_dir = tmp_path / 'Resources'
     _write_complete_license_bundle(data_dir)
     (data_dir / 'third_party_licenses' / 'Python.txt').unlink()
@@ -133,10 +141,33 @@ def test_third_party_notices_reference_every_bundled_license_text() -> None:
     referenced = set(
         re.findall(r'third_party_licenses/([\w.-]+\.txt)', notices)
     )
-    bundled = {
-        path.name
-        for path in utils.THIRD_PARTY_LICENSES_DIR.iterdir()
-        if path.is_file()
-    }
+    bundled = {path.name for path in utils.list_third_party_license_texts()}
 
     assert referenced == bundled
+
+
+def test_license_checks_ignore_non_license_files_in_licenses_folder(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify OS-created files in ``third_party_licenses/`` are not required.
+
+    Opening the folder in macOS Finder can create ``.DS_Store``. Treating it as
+    a license text would fail the notices check and make every build require
+    that file inside the packaged app.
+    """
+    licenses_dir = tmp_path / 'third_party_licenses'
+    shutil.copytree(utils.THIRD_PARTY_LICENSES_DIR, licenses_dir)
+    (licenses_dir / '.DS_Store').write_bytes(b'finder')
+    monkeypatch.setattr(utils, 'THIRD_PARTY_LICENSES_DIR', licenses_dir)
+    monkeypatch.setattr(
+        utils, 'collect_runtime_dependency_names', lambda: ['pillow']
+    )
+    data_dir = tmp_path / 'Resources'
+    _write_complete_license_bundle(data_dir)
+    (data_dir / 'third_party_licenses' / '.DS_Store').unlink()
+
+    assert '.DS_Store' not in {
+        path.name for path in utils.list_third_party_license_texts()
+    }
+    utils.verify_bundled_licenses(data_dir)

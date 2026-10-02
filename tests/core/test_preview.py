@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import gc
 import os
+import struct
+import warnings
 import weakref
+import zlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Never, Self
 
@@ -300,9 +303,9 @@ def _half_transparent_palette_image() -> Image.Image:
         ),
         pytest.param(
             'IMG_6003.PNG',
-            lambda: _half_transparent_image('LA', (0, 0), (0, 255)),
+            lambda: _half_transparent_image('LA', (0, 0), (128, 255)),
             {'format': 'PNG'},
-            (0, 0, 0),
+            (128, 128, 128),
             id='png-la',
         ),
         pytest.param(
@@ -320,6 +323,20 @@ def _half_transparent_palette_image() -> Image.Image:
             id='png-16-bit-gray-trns',
         ),
         pytest.param(
+            'IMG_6003.PNG',
+            lambda: _half_transparent_image('I;16', 65535, 32768),
+            {'format': 'PNG', 'transparency': 65535},
+            (128, 128, 128),
+            id='png-16-bit-gray-white-key',
+        ),
+        pytest.param(
+            'IMG_6003.PNG',
+            lambda: _half_transparent_image('I;16', 256, 0),
+            {'format': 'PNG', 'transparency': 256},
+            (0, 0, 0),
+            id='png-16-bit-gray-key-above-255',
+        ),
+        pytest.param(
             'IMG_6003.JXL',
             lambda: _half_transparent_image(
                 'RGBA', (255, 0, 0, 0), (0, 0, 255, 255)
@@ -330,7 +347,7 @@ def _half_transparent_palette_image() -> Image.Image:
         ),
     ],
 )
-def test_transparent_raster_previews_flatten_onto_white(
+def test_transparent_raster_previews_flatten_onto_background(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
         filename: str,
@@ -339,13 +356,16 @@ def test_transparent_raster_previews_flatten_onto_white(
         opaque_rgb: tuple[int, int, int],
 ) -> None:
     """
-    Verify transparent pixels render white while opaque pixels keep color.
+    Verify transparent pixels show the background while opaque pixels keep
+    color.
 
     Preview caches are JPEG, so alpha must be flattened. A plain
     ``convert('RGB')`` drops alpha and shows the color hidden under transparent
     pixels (red here), which would mislead culling decisions. The 16-bit
-    grayscale case also guards against tone scaling bypassing transparency
-    compositing.
+    grayscale cases also guard against tone scaling bypassing compositing and
+    against Pillow's 8-bit key comparison, which would whiten every bright
+    pixel for a 65535 key and the wrong pixels for a 256 key. The gray ``LA``
+    case catches gray turning red when ``LA`` is pasted onto RGB directly.
     """
     image_factory().save(tmp_path / filename, **save_options)
     stub_read_exif(monkeypatch, {})
@@ -357,8 +377,143 @@ def test_transparent_raster_previews_flatten_onto_white(
 
     with Image.open(viewer_path) as image:
         rgb = image.convert('RGB')
-        assert_color_close(rgb.getpixel((2, 8)), (255, 255, 255))
+        assert_color_close(
+            rgb.getpixel((2, 8)),
+            core_preview_module.TRANSPARENCY_BACKGROUND_RGB,
+        )
         assert_color_close(rgb.getpixel((29, 8)), opaque_rgb)
+
+
+def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
+    checksum = zlib.crc32(chunk_type + data) & 0xFFFFFFFF
+    return (
+        struct.pack('>I', len(data))
+        + chunk_type
+        + data
+        + struct.pack('>I', checksum)
+    )
+
+
+def _sixteen_bit_rgb_png_bytes(
+        left: tuple[int, int, int],
+        right: tuple[int, int, int],
+        transparency: tuple[int, int, int],
+) -> bytes:
+    """
+    Return a 32x16 16-bit RGB PNG with a tRNS key; Pillow cannot save one.
+    """
+    rows = b''.join(
+        b'\x00'
+        + b''.join(
+            struct.pack('>3H', *(left if x < 16 else right)) for x in range(32)
+        )
+        for _ in range(16)
+    )
+    header = struct.pack('>IIBBBBB', 32, 16, 16, 2, 0, 0, 0)
+    return (
+        b'\x89PNG\r\n\x1a\n'
+        + _png_chunk(b'IHDR', header)
+        + _png_chunk(b'tRNS', struct.pack('>3H', *transparency))
+        + _png_chunk(b'IDAT', zlib.compress(rows))
+        + _png_chunk(b'IEND', b'')
+    )
+
+
+def test_sixteen_bit_rgb_png_color_key_matches_keyed_pixels(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify a 16-bit RGB tRNS key hides the keyed color and nothing else.
+
+    Pillow reduces these pixels to their high bytes but compares them with the
+    key's low bytes, which left keyed pixels opaque and turned unrelated colors
+    transparent. The right half's high bytes equal the key's low bytes, so it
+    is exactly the color that comparison used to hide.
+    """
+    key = (0x1234, 0x5678, 0x9ABC)
+    (tmp_path / 'IMG_6007.PNG').write_bytes(
+        _sixteen_bit_rgb_png_bytes(key, (0x3400, 0x7800, 0xBC00), key)
+    )
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+
+    viewer_path = library.get_preview_path('IMG_6007', 'viewer')
+
+    with Image.open(viewer_path) as image:
+        rgb = image.convert('RGB')
+        assert_color_close(
+            rgb.getpixel((2, 8)),
+            core_preview_module.TRANSPARENCY_BACKGROUND_RGB,
+        )
+        assert_color_close(rgb.getpixel((29, 8)), (52, 120, 188))
+
+
+def test_palette_png_partial_alpha_blends_without_pillow_warning(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify palette alpha blends once and does not trigger Pillow's warning.
+
+    Converting a palette image with per-entry alpha straight to RGB warns that
+    it should be converted to RGBA first. Flattening must take the single RGBA
+    conversion, which also blends half-transparent red over the background.
+    """
+    image = _half_transparent_image('P', 0, 1)
+    image.putpalette([255, 0, 0, 0, 0, 255])
+    image.save(tmp_path / 'IMG_6008.PNG', transparency=bytes([128, 255]))
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        viewer_path = library.get_preview_path('IMG_6008', 'viewer')
+
+    background = core_preview_module.TRANSPARENCY_BACKGROUND_RGB
+    with Image.open(viewer_path) as preview:
+        rgb = preview.convert('RGB')
+        assert_color_close(
+            rgb.getpixel((2, 8)),
+            (
+                round((255 * 128 + background[0] * 127) / 255),
+                round(background[1] * 127 / 255),
+                round(background[2] * 127 / 255),
+            ),
+        )
+        assert_color_close(rgb.getpixel((29, 8)), (0, 0, 255))
+
+
+def test_sixteen_bit_gray_alpha_jxl_preview_is_not_garbled(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify 16-bit grayscale+alpha JPEG XL files render their real pixels.
+
+    pillow-jxl-plugin 1.3.8 labels these 16-bit samples as 8-bit ``LA``, which
+    made the transparent half gray and the opaque gray half white. The fixture
+    is a 32x16 image whose left half is transparent and right half is opaque
+    16-bit gray 32768, made with ``cjxl -d 0`` because the plugin cannot write
+    this mode.
+    """
+    fixture = Path(__file__).parent / 'fixtures' / 'gray16_alpha.jxl'
+    (tmp_path / 'IMG_6009.JXL').write_bytes(fixture.read_bytes())
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+
+    viewer_path = library.get_preview_path('IMG_6009', 'viewer')
+
+    with Image.open(viewer_path) as image:
+        rgb = image.convert('RGB')
+        assert_color_close(
+            rgb.getpixel((2, 8)),
+            core_preview_module.TRANSPARENCY_BACKGROUND_RGB,
+        )
+        assert_color_close(rgb.getpixel((29, 8)), (128, 128, 128))
 
 
 @pytest.mark.parametrize(

@@ -328,7 +328,7 @@ def _build_photo_record(
         metadata_source=metadata_source,
         focus_point=focus_point,
         has_heif=bool(heif_files),
-        has_raster=bool(sources.raster_files),
+        has_raster=sources.has_raster,
         focus_point_pending=focus_point_pending,
         capture_at=exif_display.capture_at,
         scene_id=None,

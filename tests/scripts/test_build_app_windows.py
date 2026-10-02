@@ -20,7 +20,7 @@ def test_windows_pyinstaller_command_prefers_module_when_binary_missing(
     # depend on which packages this test environment has installed.
     monkeypatch.setattr(
         build_app.utils,
-        'runtime_metadata_args',
+        'build_runtime_metadata_args',
         lambda: ['--copy-metadata', 'pillow'],
     )
     monkeypatch.setattr(
@@ -83,7 +83,7 @@ def test_windows_pyinstaller_command_supports_onefile(
     # depend on which packages this test environment has installed.
     monkeypatch.setattr(
         build_app.utils,
-        'runtime_metadata_args',
+        'build_runtime_metadata_args',
         lambda: ['--copy-metadata', 'pillow'],
     )
     monkeypatch.setattr(
@@ -144,7 +144,7 @@ def test_windows_pyinstaller_command_supports_console_debug_build(
     # depend on which packages this test environment has installed.
     monkeypatch.setattr(
         build_app.utils,
-        'runtime_metadata_args',
+        'build_runtime_metadata_args',
         lambda: ['--copy-metadata', 'pillow'],
     )
     monkeypatch.setattr(

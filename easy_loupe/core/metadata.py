@@ -17,8 +17,10 @@ from easy_loupe.core.records import (
     SceneGroup,
 )
 from easy_loupe.core.recursive_loading import (
+    build_photo_id_group_index,
     normalize_photo_identifier,
     normalize_photo_identifier_for_valid_ids,
+    resolve_photo_identifier_by_group_key,
 )
 
 if TYPE_CHECKING:
@@ -56,7 +58,11 @@ def normalize_metadata_entries(
     separator variants. When ``valid_photo_ids`` is provided, keys are resolved
     against the IDs that were actually loaded from the current folder. That
     lets the loader prefer exact IDs such as ``IMG.0001`` before falling back
-    to legacy extension stripping for keys such as ``IMG_0001.JPG``.
+    to legacy extension stripping for keys such as ``IMG_0001.JPG``. Keys that
+    still do not match fall back to a case-insensitive stem match, because a
+    photo's ID follows the companion file that wins preview priority and can
+    change case when a companion such as ``dsc01234.png`` appears next to
+    ``DSC01234.ARW``. Exact and legacy matches always win over that fallback.
 
     Callers that do not have a loaded photo set can omit ``valid_photo_ids``;
     the function then keeps the historical generic normalization behavior.
@@ -71,23 +77,33 @@ def normalize_metadata_entries(
         return {}
 
     normalized: dict[str, dict[str, Any]] = {}
+    # Case-only matches are collected separately so an exact or legacy key for
+    # the same photo wins regardless of the order keys were saved in.
+    case_only_matches: dict[str, dict[str, Any]] = {}
     valid_photo_id_set = (
         set(valid_photo_ids) if valid_photo_ids is not None else None
     )
+    photo_id_group_index = build_photo_id_group_index(valid_photo_id_set or ())
     for key, value in photos.items():
         if not isinstance(value, dict):
             continue
 
-        # Loaded IDs are the only reliable way to tell a current dotted stem
-        # such as IMG.0001 from a legacy filename key that needs suffix
-        # stripping.
-        photo_id = (
-            normalize_photo_identifier(key)
-            if valid_photo_id_set is None
-            else normalize_photo_identifier_for_valid_ids(
+        target = normalized
+        if valid_photo_id_set is None:
+            photo_id = normalize_photo_identifier(key)
+        else:
+            # Loaded IDs are the only reliable way to tell a current dotted
+            # stem such as IMG.0001 from a legacy filename key that needs
+            # suffix stripping.
+            photo_id = normalize_photo_identifier_for_valid_ids(
                 key, valid_photo_id_set
             )
-        )
+            if photo_id is None:
+                photo_id = resolve_photo_identifier_by_group_key(
+                    key, photo_id_group_index
+                )
+                target = case_only_matches
+
         if photo_id is None:
             continue
 
@@ -108,9 +124,9 @@ def normalize_metadata_entries(
             entry['flag'] = flag
 
         if entry:
-            normalized[photo_id] = entry
+            target[photo_id] = entry
 
-    return normalized
+    return {**case_only_matches, **normalized}
 
 
 def normalize_scene_groups(
@@ -127,7 +143,9 @@ def normalize_scene_groups(
 
     Exact loaded IDs are preferred before extension stripping for the same
     reason as per-photo metadata: dotted stems such as ``IMG.0001`` are valid
-    current IDs and must not be shortened to ``IMG``.
+    current IDs and must not be shortened to ``IMG``. Saved IDs that differ
+    from a loaded ID only in stem case fall back to that loaded ID, matching
+    :func:`normalize_metadata_entries`.
     """
     if not isinstance(data, dict):
         return None, []
@@ -146,6 +164,7 @@ def normalize_scene_groups(
         return scene_source, []
 
     valid_photo_ids = set(photo_ids)
+    photo_id_group_index = build_photo_id_group_index(photo_ids)
     seen: set[str] = set()
     groups: list[list[str]] = []
     had_valid_saved_photo_id = False
@@ -156,9 +175,11 @@ def normalize_scene_groups(
         group_photo_ids: list[str] = []
         for raw_photo_id in raw_group:
             # Resolve against the loaded photo set so exact current IDs win
-            # over legacy filename stripping.
+            # over legacy filename stripping, then case-only stem changes.
             photo_id = normalize_photo_identifier_for_valid_ids(
                 raw_photo_id, valid_photo_ids
+            ) or resolve_photo_identifier_by_group_key(
+                raw_photo_id, photo_id_group_index
             )
             if photo_id is None:
                 continue

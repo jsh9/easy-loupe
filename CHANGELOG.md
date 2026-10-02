@@ -8,8 +8,11 @@
     JPEG, HEIC/HEIF, and RAW files, in folder loads and when you open a single
     file. When a JPEG XL or PNG file shares a name with other formats, JPEG and
     HEIC/HEIF previews are still preferred, and RAW is still used for metadata.
-    Transparent areas in PNG and JPEG XL images show as white, and 16-bit
-    grayscale PNGs now display their real tones instead of pure white.
+    Transparent areas in PNG and JPEG XL images show as near-white, so clipping
+    warnings do not flag them, and 16-bit PNG and JPEG XL images keep their
+    real tones and transparency. Camera details and capture times from JPEG XL
+    files made by `cjxl`, including losslessly converted JPEGs, also appear in
+    the packaged apps.
 
 - Changed
 
@@ -18,7 +21,8 @@
 
   - The About dialog now shows EasyLoupe's copyright and license, states that
     it comes with no warranty, and links to the source code, the license, and
-    the new third-party notices. Packaged apps also include EasyLoupe's
+    the new third-party notices. It is also available from the Help menu of
+    windows opened from a single photo. Packaged apps also include EasyLoupe's
     license, the third-party notices, and the license texts of the components
     they bundle.
 
@@ -32,6 +36,10 @@
 
 - Fixed
 
+  - Ratings, color labels, flags, and scene groups are no longer lost when a
+    photo's companion files differ only in filename letter case, for example
+    `DSC01234.ARW` next to `dsc01234.png` or `dsc01234.jpg`. Such a photo can
+    take its name from the other file, and its saved tags now follow it.
   - Scene detection on large folders (roughly 500 or more photos) no longer
     crashes the app or leaves the progress overlay stuck after the scene groups
     are saved. Progress updates from background work are now handled one at a

@@ -21,7 +21,7 @@ def test_pyinstaller_command_prefers_module_when_binary_missing(
     # depend on which packages this test environment has installed.
     monkeypatch.setattr(
         build_app.utils,
-        'runtime_metadata_args',
+        'build_runtime_metadata_args',
         lambda: ['--copy-metadata', 'pillow'],
     )
     monkeypatch.setattr(
@@ -86,7 +86,7 @@ def test_pyinstaller_command_uses_binary_when_available(
     # depend on which packages this test environment has installed.
     monkeypatch.setattr(
         build_app.utils,
-        'runtime_metadata_args',
+        'build_runtime_metadata_args',
         lambda: ['--copy-metadata', 'pillow'],
     )
     monkeypatch.setattr(
@@ -141,6 +141,13 @@ def test_pyinstaller_command_uses_binary_when_available(
 
 
 def test_document_type_entry_registers_supported_photo_extensions() -> None:
+    """
+    Verify Finder can offer EasyLoupe for every supported photo format.
+
+    The document types come from ``SUPPORTED_EXTENSIONS``, so JPEG XL and PNG
+    must appear alongside JPEG, HEIC, and RAW, while the Alternate rank keeps
+    EasyLoupe from taking over default apps.
+    """
     entry = build_app.document_type_entry()
 
     assert entry['CFBundleTypeRole'] == 'Viewer'
@@ -175,6 +182,14 @@ def test_main_signs_and_verifies_after_metadata_injection(
         monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """
+    Verify the macOS build runs its post-PyInstaller steps in order.
+
+    License files are checked after cleanup removes bundled PySide tool apps
+    and before plist injection and signing, so a missing license stops the
+    build before an incomplete app is signed. Signing must follow every bundle
+    mutation, and verification must follow signing.
+    """
     calls: list[str] = []
     monkeypatch.setattr(
         build_app,

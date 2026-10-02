@@ -10,6 +10,7 @@ from PIL import Image
 from PySide6.QtWidgets import QApplication
 
 import easy_loupe.ui.viewers.clipping as clipping_module
+from easy_loupe.core.photo_library import PhotoLibrary
 from easy_loupe.ui.viewers.clipping import (
     CLIPPING_ANALYSIS_MAX_LONG_EDGE,
     COMPLETE_HIGHLIGHT_CLIPPING_RGBA,
@@ -25,6 +26,7 @@ from easy_loupe.ui.viewers.clipping import (
     clipping_overlay_payload_for_key,
     clipping_overlay_pixmap,
 )
+from tests.ui._helpers import stub_read_exif
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -88,6 +90,33 @@ def test_clipping_overlay_marks_exact_channel_levels(
     overlay = build_clipping_overlay_image(image)
 
     assert overlay.getpixel((0, 0)) == expected
+
+
+def test_flattened_transparency_is_not_marked_as_clipped(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify transparent PNG areas do not show highlight clipping warnings.
+
+    The clipping overlay analyzes the cached viewer preview, where transparency
+    has been flattened. A pure white background would read as fully clipped
+    highlights over every transparent pixel even when the photo content has no
+    clipping at all.
+    """
+    image = Image.new('RGBA', (64, 32), (0, 0, 0, 0))
+    image.paste(Image.new('RGBA', (32, 32), (128, 128, 128, 255)), (32, 0))
+    image.save(tmp_path / 'IMG_6010.PNG')
+    stub_read_exif(monkeypatch, {})
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+
+    viewer_path = library.get_preview_path('IMG_6010', 'viewer')
+
+    with Image.open(viewer_path) as preview:
+        overlay = build_clipping_overlay_image(preview)
+
+    assert overlay.getpixel((4, 16)) == (0, 0, 0, 0)
+    assert overlay.getpixel((48, 16)) == (0, 0, 0, 0)
 
 
 def test_exposure_masks_partition_all_rgb_endpoint_combinations() -> None:

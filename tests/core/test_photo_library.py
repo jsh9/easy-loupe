@@ -95,6 +95,13 @@ def test_load_folder_groups_jpeg_and_raw_files_by_stem(
 
 
 def test_supported_extensions_include_major_viewer_formats() -> None:
+    """
+    Verify folder scans and file-open handling accept every promised format.
+
+    ``SUPPORTED_EXTENSIONS`` drives folder discovery, direct file opens, and
+    macOS document types, so dropping a raster or RAW extension would silently
+    hide those photos everywhere.
+    """
     assert {
         '.jpg',
         '.jpeg',

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
 
 if TYPE_CHECKING:
     from importlib.resources.abc import Traversable
@@ -42,7 +42,7 @@ APP_THIRD_PARTY_NOTICES_URL = (
 )
 
 
-def about_dialog_html() -> str:
+def build_about_dialog_html() -> str:
     """
     Return the About dialog body, including the GPL's legal notices.
 
@@ -61,6 +61,16 @@ def about_dialog_html() -> str:
         f'<a href="{APP_LICENSE_URL}">License</a> &middot; '
         f'<a href="{APP_THIRD_PARTY_NOTICES_URL}">Third-party notices</a></p>'
     )
+
+
+def show_about_dialog(parent: QWidget) -> None:
+    """
+    Show the About dialog for any EasyLoupe window.
+
+    The culling window and standalone photo-viewer windows are separate
+    interactive interfaces, so both need a route to the GPL notices.
+    """
+    QMessageBox.about(parent, f'About {APP_NAME}', build_about_dialog_html())
 
 
 def asset_resource(name: str) -> Traversable:

@@ -210,9 +210,9 @@ maintenance guide before editing behavior.
 ## 6. External Dependencies And Runtime Assumptions
 
 - `PySide6` powers the desktop UI.
-- `Pillow`, `pillow-heif`, `pillow-jxl-plugin`, `rawpy`, `imagehash`, and
-  `exiftool` support image loading, RAW/HEIF/JPEG XL rendering, scene
-  detection, and metadata extraction. See
+- `Pillow`, `pillow-heif`, `pillow-jxl-plugin`, `brotli`, `rawpy`, `imagehash`,
+  and `exiftool` support image loading, RAW/HEIF/JPEG XL rendering, JPEG XL
+  metadata decompression, scene detection, and metadata extraction. See
   `docs/maintenance-guides/previews-exif-autofocus.md` for runtime behavior and
   fallback contracts.
 - Packaged builds bundle ExifTool payloads. Source/development runs rely on

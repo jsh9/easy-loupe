@@ -55,8 +55,8 @@ def common_pyinstaller_args(
         'easy_loupe.ui.assets',
         '--copy-metadata',
         'easy-loupe',
-        *runtime_metadata_args(),
-        *license_data_args(),
+        *build_runtime_metadata_args(),
+        *build_license_data_args(),
         str(ENTRYPOINT),
     ]
     if windowed:
@@ -65,7 +65,7 @@ def common_pyinstaller_args(
     return args
 
 
-def runtime_dependency_names(root: str = 'easy-loupe') -> list[str]:
+def collect_runtime_dependency_names(root: str = 'easy-loupe') -> list[str]:
     """
     Return the installed runtime dependency closure of ``root``, sorted.
 
@@ -107,7 +107,7 @@ def _is_installed_distribution(name: str) -> bool:
     return True
 
 
-def runtime_metadata_args() -> list[str]:
+def build_runtime_metadata_args() -> list[str]:
     """
     Return PyInstaller args that bundle runtime dependency metadata.
 
@@ -115,13 +115,13 @@ def runtime_metadata_args() -> list[str]:
     which ``THIRD_PARTY_NOTICES.md`` points packaged-app users to.
     """
     args: list[str] = []
-    for name in runtime_dependency_names():
+    for name in collect_runtime_dependency_names():
         args.extend(['--copy-metadata', name])
 
     return args
 
 
-def license_data_args() -> list[str]:
+def build_license_data_args() -> list[str]:
     """
     Return PyInstaller args that bundle EasyLoupe's license notices.
 
@@ -139,6 +139,16 @@ def license_data_args() -> list[str]:
             THIRD_PARTY_LICENSES_DIR, THIRD_PARTY_LICENSES_DIR.name
         ),
     ]
+
+
+def list_third_party_license_texts() -> list[Path]:
+    """
+    Return the curated license texts in ``third_party_licenses/``, sorted.
+
+    Only ``.txt`` files count, so files that the OS adds to the folder, such as
+    macOS ``.DS_Store``, never become required license files.
+    """
+    return sorted(THIRD_PARTY_LICENSES_DIR.glob('*.txt'))
 
 
 def verify_bundled_licenses(data_dir: Path) -> None:
@@ -160,8 +170,7 @@ def verify_bundled_licenses(data_dir: Path) -> None:
         data_dir / THIRD_PARTY_NOTICES_PATH.name,
         *(
             data_dir / THIRD_PARTY_LICENSES_DIR.name / path.name
-            for path in sorted(THIRD_PARTY_LICENSES_DIR.iterdir())
-            if path.is_file()
+            for path in list_third_party_license_texts()
         ),
     ]
     # Report POSIX-style paths so build errors read the same on every OS.
@@ -176,7 +185,7 @@ def verify_bundled_licenses(data_dir: Path) -> None:
     }
     missing.extend(
         f'{name} package metadata'
-        for name in ['easy-loupe', *runtime_dependency_names()]
+        for name in ['easy-loupe', *collect_runtime_dependency_names()]
         if name not in bundled_metadata
     )
     if missing:
