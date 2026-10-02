@@ -566,6 +566,24 @@ class MainWindowBuildMixin:
             ),
         }
 
+        # View-only rotation follows the same selection, gating, and undo
+        # rules as tags, so it lives beside them as real QAction shortcuts.
+        self.rotate_menu = self.assign_photo_menu.addMenu('R&otate')
+        self.rotate_actions = {
+            1: self._create_assignment_action(
+                self.rotate_menu,
+                'Clockwise',
+                ']',
+                lambda: self._rotate_selection(1),
+            ),
+            -1: self._create_assignment_action(
+                self.rotate_menu,
+                'Counterclockwise',
+                '[',
+                lambda: self._rotate_selection(-1),
+            ),
+        }
+
         self._build_help_menu(menu_bar)
 
     def _build_file_menu(self: MainWindow, menu_bar: QMenuBar) -> None:

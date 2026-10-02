@@ -81,6 +81,15 @@ Major logic:
   temp directory.
 - Cache invalidation is currently mtime-based. If preview semantics change,
   keep cache key behavior in mind.
+- Cached previews are always unrotated. User view rotation (`]`/`[`, stored as
+  `rotation` in `easy-loupe.json`) is applied only at display time by
+  `easy_loupe/ui/rotation.py`, so the cache key, scene-detection hashes, the
+  RGB histogram, and clipping analysis never depend on it. Do not add rotation
+  to the cache key; that would re-render previews on every turn and change
+  scene detection.
+- Ctrl+C copies the JPEG source or `"viewer"` preview turned by the photo's
+  view rotation with `rotate_image()`. PIL's `Image.rotate()` turns the other
+  way, so use the shared Qt helper wherever output must match the screen.
 
 ## 2. Runtime Dependencies
 
@@ -205,7 +214,10 @@ Major logic:
   compatibility, but new camera-brand-specific extraction logic belongs under
   `autofocus_points/brands/`.
 - Stored focus points are normalized `(x, y)` values intended to match the
-  displayed, EXIF-transposed preview orientation.
+  displayed, EXIF-transposed preview orientation. They stay in that unrotated
+  preview frame even when a user view rotation is saved; viewers map them with
+  `rotate_normalized_point()` (the same mapping as EXIF orientations 6, 3, and
+  8\) when drawing markers or centering focus zoom.
 - Pentax K-1/K-1 II DSLR phase-detect metadata exposes AF point ids rather than
   pixel coordinates. The app maps those centrally clustered AF points into an
   approximate central coverage box in `autofocus_points/brands/pentax.py`; do

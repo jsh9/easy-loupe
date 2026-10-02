@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+- Added
+
+  - Press `]` to turn photos 90 degrees clockwise for viewing, or `[` to turn
+    them counterclockwise. The commands are also in `Assign to Photo > Rotate`.
+    Like ratings and labels, rotation applies to every selected photo in
+    culling and browse view and to the active photo in compare view, and
+    `Ctrl+Z`/`Ctrl+Y` undo and redo it. Rotation only changes how EasyLoupe
+    shows a photo: original files, their EXIF data, and XMP sidecars are never
+    changed. The viewer, split view, thumbnails, scene strip, browse grid,
+    compare panes, AF point, clipping warnings, zoom minimap, and `Ctrl+C`
+    copies all follow it, and rotating while zoomed keeps the same part of the
+    photo centered.
+  - Rotations are saved per photo in the folder's `easy-loupe.json` as a new
+    optional `rotation` value (90, 180, or 270), so photos open turned the same
+    way next time. Photos that are not rotated keep the same entries as before.
+    Older EasyLoupe versions ignore `rotation` and drop it if they save the
+    folder's metadata.
+  - When you open a single photo from Finder or Explorer, the photo viewer
+    shows rotations saved in that folder's `easy-loupe.json`. `]` and `[` also
+    turn photos there, but only for that viewing session: the photo viewer
+    never writes `easy-loupe.json`.
+
 ## [1.5.0] - 2026-10-02
 
 - Added

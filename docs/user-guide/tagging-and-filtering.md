@@ -46,7 +46,8 @@ In compare view, metadata applies only to the active compare photo.
 
 ## 4. Undo And Redo
 
-Use `Ctrl+Z` and `Ctrl+Y` to undo or redo metadata assignment batches.
+Use `Ctrl+Z` and `Ctrl+Y` to undo or redo metadata assignment batches,
+including view rotations made with `]` and `[`.
 
 ## 5. Filtering
 
@@ -68,5 +69,10 @@ EasyLoupe writes metadata immediately to `easy-loupe.json` in the selected
 folder. Root photos use their visible filename stem as the photo key. Photos
 loaded from subfolders use folder-relative keys such as `subfolder/IMG_1234`.
 
-The file stores per-photo `rating`, `color_label`, and `flag` values. Scene
-groups may also be stored after scene detection or manual scene editing.
+The file stores per-photo `rating`, `color_label`, and `flag` values, plus a
+`rotation` value (90, 180, or 270 degrees clockwise) for photos you turned with
+`]` or `[`. Unrotated photos have no `rotation` entry. Scene groups may also be
+stored after scene detection or manual scene editing.
+
+Older EasyLoupe versions do not know `rotation` and drop it if they save the
+folder's metadata.

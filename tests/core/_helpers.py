@@ -60,6 +60,7 @@ def make_photo_record(
         rating: int | None,
         color_label: str | None,
         flag: str | None,
+        rotation: int = 0,
 ) -> object:
     return type(
         'PhotoLike',
@@ -69,6 +70,7 @@ def make_photo_record(
             'rating': rating,
             'color_label': color_label,
             'flag': flag,
+            'rotation': rotation,
         },
     )()
 

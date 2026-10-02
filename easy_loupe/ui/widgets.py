@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from easy_loupe.core.rotation import NO_ROTATION_DEGREES
+from easy_loupe.ui.rotation import rotate_pixmap
 from easy_loupe.ui.thumbnail_lookahead import reveal_neighbor_after_move
 
 if TYPE_CHECKING:
@@ -316,6 +318,7 @@ class ThumbnailItemWidget(QWidget):
             rejected: bool = False,
             scene_count: int | None = None,
             stacked: bool = False,
+            rotation: int = NO_ROTATION_DEGREES,
             parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -338,7 +341,11 @@ class ThumbnailItemWidget(QWidget):
             frame_size.height() + stack_offset,
         )
 
-        pixmap = QPixmap(str(thumb_path))
+        # Keep the unrotated thumbnail so later rotations re-turn the source
+        # pixels instead of compounding turns on an already rotated copy.
+        self._source_pixmap = QPixmap(str(thumb_path))
+        self._rotation = rotation
+        pixmap = rotate_pixmap(self._source_pixmap, rotation)
         if stacked:
             self._create_thumb_frame(
                 stack_widget,
@@ -434,6 +441,26 @@ class ThumbnailItemWidget(QWidget):
     @staticmethod
     def _set_pixmap(widget: ThumbnailPreviewWidget, pixmap: QPixmap) -> None:
         widget.set_pixmap(pixmap)
+
+    def set_rotation(self, rotation: int) -> None:
+        """
+        Show the thumbnail at a new view rotation without rebuilding the card.
+
+        Rotation never changes card geometry: each image widget letterboxes the
+        pixmap by its own aspect ratio, and minimap overlays stay in the same
+        rotated normalized frame as the main viewer.
+        """
+        if rotation == self._rotation:
+            return
+
+        self._rotation = rotation
+        pixmap = rotate_pixmap(self._source_pixmap, rotation)
+        for image_widget in self._image_widgets:
+            self._set_pixmap(image_widget, pixmap)
+
+    def rotation(self) -> int:
+        """Return the clockwise view rotation shown by this card."""
+        return self._rotation
 
     def _reserved_text_height(self, row_spacing: int) -> int:
         """Reserve room for both text rows even when metadata is empty."""

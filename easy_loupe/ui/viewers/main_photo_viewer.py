@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QSplitter, QStackedLayout, QWidget
 
+from easy_loupe.core.rotation import NO_ROTATION_DEGREES
 from easy_loupe.ui.defaults import (
     DEFAULT_SHOW_AF_POINT,
     DEFAULT_SHOW_CLIPPING,
@@ -35,6 +36,10 @@ class MainPhotoViewer(QWidget):
         self._current_image_path: Path | None = None
         self._current_focus_point = (0.5, 0.5)
         self._current_focus_point_pending = False
+        # Every internal reload (split toggles, Space promotion, forced fit)
+        # re-calls ``PhotoViewer.set_photo`` from this cached state, so the
+        # rotation must live here too or those reloads would undo it.
+        self._current_rotation = NO_ROTATION_DEGREES
         self._focus_point_marker_enabled = DEFAULT_SHOW_AF_POINT
         self._clipping_warning_enabled = DEFAULT_SHOW_CLIPPING
         self._mode = 'single-fit'
@@ -107,11 +112,13 @@ class MainPhotoViewer(QWidget):
             preserve_zoom: bool = False,
             preserved_center: tuple[float, float] | None = None,
             handoff_manual_view: ManualView | None = None,
+            rotation: int = NO_ROTATION_DEGREES,
     ) -> None:
         """Display a photo in the active single-pane or split-view mode."""
         self._current_image_path = image_path
         self._current_focus_point = focus_point
         self._current_focus_point_pending = focus_point_pending
+        self._current_rotation = rotation
         if self.is_split_view():
             # Split navigation restores per-photo right-pane memory, so avoid
             # carrying the previous photo's single-pane handoff view here.
@@ -124,7 +131,27 @@ class MainPhotoViewer(QWidget):
                 preserve_zoom=preserve_zoom,
                 preserved_center=preserved_center,
                 handoff_manual_view=handoff_manual_view,
+                rotation=rotation,
             )
+
+        self._sync_mode()
+
+    def set_rotation(self, rotation: int) -> None:
+        """
+        Turn the displayed photo in place, keeping its inspection state.
+
+        Only the visible layout is rotated now; hidden panes are reloaded from
+        ``_current_rotation`` whenever single/split mode switches.
+        """
+        if self._current_image_path is None:
+            return
+
+        self._current_rotation = rotation
+        if self.is_split_view():
+            self.split_fit_viewer.set_rotation(rotation)
+            self.split_zoom_viewer.set_rotation(rotation)
+        else:
+            self.single_viewer.set_rotation(rotation)
 
         self._sync_mode()
 
@@ -133,6 +160,7 @@ class MainPhotoViewer(QWidget):
         self._current_image_path = None
         self._current_focus_point = (0.5, 0.5)
         self._current_focus_point_pending = False
+        self._current_rotation = NO_ROTATION_DEGREES
         self.single_viewer.clear_photo()
         self.split_fit_viewer.clear_photo()
         self.split_zoom_viewer.clear_photo()
@@ -211,6 +239,7 @@ class MainPhotoViewer(QWidget):
             self._current_focus_point,
             focus_point_pending=self._current_focus_point_pending,
             preserve_zoom=False,
+            rotation=self._current_rotation,
         )
         self._mode = 'single-fit'
         self.visible_region_changed.emit()
@@ -230,6 +259,7 @@ class MainPhotoViewer(QWidget):
                 self._current_focus_point,
                 focus_point_pending=self._current_focus_point_pending,
                 preserve_zoom=False,
+                rotation=self._current_rotation,
             )
             if manual_view is not None:
                 self.apply_manual_view(
@@ -259,6 +289,7 @@ class MainPhotoViewer(QWidget):
                 self._current_focus_point,
                 focus_point_pending=self._current_focus_point_pending,
                 preserve_zoom=False,
+                rotation=self._current_rotation,
             )
             if manual_view is not None:
                 self.apply_manual_view(
@@ -336,12 +367,14 @@ class MainPhotoViewer(QWidget):
             self._current_focus_point,
             focus_point_pending=self._current_focus_point_pending,
             preserve_zoom=False,
+            rotation=self._current_rotation,
         )
         self.split_zoom_viewer.set_photo(
             self._current_image_path,
             self._current_focus_point,
             focus_point_pending=self._current_focus_point_pending,
             preserve_zoom=False,
+            rotation=self._current_rotation,
         )
         self.split_zoom_viewer.restore_or_focus_manual_view()
         self._ensure_split_sizes()

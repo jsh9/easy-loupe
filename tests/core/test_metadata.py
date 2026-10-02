@@ -542,3 +542,142 @@ def test_export_metadata_delegates_to_serialize(
     exported = library.export_metadata()
 
     assert exported == {'IMG_9070': {'rating': 2}}
+
+
+def test_load_folder_reads_saved_rotation_and_ignores_invalid_values(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify saved view rotations load, including through legacy keys.
+
+    Rotation lives in the same per-photo entry as tags, so it must follow
+    legacy filename-key migration. Invalid values must be ignored instead of
+    blocking the folder load, matching how bad ratings are handled.
+    """
+    for photo_id in ('IMG_3000', 'IMG_3001', 'IMG_3002', 'IMG_3003'):
+        create_jpeg(tmp_path / f'{photo_id}.JPG', 'green')
+
+    (tmp_path / METADATA_FILENAME).write_text(
+        json.dumps({
+            'photos': {
+                'IMG_3000': {'rotation': 90},
+                'IMG_3001.JPG': {'rotation': 270, 'rating': 2},
+                'IMG_3002': {'rotation': 45},
+                'IMG_3003': {'rotation': True},
+            }
+        }),
+        encoding='utf-8',
+    )
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+
+    assert library.get_photo('IMG_3000').rotation == 90
+    assert library.get_photo('IMG_3001').rotation == 270
+    assert library.get_photo('IMG_3001').rating == 2
+    assert library.get_photo('IMG_3002').rotation == 0
+    assert library.get_photo('IMG_3003').rotation == 0
+
+
+def test_save_metadata_writes_only_nonzero_rotation(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify rotation persists as an optional key that disappears at zero.
+
+    Unrotated photos must keep the historical on-disk shape, and turning a
+    photo back to 0 must remove an entry that has no other metadata.
+    """
+    create_jpeg(tmp_path / 'IMG_3100.JPG', 'blue')
+    create_jpeg(tmp_path / 'IMG_3101.JPG', 'red')
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+    library.update_metadata('IMG_3100', rotation=90, fields={'rotation'})
+    library.update_metadata('IMG_3101', rating=3, fields={'rating'})
+    library.save_metadata()
+
+    metadata_path = tmp_path / METADATA_FILENAME
+    assert json.loads(metadata_path.read_text(encoding='utf-8')) == {
+        'photos': {
+            'IMG_3100': {'rotation': 90},
+            'IMG_3101': {'rating': 3},
+        }
+    }
+
+    reloaded = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    reloaded.load_folder(tmp_path)
+    assert reloaded.get_photo('IMG_3100').rotation == 90
+
+    reloaded.update_metadata('IMG_3100', rotation=0, fields={'rotation'})
+    reloaded.save_metadata()
+
+    assert json.loads(metadata_path.read_text(encoding='utf-8')) == {
+        'photos': {'IMG_3101': {'rating': 3}}
+    }
+
+
+def test_metadata_normalization_and_serialization_handle_rotation() -> None:
+    """
+    Verify the pure normalize/serialize pair round-trips rotation.
+
+    Zero and invalid rotations are dropped on both sides so the persisted entry
+    shape only grows when a photo is actually turned.
+    """
+    normalized = normalize_metadata_entries({
+        'photos': {
+            'IMG_3200': {'rotation': 180},
+            'IMG_3201': {'rotation': 0},
+            'IMG_3202': {'rotation': 'sideways', 'flag': 'picked'},
+        }
+    })
+
+    assert normalized == {
+        'IMG_3200': {'rotation': 180},
+        'IMG_3202': {'flag': 'picked'},
+    }
+
+    photos = [
+        make_photo_record(
+            'IMG_3200', rating=None, color_label=None, flag=None, rotation=180
+        ),
+        make_photo_record(
+            'IMG_3201', rating=None, color_label=None, flag=None, rotation=0
+        ),
+    ]
+    assert serialize_metadata_entries(photos) == {
+        'IMG_3200': {'rotation': 180}
+    }
+
+
+@pytest.mark.parametrize(
+    'rotation',
+    [45, -90, 360, '90', True],
+    ids=['not-quarter-turn', 'negative', 'full-turn', 'string', 'bool'],
+)
+def test_update_metadata_rejects_invalid_rotation(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rotation: object
+) -> None:
+    """
+    Verify rotation updates are validated like the other metadata fields.
+
+    UI code only produces quarter turns, but the library API is shared and must
+    refuse values that the loader would later discard.
+    """
+    create_jpeg(tmp_path / 'IMG_3300.JPG', 'purple')
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+
+    with pytest.raises(ValueError, match='rotation'):
+        library.update_metadata(
+            'IMG_3300', rotation=rotation, fields={'rotation'}
+        )
+
+    cleared = library.update_metadata(
+        'IMG_3300', rotation=None, fields={'rotation'}
+    )
+    assert cleared.rotation == 0

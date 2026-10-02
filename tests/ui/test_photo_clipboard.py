@@ -199,3 +199,50 @@ def test_copy_photo_pixels_selects_clipboard_source(
     assert library.preview_calls == expected_preview_calls
     _assert_close_rgb(_clipboard_pixel(), expected_color)
     del app
+
+
+@pytest.mark.parametrize(
+    ('rotation', 'expected_size', 'red_pixel'),
+    [
+        pytest.param(0, (12, 8), (1, 4), id='unrotated'),
+        pytest.param(90, (8, 12), (4, 1), id='clockwise'),
+        pytest.param(270, (8, 12), (4, 10), id='counterclockwise'),
+    ],
+)
+def test_copy_photo_pixels_copies_view_rotation(
+        tmp_path: Path,
+        rotation: int,
+        expected_size: tuple[int, int],
+        red_pixel: tuple[int, int],
+) -> None:
+    """
+    Verify clipboard copies match the photo's view-only rotation.
+
+    Ctrl+C copies the viewed photo, so a sideways photo turned upright with
+    ``]`` must paste upright too, while the source file stays untouched.
+    """
+    app = QApplication.instance() or QApplication([])
+    source_path = tmp_path / 'TURNED.png'
+    image = Image.new('RGB', (12, 8), color=(30, 60, 200))
+    image.paste((200, 30, 30), (0, 0, 6, 8))
+    image.save(source_path, format='PNG')
+    source_bytes = source_path.read_bytes()
+    record = _photo_record(
+        'TURNED',
+        preview_source=source_path,
+        has_jpeg=True,
+        has_raw=False,
+    )
+    record.rotation = rotation
+    library = FakeLibrary({'TURNED': record})
+
+    assert copy_photo_pixels_to_clipboard(cast('Any', library), 'TURNED')
+
+    copied = QApplication.clipboard().image()
+    assert (copied.width(), copied.height()) == expected_size
+    color = copied.pixelColor(*red_pixel)
+    _assert_close_rgb(
+        (color.red(), color.green(), color.blue()), (200, 30, 30)
+    )
+    assert source_path.read_bytes() == source_bytes
+    del app

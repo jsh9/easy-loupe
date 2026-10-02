@@ -732,6 +732,7 @@ class MainWindowPresentationMixin:
             rejected=rejected,
             scene_count=scene_count,
             stacked=stacked,
+            rotation=photo.rotation,
         )
         widget.image_position_clicked.connect(
             lambda x, y, source_list=list_widget, photo_id=photo.photo_id: (
@@ -785,6 +786,22 @@ class MainWindowPresentationMixin:
 
         widget.set_metadata_text(metadata_text)
         item.setData(FLAG_ROLE, 'rejected' if rejected else None)
+
+    @staticmethod
+    def _update_photo_item_rotation(
+            list_widget: QListWidget, row: int | None, rotation: int
+    ) -> None:
+        """Turn one existing photo card in place without replacing it."""
+        if row is None:
+            return
+
+        item = list_widget.item(row)
+        if item is None:
+            return
+
+        widget = list_widget.itemWidget(item)
+        if isinstance(widget, ThumbnailItemWidget):
+            widget.set_rotation(rotation)
 
     def _refresh_metadata_items_in_place(
             self: MainWindow, photo_ids: list[str]

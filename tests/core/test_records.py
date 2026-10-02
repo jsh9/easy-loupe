@@ -40,6 +40,7 @@ def test_photo_record_to_api_dict_returns_expected_shape(
         'IMG_9000', color_label='blue', fields={'color_label'}
     )
     library.update_metadata('IMG_9000', flag='picked', fields={'flag'})
+    library.update_metadata('IMG_9000', rotation=270, fields={'rotation'})
 
     photo = library.get_photo('IMG_9000')
     api_dict = photo.to_api_dict()
@@ -54,6 +55,7 @@ def test_photo_record_to_api_dict_returns_expected_shape(
     assert api_dict['rating'] == 3
     assert api_dict['color_label'] == 'blue'
     assert api_dict['flag'] == 'picked'
+    assert api_dict['rotation'] == 270
     assert api_dict['focus_point'] == {'x': 0.5, 'y': 0.5}
     assert api_dict['scene_id'] is None
     assert api_dict['image_width'] == 4000

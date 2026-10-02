@@ -42,6 +42,7 @@ from easy_loupe.core.recursive_loading import (
     normalize_load_recursively,
     resolve_relative_path,
 )
+from easy_loupe.core.rotation import ROTATION_METADATA_FIELD, step_rotation
 from easy_loupe.progress import ProgressSnapshot
 from easy_loupe.ui.defaults import (
     DEFAULT_SHOW_AF_POINT,
@@ -69,6 +70,7 @@ from easy_loupe.ui.progress_overlay import (
     ProgressOverlayController,
     build_progress_overlay,
 )
+from easy_loupe.ui.rotation import rotate_pixmap
 from easy_loupe.ui.shortcut_help import (
     ShortcutHelpContext,
     ShortcutHelpOverlay,
@@ -523,6 +525,12 @@ class PhotoViewerWindow(QMainWindow):
         self.keypad_enter_shortcut = self._make_shortcut(
             Qt.Key_Enter, self._request_culling_handoff
         )
+        self.rotate_clockwise_shortcut = self._make_shortcut(
+            ']', lambda: self._rotate_current_photo(1)
+        )
+        self.rotate_counterclockwise_shortcut = self._make_shortcut(
+            '[', lambda: self._rotate_current_photo(-1)
+        )
         for key, direction in (
             (Qt.Key_Left, -1),
             (Qt.Key_Up, -1),
@@ -709,6 +717,31 @@ class PhotoViewerWindow(QMainWindow):
         self._start_photo_viewer_exif_refresh()
         self._start_viewer_prefetch()
 
+    def _rotate_current_photo(self, quarter_turns: int) -> None:
+        """
+        Turn the current photo for this viewing session only.
+
+        The standalone viewer never writes ``easy-loupe.json``: its library
+        only covers the opened file's folder and has no scene groups, so a save
+        could drop data. The turn is kept on this window's in-memory record, so
+        it survives navigating away and back, but it is not carried into the
+        culling handoff, which uses a separately hydrated library read from
+        disk.
+        """
+        if self.current_photo_id is None or not self.library.photos:
+            return
+
+        photo = self.library.get_photo(self.current_photo_id)
+        rotation = step_rotation(photo.rotation, quarter_turns)
+        self.library.update_metadata(
+            photo.photo_id, rotation=rotation, fields={ROTATION_METADATA_FIELD}
+        )
+        # The viewer emits ``visible_region_changed`` while turning; drop the
+        # cached minimap first so that refresh loads the rotated thumbnail.
+        self._minimap_photo_id = None
+        self.viewer.set_rotation(rotation)
+        self._refresh_visible_region_overlay()
+
     def _capture_inspection_state(self) -> ViewerInspectionState:
         """Capture split/manual inspection state before a photo change."""
         if self.viewer.is_split_view():
@@ -742,6 +775,7 @@ class PhotoViewerWindow(QMainWindow):
             photo.focus_point,
             focus_point_pending=getattr(photo, 'focus_point_pending', False),
             preserve_zoom=False,
+            rotation=photo.rotation,
         )
         if not force_fit and inspection_state is not None:
             self._restore_inspection_state(inspection_state)
@@ -1442,7 +1476,12 @@ class PhotoViewerWindow(QMainWindow):
                 self._hide_minimap()
                 return
 
-            self.minimap.set_pixmap(QPixmap(str(thumb_path)))
+            # Match the viewer's rotated frame so the visible-region box and
+            # minimap clicks keep using the same normalized coordinates.
+            rotation = self.library.get_photo(self.current_photo_id).rotation
+            self.minimap.set_pixmap(
+                rotate_pixmap(QPixmap(str(thumb_path)), rotation)
+            )
             self._minimap_photo_id = self.current_photo_id
 
         self.minimap.set_visible_region_overlay(visible_region)

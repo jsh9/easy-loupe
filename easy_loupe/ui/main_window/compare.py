@@ -84,6 +84,7 @@ class MainWindowCompareMixin:
                     ),
                     focus_point=photo.focus_point,
                     metadata_text=metadata_markup(photo),
+                    rotation=photo.rotation,
                 )
             )
 

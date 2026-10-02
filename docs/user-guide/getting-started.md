@@ -70,6 +70,13 @@ press `G` or `Enter` to enter the full culling workspace for that folder and
 current photo. Background loading may prepare the culling folder, but the
 standalone photo viewer itself stays scoped to the opened file's folder.
 
+The photo viewer shows rotations saved in that folder's `easy-loupe.json`.
+Press `]` or `[` to turn a photo while you look at it; this rotation lasts only
+until the photo viewer closes. It is not saved and does not carry into the
+culling workspace. Rotations saved from a culling session that included
+subfolders live in the parent folder's file, so the photo viewer does not show
+them.
+
 ## 5. Shortcut Help
 
 Press `?` or choose `Help > Keyboard Shortcuts` to show the shortcuts that

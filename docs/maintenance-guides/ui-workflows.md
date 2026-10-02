@@ -147,9 +147,11 @@ Major logic:
   no photos match.
 - Metadata edits in compare mode update the existing hidden thumbnail, browse,
   and scene-strip cards in place when every changed photo keeps the same filter
-  membership. They must preserve row-widget identity, selection, geometry, and
-  scroll state so compare exit reveals the original culling lists instead of a
-  rebuilt hidden layout.
+  membership. View rotation never changes membership, so rotation edits always
+  take an in-place path in every mode, including the active compare pane. They
+  must preserve row-widget identity, selection, geometry, and scroll state so
+  compare exit reveals the original culling lists instead of a rebuilt hidden
+  layout.
 - When a compare-mode metadata edit changes active-filter membership, the
   culling lists are rebuilt. Compared photos that no longer match are pruned,
   and compare mode exits when fewer than two compared photos remain visible.
@@ -188,7 +190,12 @@ Mode summary:
   enters culling mode. Its Help menu has the same `About EasyLoupe` entry as
   the culling window, through `show_about_dialog()` in `ui/identity.py`,
   because it is a separate interactive interface that must show the GPL
-  notices. On macOS the entry moves to the application menu.
+  notices. On macOS the entry moves to the application menu. It shows view
+  rotations saved in the opened folder's `easy-loupe.json`, and `[`/`]` rotate
+  the current photo for the session only: the turn lives on the window's
+  in-memory record, survives adjacent-photo navigation and Ctrl+C, but is never
+  saved and does not carry into the culling handoff, which uses a separately
+  hydrated library read from disk.
 - `View mode` shows the left thumbnail strip and main viewer, plus the
   horizontal scene strip when scene detection is available for the current
   photo.
@@ -280,6 +287,26 @@ Major logic:
 - Manual zoom state is remembered per photo. Returning to the same photo
   restores its last manual zoom center and scale; a different photo gets its
   own remembered state or falls back to the extracted AF point.
+- View rotation (`]` clockwise, `[` counterclockwise) turns the decoded pixels
+  once when a photo is shown; the `QGraphicsView` itself is never rotated.
+  Every scene coordinate, fit/zoom/pan rule, normalized center, and
+  `visible_region_rect()` therefore lives in the rotated on-screen frame. Only
+  unrotated inputs are mapped: AF points through `rotate_normalized_point()`
+  and clipping overlays at apply time.
+- Remembered manual zoom is keyed per photo and rotation. Rotation `0` keeps
+  the plain image-path key; other rotations append `|rotation=N`. A photo
+  turned while hidden (for example from a browse multi-selection) therefore
+  starts fresh AF-centered inspection instead of restoring a center from the
+  other orientation. Late AF data clears pending-period concrete centers for
+  every rotation of the photo.
+- `PhotoViewer.set_rotation()` turns the displayed photo in place from the
+  already decoded pixmap, without re-reading the full-resolution preview. Fit
+  stays fit, explicit 100% stays at true 100%, and manual zoom keeps the same
+  detail centered at the same fit-relative zoom (the fill-viewport rule may
+  enlarge it near edges). Hold-zoom and a temporary `Shift+F` recenter end.
+  `MainPhotoViewer` caches the rotation so split toggles, `Space` promotion,
+  and forced-fit reloads keep it. In a locked compare grid, the rotated pane
+  keeps its own detail until the next click or drag re-syncs the panes.
 - A photo with no remembered manual view enters focus zoom around the extracted
   AF point or image center at scale 1.0. Edge AF positions clamp without
   increasing the initial magnification. Remembered per-photo manual zoom state
@@ -359,12 +386,15 @@ Major logic:
   single/split panes, standalone photo-viewer panes, compare grid panes, and
   selected compare photos. Clipping analysis first downsamples the displayed
   preview to a 3000-pixel long edge, then scales the resulting overlay back
-  over the full viewer scene. Overlay generation and cached PNG decoding run
-  off the UI thread and may appear shortly after the photo; stale requests are
-  checked before entering the thread pool during rapid navigation, and viewer
-  teardown cancels delayed starts plus marks in-flight jobs so late results
-  cannot update deleted panes. This speed-first analysis can miss tiny clipped
-  specks after downsampling. Browse thumbnails do not show clipping warnings.
+  over the full viewer scene. Analysis always uses the unrotated cached
+  preview; the viewer rotates the overlay with the photo when placing it and
+  re-places the last result on in-place rotation without a new job. Overlay
+  generation and cached PNG decoding run off the UI thread and may appear
+  shortly after the photo; stale requests are checked before entering the
+  thread pool during rapid navigation, and viewer teardown cancels delayed
+  starts plus marks in-flight jobs so late results cannot update deleted panes.
+  This speed-first analysis can miss tiny clipped specks after downsampling.
+  Browse thumbnails do not show clipping warnings.
 
 ## 4. Selection And Browse Behavior
 
@@ -414,7 +444,12 @@ Major logic:
   photo while the horizontal scene strip selects the exact photo opened.
 - If a photo already had remembered manual zoom before entering browse mode,
   the user can return to that manual view after browse-mode exit by pressing
-  `Space` again from fit view.
+  `Space` again from fit view, unless the photo was rotated in browse mode;
+  zoom memory is per rotation, so `Space` then starts fresh focus zoom.
+- Browse-mode rotation turns the selected grid cards in place. The hidden main
+  viewer may still hold another photo, so it is not rotated directly; browse
+  exit reloads it through `_display_current_photo()`, which passes the record's
+  rotation.
 - Multi-selection is preserved in thumbnail, browse, and scene workflows when
   the user extends selection with Shift or Control.
 - `Shift+Up` and `Shift+Down` in the vertical thumbnail strip use anchored
@@ -514,6 +549,8 @@ Current shortcut coverage in code includes:
 - `6`-`9`: red/yellow/green/blue color labels
 - `` ` ``: clear color label
 - `P`, `X`, `U`: picked/rejected/clear flag
+- `]`, `[`: rotate the selection (the active compare photo in compare mode)
+  clockwise or counterclockwise for viewing; saved per photo and undoable
 - `Ctrl+Z`, `Ctrl+Y`: undo/redo metadata assignment batches
 - `G`: enter browse mode
 - `C`: enter compare mode
@@ -525,7 +562,8 @@ Current shortcut coverage in code includes:
 - `Ctrl+Shift+F`: reset remembered manual zoom centers to AF points or image
   centers while preserving remembered zoom levels
 - `Ctrl+C`: copy the current single-photo viewer image to the system clipboard
-  as pixels; this appears as `Cmd+C` on macOS
+  as pixels, turned by the photo's view rotation; this appears as `Cmd+C` on
+  macOS
 - `I`: toggle the normal-view EXIF and RGB histogram overlay
 - `J`: toggle the `Show Clipping` four-color highlight and shadow clipping
   overlay in viewer panes
@@ -575,8 +613,10 @@ per-window close path as the window control.
 photo-viewer mode and the culling workspace's normal single/split main viewer.
 It does not copy a file path, zoom crop, or overlay pixels. JPEG-backed records
 copy the original JPEG source; RAW-only, HEIC/HEIF-only, JPEG XL-only, and
-PNG-only records copy the rendered `"viewer"` preview. Browse and compare views
-do not expose this shortcut because multiple photos may be visible.
+PNG-only records copy the rendered `"viewer"` preview. The copy is turned by
+the photo's view rotation so it pastes in the orientation shown on screen; the
+source file is never changed. Browse and compare views do not expose this
+shortcut because multiple photos may be visible.
 
 Window close while scene detection or organizer/undo work is active must hide
 the visible window immediately, request best-effort worker shutdown, and defer
@@ -664,6 +704,11 @@ issuing another interruptible Quit request.
   after a resize floor or transient AF recenter, plus reset-centers in those
   states. Pan and minimap tests must explicitly create a cropped view because
   first-time 100% may show the whole photo.
+- If view rotation changes, verify pixel direction (left edge to top for `]`),
+  AF marker and clipping alignment, per-rotation zoom memory, fit/manual/100%
+  preservation in `set_rotation()`, split/compare reloads, in-place card
+  updates without list rebuilds, and that the standalone viewer never writes
+  `easy-loupe.json`.
 - Verify `Shift+F` is view-only unless the user pans, including edge AF points
   that require extra live zoom and resize while temporarily recentered.
 - Verify `Ctrl+Shift+F` preserves remembered zoom levels, resets centers to

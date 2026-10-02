@@ -12,6 +12,7 @@ ______________________________________________________________________
 - [4. EXIF And Histogram](#4-exif-and-histogram)
 - [5. Clipping Warnings](#5-clipping-warnings)
 - [6. Visible-Region Minimap](#6-visible-region-minimap)
+- [7. Rotate For Viewing](#7-rotate-for-viewing)
 
 ______________________________________________________________________
 
@@ -100,3 +101,23 @@ recenter or pan the zoomed viewer.
 In scene mode, the interactive minimap belongs on the horizontal scene strip
 for the exact current photo. The left scene stack also shows it when the
 current photo is the stack cover.
+
+## 7. Rotate For Viewing
+
+Press `]` to turn photos 90 degrees clockwise, or `[` to turn them 90 degrees
+counterclockwise. You can also use `Assign to Photo > Rotate`. Rotation only
+changes how EasyLoupe shows the photo: the original file and its EXIF data are
+never modified, and rotation is not written to XMP sidecars or applied when
+organizing files.
+
+Rotation follows the same rules as ratings and labels: it applies to every
+selected photo in culling and browse view, and only to the active photo in
+compare view. `Ctrl+Z` and `Ctrl+Y` undo and redo it. EasyLoupe saves the
+rotation in `easy-loupe.json`, so the photo opens turned the same way next
+time.
+
+The viewer, thumbnails, scene strip, browse grid, compare panes, AF point,
+clipping warnings, minimap, and `Ctrl+C` copies all follow the rotation. If you
+rotate while zoomed in, the same part of the photo stays centered; 100 percent
+inspection stays at 100 percent. Remembered zoom positions are kept separately
+for each rotation.

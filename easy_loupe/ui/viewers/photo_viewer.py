@@ -38,6 +38,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from easy_loupe.core.rotation import (
+    FULL_TURN_DEGREES,
+    HALF_TURN_DEGREES,
+    NO_ROTATION_DEGREES,
+    SUPPORTED_ROTATIONS,
+    rotate_normalized_point,
+)
+from easy_loupe.ui.rotation import rotate_image, rotate_pixmap
 from easy_loupe.ui.theme import THEMES, ThemePalette
 from easy_loupe.ui.viewers.clipping import (
     ClippingOverlayCacheKey,
@@ -238,13 +246,22 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
         self._fit_scale = 1.0
         self._current_scale = 1.0
         self._focus_point = QPointF(0.5, 0.5)
+        # Callers pass AF points in the unrotated preview frame. Keep that
+        # source value so a later rotation can re-map it without drift.
+        self._source_focus_point = (0.5, 0.5)
         self._center_point = QPointF(0.0, 0.0)
         self._current_image_key: str | None = None
+        # Clockwise view-only rotation applied to the displayed pixels. All
+        # scene coordinates, including manual-view memory, use this frame.
+        self._rotation = NO_ROTATION_DEGREES
         self._manual_views = {} if manual_views is None else manual_views
         self._mode = 'fit'
         self._focus_point_marker_enabled = False
         self._clipping_warning_enabled = False
         self._clipping_overlay_key: ClippingOverlayCacheKey | None = None
+        # The last applied overlay stays in the unrotated analysis frame so a
+        # rotation can re-place it without restarting the background job.
+        self._clipping_overlay_result: _ClippingOverlayResult | None = None
         self._clipping_overlay_request_id = 0
         self._clipping_overlay_disposed = False
         self._pending_clipping_overlay_request: (
@@ -286,21 +303,25 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
             preserve_zoom: bool = False,
             preserved_center: tuple[float, float] | None = None,
             handoff_manual_view: ManualView | None = None,
+            rotation: int = NO_ROTATION_DEGREES,
     ) -> None:
-        """Load a photo and optionally restore a preserved manual zoom view."""
+        """
+        Load a photo and optionally restore a preserved manual zoom view.
+
+        ``rotation`` is the clockwise view-only rotation in degrees. The
+        decoded pixels are turned once here, so every later zoom, pan, and
+        normalized coordinate uses the rotated on-screen frame. ``focus_point``
+        stays in the unrotated preview frame and is mapped internally.
+        """
         zoom_factor = self.current_zoom_factor()
-        pixmap = QPixmap(str(image_path))
-        self._hold_zoom_active = False
-        self._actual_size_zoom_active = False
-        self._clear_transient_recenter()
-        self._current_image_key = str(image_path)
-        self._pixmap_item.setPixmap(pixmap)
-        self._scene.setSceneRect(pixmap.rect())
-        self._image_size = pixmap.size()
-        self._update_clipping_overlay()
-        self._focus_point = QPointF(focus_point[0], focus_point[1])
-        self._focus_point_pending = focus_point_pending
-        self._position_focus_point_marker()
+        pixmap = rotate_pixmap(QPixmap(str(image_path)), rotation)
+        self._show_pixmap(
+            pixmap,
+            image_key=str(image_path),
+            rotation=rotation,
+            focus_point=focus_point,
+            focus_point_pending=focus_point_pending,
+        )
         # The full handoff path has to run before legacy preserve-zoom
         # handling, because ``ManualView.center is None`` carries the
         # "use this photo's focus center" intent across multiple photo hops.
@@ -317,6 +338,123 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
             return
 
         self.set_fit_view()
+
+    def set_rotation(self, rotation: int) -> None:
+        """
+        Turn the displayed photo to a new view rotation in place.
+
+        The already decoded pixmap is rotated by the difference, so pressing a
+        rotate key never re-reads a full-resolution preview. Inspection
+        survives the turn: fit stays fit, 100 percent stays 100 percent, and
+        manual zoom keeps the same image detail centered at the same
+        fit-relative zoom, matching how resizes carry manual views. Temporary
+        hold-zoom and Shift+F recentering end, like on any photo reload.
+        """
+        if rotation == self._rotation:
+            return
+
+        if self._image_size.isEmpty() or self._current_image_key is None:
+            self._rotation = rotation
+            return
+
+        delta = (rotation - self._rotation) % FULL_TURN_DEGREES
+        # Capture inspection state before ``_rotation`` changes, because the
+        # manual-view memory key includes the rotation it was stored under.
+        actual_size = self.is_actual_size_zoom_active()
+        center = self.normalized_viewport_center()
+        manual_view = self.current_manual_view()
+        self._show_pixmap(
+            rotate_pixmap(self._pixmap_item.pixmap(), delta),
+            image_key=self._current_image_key,
+            rotation=rotation,
+            focus_point=self._source_focus_point,
+            focus_point_pending=self._focus_point_pending,
+            refresh_clipping=False,
+        )
+        if actual_size and center is not None:
+            self.zoom_to_actual_size(rotate_normalized_point(center, delta))
+            return
+
+        if manual_view is not None:
+            # A None center is AF intent; the AF point already turned with the
+            # photo, so only concrete centers need mapping into the new frame.
+            rotated_center = (
+                None
+                if manual_view.center is None
+                else rotate_normalized_point(manual_view.center, delta)
+            )
+            self._apply_handoff_manual_view(
+                ManualView(manual_view.zoom_factor, rotated_center)
+            )
+            return
+
+        self.set_fit_view()
+
+    def current_rotation(self) -> int:
+        """Return the clockwise view rotation of the displayed photo."""
+        return self._rotation
+
+    def _show_pixmap(
+            self,
+            pixmap: QPixmap,
+            *,
+            image_key: str,
+            rotation: int,
+            focus_point: tuple[float, float],
+            focus_point_pending: bool,
+            refresh_clipping: bool = True,
+    ) -> None:
+        """
+        Install already rotated pixels and reset per-photo viewer state.
+
+        ``refresh_clipping`` restarts clipping analysis for a newly loaded
+        file. In-place rotation passes False and re-places the existing overlay
+        instead, because the analysis does not depend on rotation.
+        """
+        self._hold_zoom_active = False
+        self._actual_size_zoom_active = False
+        self._clear_transient_recenter()
+        self._current_image_key = image_key
+        # Set rotation before any manual-view memory access so lookups and
+        # stores use this orientation's key.
+        self._rotation = rotation
+        self._pixmap_item.setPixmap(pixmap)
+        self._scene.setSceneRect(pixmap.rect())
+        self._image_size = pixmap.size()
+        if refresh_clipping:
+            self._update_clipping_overlay()
+        elif self._clipping_overlay_result is not None:
+            self._apply_clipping_overlay_result(self._clipping_overlay_result)
+
+        self._set_source_focus_point(focus_point)
+        self._focus_point_pending = focus_point_pending
+        self._position_focus_point_marker()
+
+    def _set_source_focus_point(
+            self, focus_point: tuple[float, float]
+    ) -> None:
+        """Store an unrotated AF point and its position in the view frame."""
+        self._source_focus_point = (focus_point[0], focus_point[1])
+        rotated_point = rotate_normalized_point(focus_point, self._rotation)
+        self._focus_point = QPointF(rotated_point[0], rotated_point[1])
+
+    def _manual_view_key(self, rotation: int | None = None) -> str | None:
+        """
+        Return the manual-view memory key for the current photo.
+
+        Remembered centers are normalized in the rotated frame, so each
+        rotation gets its own slot. Rotation 0 keeps the plain image-path key
+        used before rotation existed. A photo turned while hidden then starts
+        fresh instead of restoring a center from another orientation.
+        """
+        if self._current_image_key is None:
+            return None
+
+        key_rotation = self._rotation if rotation is None else rotation
+        if key_rotation == NO_ROTATION_DEGREES:
+            return self._current_image_key
+
+        return f'{self._current_image_key}|rotation={key_rotation}'
 
     def _apply_handoff_manual_view(self, manual_view: ManualView) -> None:
         """
@@ -343,11 +481,12 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
             center[0] * self._image_size.width(),
             center[1] * self._image_size.height(),
         )
-        if self._current_image_key is not None:
+        manual_view_key = self._manual_view_key()
+        if manual_view_key is not None:
             # Keep focus-centered views as a sentinel rather than concrete
             # coordinates, so reset-all remains photo-relative on the next
             # navigation hop.
-            self._manual_views[self._current_image_key] = ManualView(
+            self._manual_views[manual_view_key] = ManualView(
                 manual_view.zoom_factor,
                 None if use_focus_center else center,
             )
@@ -363,6 +502,8 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
         self._current_scale = 1.0
         self._center_point = QPointF(0.0, 0.0)
         self._current_image_key = None
+        self._rotation = NO_ROTATION_DEGREES
+        self._source_focus_point = (0.5, 0.5)
         self._mode = 'fit'
         self._focus_point_pending = False
         self._hold_zoom_active = False
@@ -412,14 +553,24 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
     def set_focus_point(self, focus_point: tuple[float, float]) -> None:
         """Update the active focus point without changing the view."""
         was_pending = self._focus_point_pending
-        self._focus_point = QPointF(focus_point[0], focus_point[1])
+        self._set_source_focus_point(focus_point)
         self._focus_point_pending = False
-        if was_pending and self._current_image_key is not None:
-            manual_view = self._manual_views.get(self._current_image_key)
-            if manual_view is not None:
+        if was_pending:
+            # Pans made while AF was pending were centered on fallback
+            # coordinates. Drop them for every orientation of this photo so
+            # rotating later cannot resurrect a stale fallback-centered view.
+            for rotation in SUPPORTED_ROTATIONS:
+                manual_view_key = self._manual_view_key(rotation)
+                if manual_view_key is None:
+                    continue
+
+                manual_view = self._manual_views.get(manual_view_key)
+                if manual_view is None:
+                    continue
+
                 _zoom_factor, center = self._manual_view_parts(manual_view)
                 if center is not None:
-                    self._manual_views.pop(self._current_image_key, None)
+                    self._manual_views.pop(manual_view_key, None)
 
         self._update_focus_point_marker()
 
@@ -607,12 +758,13 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
     def recenter_manual_view(self) -> None:
         """Reset to AF intent while retaining the remembered zoom factor."""
         manual_view = self.current_manual_view()
-        if manual_view is None or self._current_image_key is None:
+        manual_view_key = self._manual_view_key()
+        if manual_view is None or manual_view_key is None:
             return
 
         # Use saved magnification, not a resize floor or temporary AF zoom.
         # Clamping the restored center keeps an edge AF from enlarging it.
-        self._manual_views[self._current_image_key] = ManualView(
+        self._manual_views[manual_view_key] = ManualView(
             manual_view.zoom_factor, None
         )
         self._clear_transient_recenter()
@@ -803,8 +955,9 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
         ):
             return None
 
-        if self._current_image_key is not None:
-            manual_view = self._manual_views.get(self._current_image_key)
+        manual_view_key = self._manual_view_key()
+        if manual_view_key is not None:
+            manual_view = self._manual_views.get(manual_view_key)
             if manual_view is not None:
                 zoom_factor, center = self._manual_view_parts(manual_view)
                 return ManualView(zoom_factor, center)
@@ -989,7 +1142,7 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
         # not replace them with a temporary clamp or Shift+F magnification.
         if (
             self.should_preserve_zoom()
-            and self._current_image_key not in self._manual_views
+            and self._manual_view_key() not in self._manual_views
         ):
             self._store_manual_view()
 
@@ -999,9 +1152,10 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
             use_focus_center: bool = False,
             zoom_factor: float | None = None,
     ) -> None:
+        manual_view_key = self._manual_view_key()
         if (
             self._actual_size_zoom_active
-            or self._current_image_key is None
+            or manual_view_key is None
             or self._image_size.isEmpty()
         ):
             return
@@ -1021,7 +1175,7 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
         # Restoring below-fit memory can hit the 100% floor while a pane is
         # hidden or smaller. Keep the requested factor so its eventual resize
         # restores the original magnification instead of saving that clamp.
-        self._manual_views[self._current_image_key] = ManualView(
+        self._manual_views[manual_view_key] = ManualView(
             self.current_zoom_factor() if zoom_factor is None else zoom_factor,
             center,
         )
@@ -1030,15 +1184,16 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
 
     def _preserve_previous_manual_view(self) -> None:
         """Keep stored manual memory unchanged during view-only recentering."""
-        if self._current_image_key is None:
+        manual_view_key = self._manual_view_key()
+        if manual_view_key is None:
             return
 
-        manual_view = self._manual_views.get(self._current_image_key)
+        manual_view = self._manual_views.get(manual_view_key)
         if manual_view is None:
             return
 
         zoom_factor, center = self._manual_view_parts(manual_view)
-        self._manual_views[self._current_image_key] = ManualView(
+        self._manual_views[manual_view_key] = ManualView(
             zoom_factor,
             center,
         )
@@ -1079,10 +1234,11 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
         self._apply_transform()
 
     def _restore_manual_view(self, *, clamp_center: bool = False) -> bool:
-        if self._current_image_key is None or self._image_size.isEmpty():
+        manual_view_key = self._manual_view_key()
+        if manual_view_key is None or self._image_size.isEmpty():
             return False
 
-        manual_view = self._manual_views.get(self._current_image_key)
+        manual_view = self._manual_views.get(manual_view_key)
         if manual_view is None:
             return False
 
@@ -1120,10 +1276,11 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
         return (self._focus_point.x(), self._focus_point.y())
 
     def _manual_view_uses_focus_center(self) -> bool:
-        if self._current_image_key is None:
+        manual_view_key = self._manual_view_key()
+        if manual_view_key is None:
             return False
 
-        manual_view = self._manual_views.get(self._current_image_key)
+        manual_view = self._manual_views.get(manual_view_key)
         if manual_view is None:
             return False
 
@@ -1261,15 +1418,23 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
     def _apply_clipping_overlay_result(
             self, result: _ClippingOverlayResult
     ) -> None:
-        overlay = QPixmap.fromImage(result.image)
+        # Clipping analysis runs on the unrotated cached preview, so turn the
+        # overlay with the photo before placing it in the rotated scene.
+        overlay = QPixmap.fromImage(rotate_image(result.image, self._rotation))
         if overlay.isNull() or result.width <= 0 or result.height <= 0:
             self._clear_clipping_overlay()
             return
 
+        self._clipping_overlay_result = result
+        overlay_width, overlay_height = (
+            (result.width, result.height)
+            if self._rotation % HALF_TURN_DEGREES == NO_ROTATION_DEGREES
+            else (result.height, result.width)
+        )
         # Cached clipping pixmaps can be smaller than the photo pixmap, so
         # scale the item in scene coordinates to keep warnings aligned.
-        scale_x = self._image_size.width() / result.width
-        scale_y = self._image_size.height() / result.height
+        scale_x = self._image_size.width() / overlay_width
+        scale_y = self._image_size.height() / overlay_height
         self._clipping_overlay_item.setPixmap(overlay)
         self._clipping_overlay_item.setTransform(
             QTransform.fromScale(scale_x, scale_y)
@@ -1279,6 +1444,7 @@ class PhotoViewer(QGraphicsView):  # noqa: PLR0904 - Qt viewer API surface.
     def _clear_clipping_overlay(self) -> None:
         # Clear the transform with the pixmap so later photos cannot inherit
         # stale scaling from a differently sized bounded overlay.
+        self._clipping_overlay_result = None
         self._clipping_overlay_item.setPixmap(QPixmap())
         self._clipping_overlay_item.setTransform(QTransform())
         self._clipping_overlay_item.setVisible(False)

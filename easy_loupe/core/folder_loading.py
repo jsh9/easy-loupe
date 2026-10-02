@@ -35,6 +35,7 @@ from easy_loupe.core.recursive_loading import (
     relative_photo_id,
     relative_posix_path,
 )
+from easy_loupe.core.rotation import NO_ROTATION_DEGREES, normalize_rotation
 from easy_loupe.progress import ProgressReporter, ProgressStageDefinition
 
 if TYPE_CHECKING:
@@ -365,6 +366,10 @@ def _apply_normalized_metadata(
             color_label if color_label in COLOR_LABELS else None
         )
         photo.flag = flag if flag in FLAGS else None
+        photo.rotation = (
+            normalize_rotation(existing_metadata.get('rotation'))
+            or NO_ROTATION_DEGREES
+        )
 
 
 def build_photo_exif_display(

@@ -39,8 +39,8 @@ use compare view when a small set of photos needs closer inspection.
 - [Scenes](scenes.md): detect photo sequences, work with scene stacks, navigate
   the scene strip, and manually merge or break scenes.
 - [Inspection Tools](inspection-tools.md): use fit/manual zoom, split view, AF
-  point display, EXIF and histogram details, clipping warnings, and visible
-  region minimaps.
+  point display, EXIF and histogram details, clipping warnings, visible region
+  minimaps, and view-only rotation.
 - [Organize And XMP](organize-and-xmp.md): reorganize photos into folders,
   write shared XMP sidecars, choose conflict behavior, and undo completed file
   operations.

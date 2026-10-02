@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPointF, Qt, Signal
@@ -70,6 +70,9 @@ class ComparePhoto:
     image_path: Path
     focus_point: tuple[float, float]
     metadata_text: str = ''
+    # Clockwise view-only rotation in degrees; last so positional
+    # construction of the older fields keeps working.
+    rotation: int = 0
 
 
 @dataclass(frozen=True)
@@ -295,17 +298,57 @@ class ComparePhotoViewer(QWidget):
                 active_photo_id
             )
 
+        self._layout_photo_panes()
+        self._sync_active_frame_styles()
+        self._restore_selected_photo_view_state(selected_view_state)
+        self._emit_active_photo_changed()
+
+    def set_photo_rotation(self, photo_id: str, rotation: int) -> None:
+        """
+        Turn one compared photo in place without rebuilding the grid.
+
+        Rebuilding through ``set_photos`` would reset every pane's zoom, so
+        only the matching pane (and the selected-photo view when it shows the
+        same photo) is rotated. The grid is re-laid out only when the turn
+        changes how many photos are vertical enough to alter its shape.
+        """
+        for index, photo in enumerate(self._photos):
+            if photo.photo_id != photo_id or photo.rotation == rotation:
+                continue
+
+            # Selected-view reloads and active-index changes read from
+            # ``_photos``, so the stored payload must carry the new rotation.
+            self._photos[index] = replace(photo, rotation=rotation)
+            self._viewers[index].set_rotation(rotation)
+            if (
+                self._selected_photo_view_active
+                and index == self._active_index
+            ):
+                self.selected_viewer.set_rotation(rotation)
+
+        rows, columns = self._grid_shape(
+            len(self._photos), self._vertical_photo_count()
+        )
+        if (rows, columns) == (self._rows, self._columns):
+            return
+
+        # Clear stretches while ``_rows``/``_columns`` still describe the old
+        # shape, then re-place the same live frames in the new shape.
+        self._reset_grid_stretches()
+        for frame in self._frames:
+            self.grid_layout.removeWidget(frame)
+
+        self._layout_photo_panes()
+
+    def _layout_photo_panes(self) -> None:
+        """Place existing panes in the grid shape their aspect ratios need."""
         rows, columns = self._grid_shape(
             len(self._photos), self._vertical_photo_count()
         )
         self._rows = rows
         self._columns = columns
-
         self._place_photo_panes()
         self._finish_photo_layout(rows, columns)
-        self._sync_active_frame_styles()
-        self._restore_selected_photo_view_state(selected_view_state)
-        self._emit_active_photo_changed()
 
     def set_photo_limit(self, limit: object) -> int:
         """Set the maximum compare count and return the normalized value."""
@@ -357,7 +400,9 @@ class ComparePhotoViewer(QWidget):
             enabled=self._clipping_warning_enabled
         )
         viewer.set_theme(self._theme)
-        viewer.set_photo(photo.image_path, photo.focus_point)
+        viewer.set_photo(
+            photo.image_path, photo.focus_point, rotation=photo.rotation
+        )
         viewer.normalized_left_clicked.connect(
             lambda x, y, viewer_index=index: self._handle_viewer_click(
                 viewer_index, (x, y)
@@ -505,14 +550,8 @@ class ComparePhotoViewer(QWidget):
             metadata_text = metadata_by_photo_id.get(
                 photo.photo_id, photo.metadata_text
             )
-            updated_photos.append(
-                ComparePhoto(
-                    photo_id=photo.photo_id,
-                    image_path=photo.image_path,
-                    focus_point=photo.focus_point,
-                    metadata_text=metadata_text,
-                )
-            )
+            # ``replace`` keeps every other payload field, such as rotation.
+            updated_photos.append(replace(photo, metadata_text=metadata_text))
             label.setText(self._metadata_label_text(metadata_text))
 
         self._photos = updated_photos
@@ -651,7 +690,9 @@ class ComparePhotoViewer(QWidget):
         self.selected_viewer.set_clipping_warning_visible(
             enabled=self._clipping_warning_enabled
         )
-        self.selected_viewer.set_photo(photo.image_path, photo.focus_point)
+        self.selected_viewer.set_photo(
+            photo.image_path, photo.focus_point, rotation=photo.rotation
+        )
         self.selected_metadata_label.setText(
             self._metadata_label_text(photo.metadata_text)
         )

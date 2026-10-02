@@ -112,6 +112,9 @@ Notes:
     extraction logic belongs under `autofocus_points/brands/`.
   - `records.py` defines the shared constants plus the `PhotoRecord` and
     `SceneGroup` dataclasses.
+  - `rotation.py` owns the persisted view-rotation value domain (0/90/180/270
+    clockwise) and the math that maps unrotated normalized points into the
+    rotated view frame.
 - `easy_loupe/ui/`
   - Defines the full PySide6 UI: browse mode, single-pane and split view modes,
     theming, thumbnail widgets, viewer, scene strip, worker thread, and the
@@ -126,6 +129,9 @@ Notes:
     prompts used by photo-viewer startup before scanning neighboring files.
   - `ui/launch.py` defines `CullingLaunchRequest`, the handoff payload used
     when a photo-viewer window opens the full culling workspace.
+  - `ui/rotation.py` holds the Qt helpers that turn pixmaps and images for
+    view-only rotation; viewers rotate pixels at display time and never rotate
+    the `QGraphicsView` or the preview cache.
   - `ui/thumbnail_lookahead.py` owns keyboard-navigation neighbor lookahead for
     the left strip. `ThumbnailListWidget.keyPressEvent` and scene-strip Up/Down
     (`navigate_global_from_scene`) call it; mouse and programmatic changes
@@ -143,7 +149,8 @@ Notes:
     adding or renaming assets.
 - `easy_loupe/ui/main_window/`
   - Contains the `MainWindow` package: `window.py`, `build.py`, `workflows.py`,
-    `navigation.py`, and `presentation.py`.
+    `navigation.py`, `presentation.py`, and `rotation.py` (the `[`/`]`
+    view-rotation workflow mixin).
   - `MainWindow` remains the central stateful UI controller.
 - `easy_loupe/ui/viewers/`
   - Contains `PhotoViewer`, `MainPhotoViewer`, shared viewer shell helpers, and

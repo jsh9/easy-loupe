@@ -455,3 +455,42 @@ def test_shortcut_help_overlay_top_aligns_and_scales_fonts(
 
     parent.close()
     app.processEvents()
+
+
+def test_shortcut_help_lists_rotation_wherever_brackets_work() -> None:
+    """
+    Verify ``[``/`]` rotation is documented in every context that binds it.
+
+    Culling, browse, and both compare contexts rotate through the shared
+    metadata group, while the standalone viewer must say its rotation is only
+    for the session because it never saves ``easy-loupe.json``.
+    """
+    for context in (
+        ShortcutHelpContext.CULLING_VIEW,
+        ShortcutHelpContext.CULLING_VIEW_NO_SCENES,
+        ShortcutHelpContext.BROWSE,
+        ShortcutHelpContext.COMPARE_GRID,
+        ShortcutHelpContext.COMPARE_SELECTED_PHOTO,
+        ShortcutHelpContext.PHOTO_VIEWER,
+    ):
+        rotation_rows = [
+            row
+            for group in shortcut_help_groups(context)
+            for row in group.rows
+            if row.shortcut == '[ / ]'
+        ]
+        assert len(rotation_rows) == 1, context
+        assert 'clockwise' in rotation_rows[0].description
+
+    photo_viewer_row = next(
+        row
+        for group in shortcut_help_groups(ShortcutHelpContext.PHOTO_VIEWER)
+        for row in group.rows
+        if row.shortcut == '[ / ]'
+    )
+    assert 'session' in photo_viewer_row.description
+    assert not any(
+        row.shortcut == '[ / ]'
+        for group in shortcut_help_groups(ShortcutHelpContext.CULLING_EMPTY)
+        for row in group.rows
+    )

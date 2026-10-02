@@ -37,6 +37,8 @@ Use:
 - `1`-`5` or `0` for rating.
 - `6`-`9` or `` ` `` for color label.
 - `P`, `X`, or `U` for picked/rejected flag.
+- `]` or `[` to rotate the active photo for viewing. The compare grid
+  rearranges itself if the rotation changes how many photos are portrait.
 
 ## 3. Zoom And Inspection
 

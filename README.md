@@ -35,6 +35,8 @@ step of a photo workflow.
   and clipping-warning overlays.
 - Fit small photos to the viewer, toggle actual-size inspection, and adjust
   magnification with predictable zoom-in and zoom-out steps.
+- Turn sideways photos upright for viewing with `]` and `[`. The rotation is
+  remembered in the folder's `easy-loupe.json`; original files never change.
 - Copy viewed photo pixels to the clipboard for pasting into other apps.
 - Reorganize photos by metadata or write shared XMP sidecars for other photo
   apps.

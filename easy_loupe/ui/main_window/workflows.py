@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from easy_loupe.core.folder_loading import FOLDER_LOAD_PROGRESS_STAGES
+from easy_loupe.core.rotation import ROTATION_METADATA_FIELD
 from easy_loupe.operations.common import (
     OperationSummary,
     UndoPlan,
@@ -1042,7 +1043,7 @@ class MainWindowWorkflowMixin:
         self._apply_metadata_values(edit.field, edit.before)
         self._metadata_redo_stack.append(edit)
         self.library.save_metadata()
-        self._after_metadata_change(list(edit.before))
+        self._refresh_after_metadata_edit(edit.field, list(edit.before))
         self._refresh_metadata_history_actions()
 
     def _redo_metadata_edit(self: MainWindow) -> None:
@@ -1065,8 +1066,24 @@ class MainWindowWorkflowMixin:
         self._apply_metadata_values(edit.field, edit.after)
         self._metadata_undo_stack.append(edit)
         self.library.save_metadata()
-        self._after_metadata_change(list(edit.after))
+        self._refresh_after_metadata_edit(edit.field, list(edit.after))
         self._refresh_metadata_history_actions()
+
+    def _refresh_after_metadata_edit(
+            self: MainWindow, field: str, photo_ids: list[str]
+    ) -> None:
+        """
+        Refresh displays after an undo or redo of one metadata field.
+
+        Rotation edits only turn existing cards and viewers in place; tag edits
+        may change filtered list membership and need the full metadata refresh
+        path.
+        """
+        if field == ROTATION_METADATA_FIELD:
+            self._refresh_rotated_photos(photo_ids)
+            return
+
+        self._after_metadata_change(photo_ids)
 
     def _apply_metadata_values(
             self: MainWindow, field: str, values: dict[str, Any]

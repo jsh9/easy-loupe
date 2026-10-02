@@ -8,6 +8,8 @@ from PIL import Image, ImageOps
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication
 
+from easy_loupe.ui.rotation import rotate_image
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -17,17 +19,23 @@ if TYPE_CHECKING:
 def copy_photo_pixels_to_clipboard(
         library: PhotoLibrary, photo_id: str
 ) -> bool:
-    """Copy the whole photo image to the system clipboard as pixels."""
+    """
+    Copy the whole photo image to the system clipboard as pixels.
+
+    The copy is turned by the photo's view-only rotation so paste targets get
+    the orientation shown on screen; the source file itself never changes.
+    """
     try:
         image_path = _clipboard_image_path(library, photo_id)
         image = _qimage_for_path(image_path)
+        rotation = library.get_photo(photo_id).rotation
     except (KeyError, OSError, RuntimeError, ValueError):
         return False
 
     if image.isNull():
         return False
 
-    QApplication.clipboard().setImage(image)
+    QApplication.clipboard().setImage(rotate_image(image, rotation))
     return True
 
 

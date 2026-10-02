@@ -95,6 +95,9 @@ class PhotoRecord:
     image_width: int | None = None
     image_height: int | None = None
     exif_display: dict[str, str] = field(default_factory=dict)
+    # Clockwise view-only rotation in degrees (0, 90, 180, or 270). Kept last
+    # so positional construction of the older fields stays unchanged.
+    rotation: int = 0
 
     def to_api_dict(self) -> dict[str, Any]:
         """Serialize the photo record to the API response shape."""
@@ -109,6 +112,7 @@ class PhotoRecord:
             'rating': self.rating,
             'color_label': self.color_label,
             'flag': self.flag,
+            'rotation': self.rotation,
             'focus_point': {
                 'x': self.focus_point[0],
                 'y': self.focus_point[1],

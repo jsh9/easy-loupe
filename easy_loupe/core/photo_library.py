@@ -235,15 +235,23 @@ class PhotoLibrary:
             rating: Any = None,
             color_label: Any = None,
             flag: Any = None,
+            rotation: Any = None,
             fields: set[str],
     ) -> PhotoRecord:
-        """Apply validated metadata updates to a loaded photo record."""
+        """
+        Apply validated metadata updates to a loaded photo record.
+
+        ``rotation`` is the view-only clockwise rotation in degrees. Like the
+        other fields it only changes the in-memory record; callers decide
+        whether to persist it with :meth:`save_metadata`.
+        """
         photo = self.get_photo(photo_id)
         return _validate_and_apply_metadata(
             photo,
             rating=rating,
             color_label=color_label,
             flag=flag,
+            rotation=rotation,
             fields=fields,
         )
 

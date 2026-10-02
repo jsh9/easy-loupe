@@ -25,8 +25,10 @@ Primary files:
 
 - `easy_loupe/core/metadata.py`
 - `easy_loupe/core/records.py`
+- `easy_loupe/core/rotation.py`
 - `easy_loupe/core/photo_library.py`
 - `tests/core/test_metadata.py`
+- `tests/core/test_rotation.py`
 
 Major logic:
 
@@ -44,9 +46,20 @@ Major logic:
 - Color labels are limited to `"red"`, `"yellow"`, `"green"`, `"blue"`,
   `"purple"`, or `None`.
 - Flags are limited to `"picked"`, `"rejected"`, or `None`.
-- Saved metadata entries may contain `rating`, `color_label`, and `flag`.
-- Clearing all assigned metadata for a photo removes that photo's persisted
-  entry from `easy-loupe.json`.
+- View rotation is limited to clockwise degrees `0`, `90`, `180`, or `270`.
+  `normalize_rotation()` rejects every other value, including `bool`, which is
+  an `int` subclass. Invalid saved values are ignored on load and rejected with
+  `ValueError` by `update_metadata()`.
+- Saved metadata entries may contain `rating`, `color_label`, `flag`, and
+  `rotation`. `rotation` is written only when it is non-zero, so unrotated
+  photos keep the historical entry shape. It travels with the rest of the entry
+  through legacy-key and case-only key migration.
+- Rotation is view-only: it never changes source files, cached previews, scene
+  detection, organizer output, or XMP sidecars.
+- Clearing all assigned metadata for a photo, including turning it back to
+  rotation `0`, removes that photo's persisted entry from `easy-loupe.json`.
+- Older EasyLoupe builds do not know `rotation` and drop it the next time they
+  save the folder metadata.
 
 ## 2. Assignment Behavior
 
@@ -55,6 +68,7 @@ Primary files:
 - `easy_loupe/ui/main_window/window.py`
 - `easy_loupe/ui/main_window/build.py`
 - `easy_loupe/ui/main_window/presentation.py`
+- `easy_loupe/ui/main_window/rotation.py`
 - `easy_loupe/ui/widgets.py`
 - `tests/ui/main_window/`
 
@@ -68,6 +82,16 @@ Major logic:
   with `0`, red/yellow/green/blue labels with `6`-`9`, clear color label with
   `` ` ``, and pick/reject/clear flags with `P`, `X`, `U`.
 - `Assign to Photo > Color Label > Purple` exists without a keyboard shortcut.
+- `Assign to Photo > Rotate` holds `Clockwise` (`]`) and `Counterclockwise`
+  (`[`). They use the same selection rules, busy/frozen/help gating, and
+  metadata undo history as tag assignments. Each photo turns by one quarter
+  turn from its own current rotation, so the undo record stores per-photo
+  before/after values.
+- Rotation never changes filter membership, sort order, or card geometry.
+  `MainWindowRotationMixin._refresh_rotated_photos()` therefore turns the
+  existing thumbnail, browse, and scene-strip cards and the main viewer in
+  place instead of rebuilding lists. Undo/redo of a rotation edit uses the same
+  in-place refresh rather than `_after_metadata_change()`.
 - `Assign to Photo` actions are disabled while the progress overlay/busy state
   is active.
 - `Ctrl+Z` and `Ctrl+Y` undo and redo metadata assignment batches.
@@ -183,6 +207,9 @@ Major logic:
   cleanup so the overlay receives a terminal update.
 - Undo plans should continue to describe the exact files created, moved, backed
   up, or removed by recursive operations.
+- Metadata undo/redo (`Ctrl+Z`/`Ctrl+Y`) covers ratings, color labels, flags,
+  view rotations, and scene edits. It is in-memory and separate from organizer
+  undo plans.
 
 ## 5. Verification Pointers
 
@@ -197,7 +224,10 @@ Major logic:
   corresponding keyboard shortcut for each rating, color label, and flag.
 - Verify the `Assign to Photo` menu structure, action labels, and shortcut
   presence, including Purple as the only color label without a keyboard
-  shortcut.
+  shortcut and the `Rotate` submenu with `]` and `[`.
+- If rotation persistence changes, verify zero and invalid rotations are
+  omitted, saved rotations survive reload and key migration, and undo/redo
+  turns the viewer and existing cards back without rebuilding lists.
 - Verify metadata refreshes preserve scroll position when the user tags photos
   in the thumbnail strip or browse grid.
 - Verify tagging a single photo in the scene strip does not cause sticky

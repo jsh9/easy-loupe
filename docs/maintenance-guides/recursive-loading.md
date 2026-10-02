@@ -104,6 +104,8 @@ Major logic:
   legacy matches win over this fallback, and grouping keys shared by several
   loaded IDs are never guessed. The next save writes the entry under the new
   ID.
+- The optional per-photo `rotation` value is part of the same entry, so it
+  follows every key migration above together with the photo's tags.
 - Folder loading builds photo records before applying saved metadata so
   migration can compare persisted keys to the concrete IDs discovered in the
   current folder.
@@ -155,6 +157,14 @@ Major logic:
 - `CullingLaunchRequest.preloaded_library` carries the hydrated library into
   culling mode. Culling mode then reapplies its own persisted sort settings
   before rebuilding the main window lists.
+- The viewer library reads only the opened file's own folder `easy-loupe.json`,
+  and only when folder access allows a folder scan. View rotations saved by a
+  culling session rooted at a parent folder (stored under keys such as
+  `sub/IMG_1234`) are therefore not shown in standalone mode.
+- `[`/`]` rotations in standalone mode change only the viewer library's
+  in-memory records. That library is never saved and is never handed to culling
+  mode, so session rotations do not reach `easy-loupe.json` or the hydrated
+  culling library.
 
 ## 6. Operations And Output Paths
 

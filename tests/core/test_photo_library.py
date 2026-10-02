@@ -306,6 +306,38 @@ def test_load_viewer_folder_uses_filename_order_and_can_open_single_file(
     assert single_library.get_photo('B').focus_point_pending is True
 
 
+def test_load_viewer_folder_applies_saved_rotation_only_with_folder_scan(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify the standalone viewer reads saved rotations from its own folder.
+
+    Direct file opens should show photos turned the way the culling session
+    left them, but only when the viewer may read the folder; a single-file load
+    never reads ``easy-loupe.json`` and therefore shows no rotation.
+    """
+    create_jpeg(tmp_path / 'A.JPG', 'blue')
+    create_jpeg(tmp_path / 'B.JPG', 'green')
+    (tmp_path / METADATA_FILENAME).write_text(
+        json.dumps({'photos': {'B': {'rotation': 90}}}),
+        encoding='utf-8',
+    )
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_viewer_folder(tmp_path / 'B.JPG')
+
+    assert library.get_photo('A').rotation == 0
+    assert library.get_photo('B').rotation == 90
+
+    single_library = PhotoLibrary(cache_dir=tmp_path / '.single-cache')
+    single_library.load_viewer_folder(
+        tmp_path / 'B.JPG', allow_folder_scan=False
+    )
+
+    assert single_library.get_photo('B').rotation == 0
+
+
 def test_load_folder_rejects_missing_directory(tmp_path: Path) -> None:
     library = PhotoLibrary(cache_dir=tmp_path / '.cache')
 

@@ -614,6 +614,10 @@ def _photo_viewer_groups() -> tuple[ShortcutHelpGroup, ...]:
                 ShortcutHelpRow('\\', 'Toggle split view'),
                 ShortcutHelpRow('- / = / +', 'Zoom out or in'),
                 ShortcutHelpRow('W / A / S / D', 'Pan the zoomed view'),
+                ShortcutHelpRow(
+                    '[ / ]',
+                    'Rotate counterclockwise or clockwise for this session',
+                ),
                 ShortcutHelpRow('Ctrl+C', 'Copy the image to the clipboard'),
             ),
         ),
@@ -852,6 +856,10 @@ def _metadata_group(*, compare: bool = False) -> ShortcutHelpGroup:
             ShortcutHelpRow(
                 'P / X / U',
                 f'Pick, reject, or clear flag for {target}',
+            ),
+            ShortcutHelpRow(
+                '[ / ]',
+                f'Rotate {target} counterclockwise or clockwise',
             ),
             ShortcutHelpRow('Ctrl+Z / Ctrl+Y', 'Undo or redo metadata edits'),
         ),

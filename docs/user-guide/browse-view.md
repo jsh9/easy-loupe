@@ -44,5 +44,7 @@ Metadata shortcuts work in browse view:
 - `6`-`9` sets red, yellow, green, or blue color labels, and `` ` `` clears the
   color label.
 - `P`, `X`, and `U` pick, reject, or clear the flag.
+- `]` and `[` rotate the selected photos clockwise or counterclockwise for
+  viewing.
 
 Press `C` to compare the current selection.

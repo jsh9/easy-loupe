@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QItemSelectionModel, Qt, QTimer
 
+from easy_loupe.core.rotation import NO_ROTATION_DEGREES
 from easy_loupe.ui.theme import PHOTO_ID_ROLE
 
 if TYPE_CHECKING:
@@ -469,6 +470,7 @@ class MainWindowNavigationMixin:
             photo.focus_point,
             focus_point_pending=getattr(photo, 'focus_point_pending', False),
             handoff_manual_view=manual_view,
+            rotation=getattr(photo, 'rotation', NO_ROTATION_DEGREES),
         )
         if hasattr(self, '_refresh_info_overlay'):
             self._refresh_info_overlay()

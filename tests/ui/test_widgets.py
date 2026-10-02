@@ -539,3 +539,52 @@ def test_thumbnail_item_widget_reserves_metadata_row_height_for_scene_cards(
     scene_empty_widget.close()
     scene_tagged_widget.close()
     stacked_widget.close()
+
+
+def test_thumbnail_item_widget_rotation_turns_every_stack_frame(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify thumbnail cards show and update view rotation in place.
+
+    Thumbnails double as zoom minimaps, so they must use the same rotated frame
+    as the main viewer. Scene stacks draw the cover in three frames, and
+    rotating must update all of them from the unrotated source without
+    compounding turns or rebuilding the card.
+    """
+    app = QApplication.instance() or QApplication([])
+    thumb_path = tmp_path / 'thumb.jpg'
+    create_jpeg(thumb_path, 'dimgray', size=(240, 120))
+    widget = widgets_module.ThumbnailItemWidget(
+        thumb_path=thumb_path,
+        stem='IMG_2100...IMG_2102',
+        metadata_text='',
+        frame_size=QSize(220, 165),
+        theme=theme_module.THEMES['light'],
+        scene_count=3,
+        stacked=True,
+        rotation=90,
+    )
+    app.processEvents()
+
+    def pixmap_sizes() -> list[tuple[int, int]]:
+        return [
+            (
+                image_widget._pixmap.width(),
+                image_widget._pixmap.height(),
+            )
+            for image_widget in widget._image_widgets
+        ]
+
+    assert widget.rotation() == 90
+    assert pixmap_sizes() == [(120, 240)] * 3
+
+    widget.set_rotation(180)
+
+    assert widget.rotation() == 180
+    assert pixmap_sizes() == [(240, 120)] * 3
+
+    widget.set_rotation(270)
+
+    assert pixmap_sizes() == [(120, 240)] * 3
+    widget.close()

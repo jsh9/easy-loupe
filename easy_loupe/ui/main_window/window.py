@@ -19,6 +19,7 @@ from easy_loupe.ui.main_window.navigation import (
 from easy_loupe.ui.main_window.presentation import (
     MainWindowPresentationMixin,
 )
+from easy_loupe.ui.main_window.rotation import MainWindowRotationMixin
 from easy_loupe.ui.main_window.selection import MainWindowSelectionMixin
 from easy_loupe.ui.main_window.workflows import MainWindowWorkflowMixin
 from easy_loupe.ui.theme import THEMES
@@ -39,6 +40,7 @@ if TYPE_CHECKING:
 class MainWindow(
     MainWindowBuildMixin,
     MainWindowWorkflowMixin,
+    MainWindowRotationMixin,
     MainWindowCompareMixin,
     MainWindowSelectionMixin,
     MainWindowNavigationMixin,
