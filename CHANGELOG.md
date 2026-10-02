@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-02
+
 - Added
 
   - EasyLoupe now opens JPEG XL (`.jxl`) and PNG (`.png`) photos alongside
