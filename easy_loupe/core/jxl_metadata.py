@@ -38,11 +38,11 @@ def extract_compressed_jxl_exif(path: Path) -> bytes | None:
     ``cjxl`` stores Exif in a ``brob`` box by default, including lossless JPEG
     transcodes. ExifTool can only read that box when Perl has
     ``IO::Uncompress::Brotli``, which macOS system Perl lacks, so packaged apps
-    would otherwise show no EXIF for those files. The returned bytes start
-    with a TIFF header and can be parsed by ExifTool as a standalone file.
+    would otherwise show no EXIF for those files. The returned bytes start with
+    a TIFF header and can be parsed by ExifTool as a standalone file.
 
-    Returns ``None`` for bare codestreams, files without a compressed Exif
-    box, unreadable files, and corrupt or oversized payloads.
+    Returns ``None`` for bare codestreams, files without a compressed Exif box,
+    unreadable files, and corrupt or oversized payloads.
     """
     if brotli is None:
         return None

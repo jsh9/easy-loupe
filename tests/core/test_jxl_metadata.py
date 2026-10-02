@@ -153,8 +153,8 @@ def test_extract_compressed_jxl_exif_rejects_oversized_output(
     """
     Verify a Brotli payload that inflates past the cap is ignored.
 
-    The cap protects folder loading from decompression bombs hidden in a
-    small compressed box.
+    The cap protects folder loading from decompression bombs hidden in a small
+    compressed box.
     """
     monkeypatch.setattr(jxl_metadata_module, 'MAX_DECOMPRESSED_EXIF_BYTES', 16)
     path = tmp_path / 'IMG_7003.JXL'
