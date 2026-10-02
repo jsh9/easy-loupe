@@ -40,6 +40,38 @@ Major logic:
   thumbnail when available.
 - RAW `"full"` render is intentionally separate from the viewer/thumbnail
   pipeline.
+- Shared-stem groups choose their preview source by format priority: JPEG, then
+  HEIC/HEIF, then JPEG XL, then PNG, then RAW. Any raster beats RAW because it
+  avoids the slower RAW render path.
+- `PHOTO_FORMATS` in `easy_loupe/core/photo_groups.py` is the single ordered
+  table of format labels and extensions. Preview selection and the EXIF
+  `File Size` row in both culling and photo-viewer modes classify files only
+  through it via `classify_photo_files(...)`, so a new format needs its
+  extension set in `easy_loupe/core/records.py` plus one table entry.
+- Raster sources are flattened to opaque 8-bit RGB before JPEG caching. Colors
+  and transparency are resolved separately: 16-bit or float grayscale is scaled
+  to 8 bits instead of clipping to white, then any transparency is composited
+  onto `TRANSPARENCY_BACKGROUND_RGB` in `easy_loupe/core/preview.py`.
+- The transparency background is near-white `(250, 250, 250)`, not pure white.
+  Clipping warnings and the RGB histogram analyze the cached viewer preview,
+  and the clipping overlay flags 255 as a blown highlight; this value stays
+  below 255 after JPEG caching, so transparent areas never read as clipped.
+- Transparency sources are handled per mode. Alpha bands composite directly,
+  and fully opaque alpha bands skip compositing. Palette, 1-bit, and 8-bit
+  `tRNS` keys use one Pillow RGBA conversion. High-bit-depth grayscale keys are
+  compared at full depth, because Pillow's own conversion compares clipped
+  8-bit pixels with the key's low byte. 16-bit RGB PNG keys compare the key's
+  high bytes with Pillow's high-byte pixels, the closest match available after
+  Pillow's 8-bit reduction; the PNG `IHDR` bit depth identifies them.
+- `pillow-jxl-plugin` 1.3.8 labels 16-bit grayscale+alpha JPEG XL pixels as
+  8-bit `LA`. `_repair_jxl_sixteen_bit_gray_alpha()` detects the double-sized
+  buffer and rebuilds 8-bit `LA` pixels from the high bytes; it is a no-op for
+  correctly sized buffers, so it can be removed once the plugin is fixed.
+  `tests/core/fixtures/gray16_alpha.jxl` covers it.
+- JPEG XL orientation comes from the codestream, which libjxl applies while
+  decoding pixels, so EXIF orientation is not applied again. Losslessly
+  transcoded JPEG XL files are the exception: the plugin reconstructs the
+  original JPEG, so EXIF orientation still applies.
 - Rendered JPEG previews are cached under a cache directory derived from the
   current folder, resolved preview source path, source mtime via
   `preview_version`, and requested preview kind.
@@ -63,22 +95,31 @@ Major logic:
 
 - `Pillow` handles image loading/transforms.
 - `pillow-heif` registers HEIC/HEIF image support for Pillow.
+- `pillow-jxl-plugin` (GPL-3.0-or-later) registers JPEG XL support for Pillow
+  when `easy_loupe/core/preview.py` imports `pillow_jxl`. Pillow reads PNG
+  natively.
+- `brotli` decompresses JPEG XL Exif boxes for the ExifTool fallback described
+  in the ExifTool section. Without it, that fallback is skipped.
 - `rawpy` is required to render RAW previews.
 - `imagehash` is required for scene detection.
 - If `rawpy` or `imagehash` is unavailable and the corresponding feature path
   is exercised, the library raises a runtime error.
 - If `pillow-heif` is unavailable, HEIC/HEIF preview rendering raises a runtime
-  error instead of silently producing an invalid preview.
+  error instead of silently producing an invalid preview. JPEG XL rendering
+  does the same when `pillow-jxl-plugin` is unavailable.
 
 ## 3. ExifTool Metadata
 
 Primary files:
 
 - `easy_loupe/core/exif.py`
+- `easy_loupe/core/jxl_metadata.py`
 - `easy_loupe/core/grouped_exif.py`
 - `easy_loupe/core/photo_groups.py`
 - `easy_loupe/core/metadata.py`
 - `scripts/build_app/`
+- `tests/core/test_exif.py`
+- `tests/core/test_jxl_metadata.py`
 - `tests/core/test_grouped_exif.py`
 - `tests/core/test_metadata.py`
 
@@ -134,6 +175,15 @@ Major logic:
 - On Windows packaged GUI builds, ExifTool subprocesses are launched with
   Windows-specific hidden-console options to avoid flashing a terminal window
   during metadata reads.
+- `cjxl` stores JPEG XL Exif in a Brotli-compressed `brob` box by default,
+  including lossless JPEG transcodes. ExifTool only reads those boxes when Perl
+  has `IO::Uncompress::Brotli`, which macOS system Perl lacks, so the packaged
+  macOS ExifTool returns only a warning for them. After each batch,
+  `_fill_compressed_jxl_exif()` takes `.jxl` records without `ExifByteOrder`.
+  `easy_loupe/core/jxl_metadata.py` extracts their TIFF streams in Python, and
+  one extra ExifTool batch parses them as temporary `.tif` files. The merge
+  keeps the real file's `SourceFile`, file fields, and codestream dimensions.
+  Failures in this fallback keep the primary records.
 
 ## 4. Autofocus Extraction
 
@@ -168,6 +218,9 @@ Major logic:
 - If you change ExifTool resolution or invocation, test `EASY_LOUPE_EXIFTOOL`,
   bundled PyInstaller lookup, and system `PATH` fallback behavior.
 - Preserve the missing/failing-ExifTool fallback to empty metadata.
+- If you change ExifTool batching, keep the JPEG XL Brotli fallback best
+  effort, and check a `cjxl`-made JXL with the bundled macOS ExifTool and
+  `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, which matches a Finder launch.
 - Preserve Windows hidden-console subprocess options for GUI builds.
 - If you change focus-point extraction, make the change in
   `easy_loupe/core/autofocus_points/`, keeping `easy_loupe/core/exif.py` as the

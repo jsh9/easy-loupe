@@ -10,15 +10,16 @@ ______________________________________________________________________
 - [2. Run From Source](#2-run-from-source)
 - [3. User Guide](#3-user-guide)
 - [4. Contributors](#4-contributors)
+- [5. License](#5-license)
 
 ______________________________________________________________________
 
 <!--TOC-->
 
-EasyLoupe is a desktop photo culling app for JPEG, HEIC/HEIF, and RAW folders.
-It is built for quickly reviewing a shoot, marking keepers and rejects,
-comparing similar frames, and carrying ratings or labels into the next step of
-a photo workflow.
+EasyLoupe is a desktop photo culling app for JPEG, HEIC/HEIF, JPEG XL, PNG, and
+RAW folders. It is built for quickly reviewing a shoot, marking keepers and
+rejects, comparing similar frames, and carrying ratings or labels into the next
+step of a photo workflow.
 
 ## 1. What It Helps With
 
@@ -66,3 +67,24 @@ walkthrough of the main views and workflows.
 
 Feature-level maintenance notes live in
 [docs/maintenance-guides/](docs/maintenance-guides/README.md).
+
+## 5. License
+
+Copyright (C) 2026 jsh9
+
+EasyLoupe is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version. See [LICENSE](LICENSE) for the full license text.
+
+EasyLoupe is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+Packaged EasyLoupe apps include third-party components under their own
+licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+The GPL covers EasyLoupe's code and files, including the icon files. As allowed
+by section 7(e) of the GPL, it does not grant rights to use the EasyLoupe name
+or icon as trademarks. If you distribute a modified version, give it a
+different name and icon so it is not mistaken for the official app.

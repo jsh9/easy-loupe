@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.util
+import html
 import importlib.resources
 import sys
 from importlib.metadata import PackageNotFoundError
@@ -12,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
 
 if TYPE_CHECKING:
     from importlib.resources.abc import Traversable
@@ -33,6 +34,43 @@ def _package_version() -> str:
 
 APP_NAME = 'EasyLoupe'
 APP_VERSION = _package_version()
+APP_COPYRIGHT = 'Copyright (C) 2026 jsh9'
+APP_SOURCE_URL = 'https://github.com/jsh9/easy-loupe'
+APP_LICENSE_URL = f'{APP_SOURCE_URL}/blob/main/LICENSE'
+APP_THIRD_PARTY_NOTICES_URL = (
+    f'{APP_SOURCE_URL}/blob/main/THIRD_PARTY_NOTICES.md'
+)
+
+
+def build_about_dialog_html() -> str:
+    """
+    Return the About dialog body, including the GPL's legal notices.
+
+    GPLv3 asks interactive programs to show a copyright notice, state that
+    there is no warranty, and tell users how to view the license. The text is
+    rich text so the links are clickable; Qt message boxes open external links
+    in the default browser.
+    """
+    return (
+        f'<p><b>{APP_NAME}</b><br>Version {html.escape(APP_VERSION)}</p>'
+        '<p>Photo culling made easy.</p>'
+        f'<p>{APP_COPYRIGHT}<br>'
+        'Free software under the GNU General Public License, version 3 or '
+        'later. It comes with absolutely no warranty.</p>'
+        f'<p><a href="{APP_SOURCE_URL}">Source code</a> &middot; '
+        f'<a href="{APP_LICENSE_URL}">License</a> &middot; '
+        f'<a href="{APP_THIRD_PARTY_NOTICES_URL}">Third-party notices</a></p>'
+    )
+
+
+def show_about_dialog(parent: QWidget) -> None:
+    """
+    Show the About dialog for any EasyLoupe window.
+
+    The culling window and standalone photo-viewer windows are separate
+    interactive interfaces, so both need a route to the GPL notices.
+    """
+    QMessageBox.about(parent, f'About {APP_NAME}', build_about_dialog_html())
 
 
 def asset_resource(name: str) -> Traversable:

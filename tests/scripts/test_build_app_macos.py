@@ -17,6 +17,13 @@ def test_pyinstaller_command_prefers_module_when_binary_missing(
         monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(build_app.shutil, 'which', lambda _name: None)
+    # Pin the dependency-metadata args so the exact command does not
+    # depend on which packages this test environment has installed.
+    monkeypatch.setattr(
+        build_app.utils,
+        'build_runtime_metadata_args',
+        lambda: ['--copy-metadata', 'pillow'],
+    )
     monkeypatch.setattr(
         build_app,
         'ensure_exiftool_payload',
@@ -50,6 +57,17 @@ def test_pyinstaller_command_prefers_module_when_binary_missing(
         'easy_loupe.ui.assets',
         '--copy-metadata',
         'easy-loupe',
+        '--copy-metadata',
+        'pillow',
+        '--add-data',
+        f'{build_app.utils.LICENSE_PATH}{os.pathsep}.',
+        '--add-data',
+        f'{build_app.utils.THIRD_PARTY_NOTICES_PATH}{os.pathsep}.',
+        '--add-data',
+        (
+            f'{build_app.utils.THIRD_PARTY_LICENSES_DIR}{os.pathsep}'
+            'third_party_licenses'
+        ),
         '--osx-bundle-identifier',
         'com.easyloupe.EasyLoupe',
         '--add-binary',
@@ -64,6 +82,13 @@ def test_pyinstaller_command_uses_binary_when_available(
         monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(build_app.shutil, 'which', lambda _name: 'pyinstaller')
+    # Pin the dependency-metadata args so the exact command does not
+    # depend on which packages this test environment has installed.
+    monkeypatch.setattr(
+        build_app.utils,
+        'build_runtime_metadata_args',
+        lambda: ['--copy-metadata', 'pillow'],
+    )
     monkeypatch.setattr(
         build_app,
         'ensure_exiftool_payload',
@@ -94,6 +119,17 @@ def test_pyinstaller_command_uses_binary_when_available(
         'easy_loupe.ui.assets',
         '--copy-metadata',
         'easy-loupe',
+        '--copy-metadata',
+        'pillow',
+        '--add-data',
+        f'{build_app.utils.LICENSE_PATH}{os.pathsep}.',
+        '--add-data',
+        f'{build_app.utils.THIRD_PARTY_NOTICES_PATH}{os.pathsep}.',
+        '--add-data',
+        (
+            f'{build_app.utils.THIRD_PARTY_LICENSES_DIR}{os.pathsep}'
+            'third_party_licenses'
+        ),
         '--osx-bundle-identifier',
         'com.easyloupe.EasyLoupe',
         '--add-binary',
@@ -105,11 +141,18 @@ def test_pyinstaller_command_uses_binary_when_available(
 
 
 def test_document_type_entry_registers_supported_photo_extensions() -> None:
+    """
+    Verify Finder can offer EasyLoupe for every supported photo format.
+
+    The document types come from ``SUPPORTED_EXTENSIONS``, so JPEG XL and PNG
+    must appear alongside JPEG, HEIC, and RAW, while the Alternate rank keeps
+    EasyLoupe from taking over default apps.
+    """
     entry = build_app.document_type_entry()
 
     assert entry['CFBundleTypeRole'] == 'Viewer'
     assert entry['LSHandlerRank'] == 'Alternate'
-    assert {'jpg', 'heic', 'arw', 'rw2'} <= set(
+    assert {'jpg', 'heic', 'jxl', 'png', 'arw', 'rw2'} <= set(
         entry['CFBundleTypeExtensions']
     )
 
@@ -139,6 +182,14 @@ def test_main_signs_and_verifies_after_metadata_injection(
         monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """
+    Verify the macOS build runs its post-PyInstaller steps in order.
+
+    License files are checked after cleanup removes bundled PySide tool apps
+    and before plist injection and signing, so a missing license stops the
+    build before an incomplete app is signed. Signing must follow every bundle
+    mutation, and verification must follow signing.
+    """
     calls: list[str] = []
     monkeypatch.setattr(
         build_app,
@@ -168,6 +219,11 @@ def test_main_signs_and_verifies_after_metadata_injection(
     )
     monkeypatch.setattr(
         build_app,
+        'verify_app_licenses',
+        lambda: calls.append('licenses'),
+    )
+    monkeypatch.setattr(
+        build_app,
         'inject_info_plist_metadata',
         lambda: calls.append('plist'),
     )
@@ -188,6 +244,7 @@ def test_main_signs_and_verifies_after_metadata_injection(
         'pyinstaller',
         'chmod',
         'cleanup',
+        'licenses',
         'plist',
         'sign',
         'verify',

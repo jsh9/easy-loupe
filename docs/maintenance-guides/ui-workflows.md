@@ -185,7 +185,10 @@ Mode summary:
   is opened from Finder, Explorer, or argv. It shows only the opened photo
   fit-to-window at first, supports adjacent-photo navigation within the opened
   file's immediate folder, and keeps culling chrome hidden until `G` or `Enter`
-  enters culling mode.
+  enters culling mode. Its Help menu has the same `About EasyLoupe` entry as
+  the culling window, through `show_about_dialog()` in `ui/identity.py`,
+  because it is a separate interactive interface that must show the GPL
+  notices. On macOS the entry moves to the application menu.
 - `View mode` shows the left thumbnail strip and main viewer, plus the
   horizontal scene strip when scene detection is available for the current
   photo.
@@ -571,9 +574,9 @@ per-window close path as the window control.
 `Ctrl+C`/`Cmd+C` copies the whole underlying photo image in standalone
 photo-viewer mode and the culling workspace's normal single/split main viewer.
 It does not copy a file path, zoom crop, or overlay pixels. JPEG-backed records
-copy the original JPEG source; RAW-only and HEIC/HEIF-only records copy the
-rendered `"viewer"` preview. Browse and compare views do not expose this
-shortcut because multiple photos may be visible.
+copy the original JPEG source; RAW-only, HEIC/HEIF-only, JPEG XL-only, and
+PNG-only records copy the rendered `"viewer"` preview. Browse and compare views
+do not expose this shortcut because multiple photos may be visible.
 
 Window close while scene detection or organizer/undo work is active must hide
 the visible window immediately, request best-effort worker shutdown, and defer
@@ -637,6 +640,8 @@ issuing another interruptible Quit request.
 - Verify the `Show AF point` top-bar checkbox default, shortcut, and
   propagation to the single and split viewer panes when viewer behavior
   changes.
+- Verify `Help > About EasyLoupe` opens the About dialog from both the culling
+  window and a standalone photo-viewer window.
 - Verify `?` and `Help > Keyboard Shortcuts` open the context-aware shortcut
   help overlay for the active view, verify normal shortcuts are blocked while
   it is open, verify real key presses on focused thumbnail, browse, and scene

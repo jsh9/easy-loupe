@@ -20,7 +20,11 @@ from easy_loupe.ui.viewers.compare_photo_viewer import (
     ComparePhoto,
     ComparePhotoViewer,
 )
-from tests.ui._helpers import create_jpeg, process_events_until
+from tests.ui._helpers import (
+    CLIPPING_OVERLAY_TIMEOUT_MS,
+    create_jpeg,
+    process_events_until,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -132,6 +136,7 @@ def test_compare_photo_viewer_clipping_warning_applies_to_all_panes(
         lambda: all(
             pane._clipping_overlay_item.isVisible() for pane in viewer._viewers
         ),
+        timeout_ms=CLIPPING_OVERLAY_TIMEOUT_MS,
     )
     assert [
         pane._clipping_overlay_item.isVisible() for pane in viewer._viewers
@@ -141,7 +146,9 @@ def test_compare_photo_viewer_clipping_warning_applies_to_all_panes(
 
     assert viewer.selected_viewer._clipping_warning_enabled is True
     process_events_until(
-        app, viewer.selected_viewer._clipping_overlay_item.isVisible
+        app,
+        viewer.selected_viewer._clipping_overlay_item.isVisible,
+        timeout_ms=CLIPPING_OVERLAY_TIMEOUT_MS,
     )
     assert viewer.selected_viewer._clipping_overlay_item.isVisible() is True
 

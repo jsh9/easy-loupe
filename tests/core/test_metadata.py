@@ -303,6 +303,115 @@ def test_scene_group_normalization_rejects_only_missing_photo_ids() -> None:
     assert scenes == []
 
 
+@pytest.mark.parametrize(
+    ('saved_photos', 'valid_photo_ids', 'expected'),
+    [
+        pytest.param(
+            {'DSC01234': {'rating': 5}},
+            ['dsc01234'],
+            {'dsc01234': {'rating': 5}},
+            id='stem-case-change',
+        ),
+        pytest.param(
+            {'DSC01234.ARW': {'flag': 'picked'}},
+            ['dsc01234'],
+            {'dsc01234': {'flag': 'picked'}},
+            id='legacy-filename-key-with-case-change',
+        ),
+        pytest.param(
+            {'dsc01234': {'rating': 2}, 'DSC01234': {'rating': 5}},
+            ['dsc01234'],
+            {'dsc01234': {'rating': 2}},
+            id='exact-key-wins-over-case-variant',
+        ),
+        pytest.param(
+            {'Trip/IMG_1000': {'rating': 4}},
+            ['trip/img_1000'],
+            {},
+            id='parent-folder-case-must-match',
+        ),
+        pytest.param(
+            {'Img_1000': {'rating': 4}},
+            ['img_1000', 'IMG_1000'],
+            {},
+            id='ambiguous-case-variants-are-not-guessed',
+        ),
+    ],
+)
+def test_metadata_normalization_falls_back_to_stem_case_changes(
+        saved_photos: dict[str, dict[str, object]],
+        valid_photo_ids: list[str],
+        expected: dict[str, dict[str, object]],
+) -> None:
+    """
+    Verify saved metadata follows a photo whose ID changed only in case.
+
+    A photo ID is the stem of the companion that wins preview priority, so
+    ``DSC01234.ARW`` gaining ``dsc01234.png`` renames the photo. Without this
+    fallback its rating would vanish and be dropped on the next save. Exact
+    keys must still win, and parent folders stay case-sensitive because
+    recursive loads can contain ``Trip/`` and ``trip/`` as different folders.
+    """
+    assert (
+        normalize_metadata_entries(
+            {'photos': saved_photos}, valid_photo_ids=valid_photo_ids
+        )
+        == expected
+    )
+
+
+def test_scene_group_normalization_follows_stem_case_changes() -> None:
+    """
+    Verify saved scene groups keep photos whose ID changed only in case.
+
+    Scene membership is stored by photo ID, so it needs the same case-only
+    fallback as per-photo metadata to survive a new companion file.
+    """
+    source, scenes = normalize_scene_groups(
+        {
+            'scenes': {
+                'source': 'manual',
+                'groups': [['DSC01234', 'DSC01235']],
+            }
+        },
+        ['dsc01234', 'DSC01235', 'DSC01236'],
+    )
+
+    assert source == 'manual'
+    assert [scene.photo_ids for scene in scenes] == [
+        ['dsc01234', 'DSC01235'],
+        ['DSC01236'],
+    ]
+
+
+def test_load_folder_keeps_rating_when_png_companion_renames_photo(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify a new PNG companion with a lowercase stem keeps a RAW's rating.
+
+    PNG now outranks RAW as the preview source, so ``dsc01234.png`` changes the
+    photo ID of an already rated ``DSC01234.ARW``. The rating must load under
+    the new ID and be saved there instead of being erased.
+    """
+    stub_read_exif(monkeypatch, {})
+    (tmp_path / 'DSC01234.ARW').write_bytes(b'raw')
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+    library.update_metadata('DSC01234', rating=5, fields={'rating'})
+    library.save_metadata()
+
+    (tmp_path / 'dsc01234.png').write_bytes(b'png')
+    reloaded = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    reloaded.load_folder(tmp_path)
+    reloaded.save_metadata()
+
+    assert [photo.photo_id for photo in reloaded.photos] == ['dsc01234']
+    assert reloaded.photos[0].rating == 5
+    saved = json.loads((tmp_path / METADATA_FILENAME).read_text())
+    assert saved['photos'] == {'dsc01234': {'rating': 5}}
+
+
 def test_folder_metadata_serializes_photos_and_scenes() -> None:
     photos = [
         make_photo_record(

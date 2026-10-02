@@ -24,6 +24,12 @@ if TYPE_CHECKING:
     import pytest
 
 
+# Clipping overlays render on a thread-pool worker after a start timer, and
+# shared CI runners can take well over a second to deliver them. Waits return
+# as soon as the overlay appears, so the generous limit only matters on slow
+# machines.
+CLIPPING_OVERLAY_TIMEOUT_MS = 5_000
+
 MUTED_PLACEHOLDER_COLORS: dict[str, str] = {
     'red': '#a85f5f',
     'blue': '#5f7fa8',

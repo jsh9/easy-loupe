@@ -35,7 +35,7 @@ Primary files:
 Major logic:
 
 - Supported extensions are defined in `easy_loupe/core/records.py` and include
-  JPEG, HEIC/HEIF, and multiple camera RAW formats.
+  JPEG, HEIC/HEIF, JPEG XL, PNG, and multiple camera RAW formats.
 - `PhotoLibrary.load_recursively` stores the active direct-vs-recursive scan
   preference. `PhotoLibrary.set_load_recursively(...)` normalizes raw values
   before the next folder load.
@@ -94,6 +94,16 @@ Major logic:
 - Legacy metadata forms remain supported: filename keys with extensions are
   reduced to stems, Windows separators are normalized to `/`, and flag value
   `reject` becomes `rejected`.
+- A photo ID is the stem of the companion file that wins preview priority, so
+  it can change case when a new companion appears, such as `DSC01234.ARW`
+  gaining `dsc01234.png`. Keys that match no loaded ID exactly or after suffix
+  stripping fall back to a case-insensitive stem match through
+  `build_photo_id_group_index()` and `resolve_photo_identifier_by_group_key()`
+  in `recursive_loading.py`. This uses the same key as companion grouping: the
+  relative parent stays exact and only the stem is case-folded. Exact and
+  legacy matches win over this fallback, and grouping keys shared by several
+  loaded IDs are never guessed. The next save writes the entry under the new
+  ID.
 - Folder loading builds photo records before applying saved metadata so
   migration can compare persisted keys to the concrete IDs discovered in the
   current folder.
@@ -182,3 +192,6 @@ Useful manual scenarios:
   preference is enabled.
 - Load metadata containing a dotted ID such as `IMG.0001`; the photo's saved
   rating, flag, color label, and scene membership should survive.
+- Rate a RAW-only photo, add a companion PNG or JPEG XL whose stem differs only
+  in case, and reload; the rating and scene membership should follow the
+  renamed photo and be saved under its new ID.

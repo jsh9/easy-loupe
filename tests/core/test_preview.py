@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import gc
 import os
+import struct
+import warnings
 import weakref
+import zlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Never, Self
 
@@ -224,6 +227,408 @@ def test_heic_preview_uses_pillow_heif_opener(
         assert_color_close(
             image.convert('RGB').getpixel((0, 0)), (0, 128, 128)
         )
+
+
+@pytest.mark.parametrize(
+    ('filename', 'save_options'),
+    [
+        pytest.param('IMG_6002.PNG', {'format': 'PNG'}, id='png'),
+        pytest.param(
+            'IMG_6002.JXL', {'format': 'JXL', 'lossless': True}, id='jxl'
+        ),
+    ],
+)
+def test_png_and_jxl_previews_render_source_pixels(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        filename: str,
+        save_options: dict[str, Any],
+) -> None:
+    """
+    Verify PNG and JPEG XL files render through the raster preview path.
+
+    PNG decodes with stock Pillow and JPEG XL relies on the opener that
+    ``pillow-jxl-plugin`` registers, so this catches a missing plugin import or
+    a format that falls through to the RAW renderer.
+    """
+    Image.new('RGB', (32, 24), color='teal').save(
+        tmp_path / filename, **save_options
+    )
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+
+    viewer_path = library.get_preview_path('IMG_6002', 'viewer')
+
+    with Image.open(viewer_path) as image:
+        assert image.size == (32, 24)
+        assert_color_close(
+            image.convert('RGB').getpixel((0, 0)), (0, 128, 128)
+        )
+
+
+def _half_transparent_image(
+        mode: str,
+        transparent_color: Any,
+        opaque_color: Any,
+) -> Image.Image:
+    """Return a 32x16 image: left half transparent, right half opaque."""
+    image = Image.new(mode, (32, 16), transparent_color)
+    # Paste a filled image rather than a bare color: Pillow silently ignores
+    # bare integer colors when pasting into ``I;16`` images.
+    image.paste(Image.new(mode, (16, 16), opaque_color), (16, 0))
+    return image
+
+
+def _half_transparent_palette_image() -> Image.Image:
+    """Return a palette image whose index 0 (left half) is transparent."""
+    image = _half_transparent_image('P', 0, 1)
+    image.putpalette([255, 0, 0, 0, 0, 255])
+    image.info['transparency'] = 0
+    return image
+
+
+@pytest.mark.parametrize(
+    ('filename', 'image_factory', 'save_options', 'opaque_rgb'),
+    [
+        pytest.param(
+            'IMG_6003.PNG',
+            lambda: _half_transparent_image(
+                'RGBA', (255, 0, 0, 0), (0, 0, 255, 255)
+            ),
+            {'format': 'PNG'},
+            (0, 0, 255),
+            id='png-rgba',
+        ),
+        pytest.param(
+            'IMG_6003.PNG',
+            lambda: _half_transparent_image('LA', (0, 0), (128, 255)),
+            {'format': 'PNG'},
+            (128, 128, 128),
+            id='png-la',
+        ),
+        pytest.param(
+            'IMG_6003.PNG',
+            _half_transparent_palette_image,
+            {'format': 'PNG', 'transparency': 0},
+            (0, 0, 255),
+            id='png-palette-trns',
+        ),
+        pytest.param(
+            'IMG_6003.PNG',
+            lambda: _half_transparent_image('I;16', 0, 32768),
+            {'format': 'PNG', 'transparency': 0},
+            (128, 128, 128),
+            id='png-16-bit-gray-trns',
+        ),
+        pytest.param(
+            'IMG_6003.PNG',
+            lambda: _half_transparent_image('I;16', 65535, 32768),
+            {'format': 'PNG', 'transparency': 65535},
+            (128, 128, 128),
+            id='png-16-bit-gray-white-key',
+        ),
+        pytest.param(
+            'IMG_6003.PNG',
+            lambda: _half_transparent_image('I;16', 256, 0),
+            {'format': 'PNG', 'transparency': 256},
+            (0, 0, 0),
+            id='png-16-bit-gray-key-above-255',
+        ),
+        pytest.param(
+            'IMG_6003.JXL',
+            lambda: _half_transparent_image(
+                'RGBA', (255, 0, 0, 0), (0, 0, 255, 255)
+            ),
+            {'format': 'JXL', 'lossless': True},
+            (0, 0, 255),
+            id='jxl-rgba',
+        ),
+    ],
+)
+def test_transparent_raster_previews_flatten_onto_background(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        filename: str,
+        image_factory: Any,
+        save_options: dict[str, Any],
+        opaque_rgb: tuple[int, int, int],
+) -> None:
+    """
+    Verify transparent pixels show the background while opaque pixels keep
+    color.
+
+    Preview caches are JPEG, so alpha must be flattened. A plain
+    ``convert('RGB')`` drops alpha and shows the color hidden under transparent
+    pixels (red here), which would mislead culling decisions. The 16-bit
+    grayscale cases also guard against tone scaling bypassing compositing and
+    against Pillow's 8-bit key comparison, which would whiten every bright
+    pixel for a 65535 key and the wrong pixels for a 256 key. The gray ``LA``
+    case catches gray turning red when ``LA`` is pasted onto RGB directly.
+    """
+    image_factory().save(tmp_path / filename, **save_options)
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+
+    viewer_path = library.get_preview_path('IMG_6003', 'viewer')
+
+    with Image.open(viewer_path) as image:
+        rgb = image.convert('RGB')
+        assert_color_close(
+            rgb.getpixel((2, 8)),
+            core_preview_module.TRANSPARENCY_BACKGROUND_RGB,
+        )
+        assert_color_close(rgb.getpixel((29, 8)), opaque_rgb)
+
+
+def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
+    checksum = zlib.crc32(chunk_type + data) & 0xFFFFFFFF
+    return (
+        struct.pack('>I', len(data))
+        + chunk_type
+        + data
+        + struct.pack('>I', checksum)
+    )
+
+
+def _sixteen_bit_rgb_png_bytes(
+        left: tuple[int, int, int],
+        right: tuple[int, int, int],
+        transparency: tuple[int, int, int],
+) -> bytes:
+    """
+    Return a 32x16 16-bit RGB PNG with a tRNS key; Pillow cannot save one.
+    """
+    rows = b''.join(
+        b'\x00'
+        + b''.join(
+            struct.pack('>3H', *(left if x < 16 else right)) for x in range(32)
+        )
+        for _ in range(16)
+    )
+    header = struct.pack('>IIBBBBB', 32, 16, 16, 2, 0, 0, 0)
+    return (
+        b'\x89PNG\r\n\x1a\n'
+        + _png_chunk(b'IHDR', header)
+        + _png_chunk(b'tRNS', struct.pack('>3H', *transparency))
+        + _png_chunk(b'IDAT', zlib.compress(rows))
+        + _png_chunk(b'IEND', b'')
+    )
+
+
+def test_sixteen_bit_rgb_png_color_key_matches_keyed_pixels(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify a 16-bit RGB tRNS key hides the keyed color and nothing else.
+
+    Pillow reduces these pixels to their high bytes but compares them with the
+    key's low bytes, which left keyed pixels opaque and turned unrelated colors
+    transparent. The right half's high bytes equal the key's low bytes, so it
+    is exactly the color that comparison used to hide.
+    """
+    key = (0x1234, 0x5678, 0x9ABC)
+    (tmp_path / 'IMG_6007.PNG').write_bytes(
+        _sixteen_bit_rgb_png_bytes(key, (0x3400, 0x7800, 0xBC00), key)
+    )
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+
+    viewer_path = library.get_preview_path('IMG_6007', 'viewer')
+
+    with Image.open(viewer_path) as image:
+        rgb = image.convert('RGB')
+        assert_color_close(
+            rgb.getpixel((2, 8)),
+            core_preview_module.TRANSPARENCY_BACKGROUND_RGB,
+        )
+        assert_color_close(rgb.getpixel((29, 8)), (52, 120, 188))
+
+
+def test_palette_png_partial_alpha_blends_without_pillow_warning(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify palette alpha blends once and does not trigger Pillow's warning.
+
+    Converting a palette image with per-entry alpha straight to RGB warns that
+    it should be converted to RGBA first. Flattening must take the single RGBA
+    conversion, which also blends half-transparent red over the background.
+    """
+    image = _half_transparent_image('P', 0, 1)
+    image.putpalette([255, 0, 0, 0, 0, 255])
+    image.save(tmp_path / 'IMG_6008.PNG', transparency=bytes([128, 255]))
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        viewer_path = library.get_preview_path('IMG_6008', 'viewer')
+
+    background = core_preview_module.TRANSPARENCY_BACKGROUND_RGB
+    with Image.open(viewer_path) as preview:
+        rgb = preview.convert('RGB')
+        assert_color_close(
+            rgb.getpixel((2, 8)),
+            (
+                round((255 * 128 + background[0] * 127) / 255),
+                round(background[1] * 127 / 255),
+                round(background[2] * 127 / 255),
+            ),
+        )
+        assert_color_close(rgb.getpixel((29, 8)), (0, 0, 255))
+
+
+def test_sixteen_bit_gray_alpha_jxl_preview_is_not_garbled(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify 16-bit grayscale+alpha JPEG XL files render their real pixels.
+
+    pillow-jxl-plugin 1.3.8 labels these 16-bit samples as 8-bit ``LA``, which
+    made the transparent half gray and the opaque gray half white. The fixture
+    is a 32x16 image whose left half is transparent and right half is opaque
+    16-bit gray 32768, made with ``cjxl -d 0`` because the plugin cannot write
+    this mode.
+    """
+    fixture = Path(__file__).parent / 'fixtures' / 'gray16_alpha.jxl'
+    (tmp_path / 'IMG_6009.JXL').write_bytes(fixture.read_bytes())
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+
+    viewer_path = library.get_preview_path('IMG_6009', 'viewer')
+
+    with Image.open(viewer_path) as image:
+        rgb = image.convert('RGB')
+        assert_color_close(
+            rgb.getpixel((2, 8)),
+            core_preview_module.TRANSPARENCY_BACKGROUND_RGB,
+        )
+        assert_color_close(rgb.getpixel((29, 8)), (128, 128, 128))
+
+
+@pytest.mark.parametrize(
+    ('filename', 'save_options'),
+    [
+        pytest.param('IMG_6004.PNG', {'format': 'PNG'}, id='png'),
+        pytest.param(
+            'IMG_6004.JXL', {'format': 'JXL', 'lossless': True}, id='jxl'
+        ),
+    ],
+)
+def test_sixteen_bit_grayscale_previews_scale_to_eight_bits(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        filename: str,
+        save_options: dict[str, Any],
+) -> None:
+    """
+    Verify 16-bit grayscale sources keep their tones in 8-bit previews.
+
+    Pillow decodes these as ``I;16``, and converting that straight to RGB clips
+    every value above 255 to white. A mid-gray 16-bit value must stay mid-gray
+    in the cached JPEG preview.
+    """
+    Image.new('I;16', (16, 16), 32768).save(
+        tmp_path / filename, **save_options
+    )
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+
+    viewer_path = library.get_preview_path('IMG_6004', 'viewer')
+
+    with Image.open(viewer_path) as image:
+        assert_color_close(
+            image.convert('RGB').getpixel((8, 8)), (128, 128, 128)
+        )
+
+
+def _red_left_blue_right_image() -> Image.Image:
+    """Return a landscape image whose orientation is visible in pixels."""
+    image = Image.new('RGB', (40, 20), 'red')
+    image.paste((0, 0, 255), (20, 0, 40, 20))
+    return image
+
+
+def _rotate_90_cw_exif() -> bytes:
+    exif = Image.Exif()
+    exif[0x0112] = 6  # EXIF Orientation: rotate 90 degrees clockwise.
+    return exif.tobytes()
+
+
+def test_jxl_pixel_preview_ignores_exif_orientation(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify decoded JPEG XL pixels are not rotated again from EXIF.
+
+    JPEG XL's codestream orientation is authoritative and libjxl applies it
+    while decoding. This file's codestream says "identity" while its EXIF blob
+    says "rotate 90 CW", so honoring EXIF would rotate the preview away from
+    what spec-conforming decoders show, or double-rotate files whose EXIF and
+    codestream orientations agree.
+    """
+    _red_left_blue_right_image().save(
+        tmp_path / 'IMG_6005.JXL',
+        format='JXL',
+        lossless=True,
+        exif=_rotate_90_cw_exif(),
+    )
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(tmp_path)
+
+    viewer_path = library.get_preview_path('IMG_6005', 'viewer')
+
+    with Image.open(viewer_path) as image:
+        assert image.size == (40, 20)
+        assert_color_close(image.convert('RGB').getpixel((2, 10)), (254, 0, 0))
+
+
+def test_transcoded_jxl_preview_honors_jpeg_exif_orientation(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify losslessly transcoded JPEG XL files keep JPEG EXIF orientation.
+
+    The plugin reconstructs the original JPEG bytes for these files, so the
+    pixels are unrotated sensor data exactly like the source JPEG. Skipping
+    EXIF orientation here would show portrait shots sideways.
+    """
+    source_jpeg = tmp_path / 'IMG_6006.JPG'
+    photo_folder = tmp_path / 'photos'
+    photo_folder.mkdir()
+    _red_left_blue_right_image().save(
+        source_jpeg, format='JPEG', quality=95, exif=_rotate_90_cw_exif()
+    )
+    with Image.open(source_jpeg) as opened:
+        opened.save(
+            photo_folder / 'IMG_6006.JXL', format='JXL', lossless_jpeg=True
+        )
+
+    stub_read_exif(monkeypatch, {})
+
+    library = PhotoLibrary(cache_dir=tmp_path / '.cache')
+    library.load_folder(photo_folder)
+
+    viewer_path = library.get_preview_path('IMG_6006', 'viewer')
+
+    with Image.open(viewer_path) as image:
+        assert image.size == (20, 40)
+        # Rotating 90 degrees clockwise moves the red left half to the top.
+        assert_color_close(image.convert('RGB').getpixel((10, 2)), (254, 0, 0))
 
 
 def test_preview_cache_is_reused_and_invalidated_when_source_mtime_changes(

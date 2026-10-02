@@ -8,12 +8,29 @@ from typing import TYPE_CHECKING
 from easy_loupe.core.records import (
     HEIF_EXTENSIONS,
     JPEG_EXTENSIONS,
-    RASTER_EXTENSIONS,
+    JXL_EXTENSIONS,
+    PNG_EXTENSIONS,
     RAW_EXTENSIONS,
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from pathlib import Path
+
+# Display label and extensions for each supported format family, ordered by
+# preview priority. JPEG is the safest raster source; every other raster is
+# still preferred over RAW because it avoids the slower RAW render path. PNG
+# comes last among rasters because it is usually a graphic or screenshot and
+# decodes slowly at photo sizes. Preview selection and EXIF file-size rows in
+# both culling and photo-viewer modes classify files only through this table,
+# so they cannot disagree about a format.
+PHOTO_FORMATS: tuple[tuple[str, set[str]], ...] = (
+    ('JPG', JPEG_EXTENSIONS),
+    ('HEIF', HEIF_EXTENSIONS),
+    ('JXL', JXL_EXTENSIONS),
+    ('PNG', PNG_EXTENSIONS),
+    ('RAW', RAW_EXTENSIONS),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,9 +40,33 @@ class PhotoGroupSources:
     sorted_group_files: list[Path]
     jpeg_files: list[Path]
     heif_files: list[Path]
+    has_raster: bool
     raw_files: list[Path]
     preview_source: Path
     metadata_source: Path
+
+
+def classify_photo_files(files: Iterable[Path]) -> dict[str, list[Path]]:
+    """
+    Group supported photo files by their ``PHOTO_FORMATS`` label.
+
+    The result contains every label in ``PHOTO_FORMATS`` order, including empty
+    ones, so callers can take the first non-empty format as the
+    highest-priority one or render an ordered summary directly. Files keep
+    their input order within each label, and unsupported extensions are
+    skipped.
+    """
+    files_by_format: dict[str, list[Path]] = {
+        label: [] for label, _ in PHOTO_FORMATS
+    }
+    for path in files:
+        suffix = path.suffix.lower()
+        for label, extensions in PHOTO_FORMATS:
+            if suffix in extensions:
+                files_by_format[label].append(path)
+                break
+
+    return files_by_format
 
 
 def select_photo_group_sources(
@@ -41,38 +82,22 @@ def select_photo_group_sources(
     sorted_group_files = sorted(
         grouped_files, key=lambda path: path.name.lower()
     )
-    raster_files = [
-        path
-        for path in sorted_group_files
-        if path.suffix.lower() in RASTER_EXTENSIONS
-    ]
-    jpeg_files = [
-        path for path in raster_files if path.suffix.lower() in JPEG_EXTENSIONS
-    ]
-    heif_files = [
-        path for path in raster_files if path.suffix.lower() in HEIF_EXTENSIONS
-    ]
-    raw_files = [
-        path
-        for path in sorted_group_files
-        if path.suffix.lower() in RAW_EXTENSIONS
-    ]
+    files_by_format = classify_photo_files(sorted_group_files)
+    raw_files = files_by_format['RAW']
 
-    # Preserve alphabetical file listing, but choose previews by format
-    # priority. JPEG is the safest raster source; HEIF is still preferred over
-    # RAW because it avoids the slower RAW render path.
-    if jpeg_files:
-        preview_source = jpeg_files[0]
-    elif heif_files:
-        preview_source = heif_files[0]
-    else:
-        preview_source = raw_files[0]
-
+    # Preserve alphabetical file listing within each format, but choose the
+    # preview from the first non-empty format in ``PHOTO_FORMATS`` priority.
+    preview_source = next(
+        files[0] for files in files_by_format.values() if files
+    )
     metadata_source = raw_files[0] if raw_files else preview_source
     return PhotoGroupSources(
         sorted_group_files=sorted_group_files,
-        jpeg_files=jpeg_files,
-        heif_files=heif_files,
+        jpeg_files=files_by_format['JPG'],
+        heif_files=files_by_format['HEIF'],
+        has_raster=any(
+            files for label, files in files_by_format.items() if label != 'RAW'
+        ),
         raw_files=raw_files,
         preview_source=preview_source,
         metadata_source=metadata_source,

@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess  # noqa: S404 - explicit exiftool integration
 import sys
+import tempfile
 from collections.abc import Callable
 from datetime import UTC, datetime
 from fractions import Fraction
@@ -15,8 +16,10 @@ from pathlib import Path
 from typing import Any
 
 from easy_loupe.core.autofocus_points import extract_focus_point
+from easy_loupe.core.jxl_metadata import extract_compressed_jxl_exif
 from easy_loupe.core.records import (
     DATE_SEPARATOR_REPLACEMENT_COUNT,
+    JXL_EXTENSIONS,
     MIN_CAPTURE_TIMESTAMP_CHAR_COUNT,
     TIMESTAMP_DATE_SEPARATOR_INDEX,
 )
@@ -52,6 +55,9 @@ EXPOSURE_COMPENSATION_KEYS = [
     'ExposureBiasValue',
 ]
 EXPOSURE_COMPENSATION_DENOMINATOR = 3
+# ExifTool reports this module name when it cannot read Brotli-compressed
+# JPEG XL metadata boxes.
+_BROTLI_WARNING_TEXT = 'IO::Uncompress::Brotli'
 EXPOSURE_COMPENSATION_TOLERANCE = 0.01
 
 
@@ -140,6 +146,15 @@ def _read_exif_batch_with_recovery(
 def _read_exif_batch(
         exiftool_path: str, files: list[Path]
 ) -> dict[str, dict[str, Any]]:
+    batch_records = _run_exiftool_json(exiftool_path, files)
+    return _metadata_records_by_source(
+        _fill_compressed_jxl_exif(exiftool_path, batch_records)
+    )
+
+
+def _run_exiftool_json(
+        exiftool_path: str, files: list[Path]
+) -> list[dict[str, Any]]:
     command = [
         exiftool_path,
         '-j',
@@ -161,11 +176,73 @@ def _read_exif_batch(
         raise _ExifToolBatchError from exc
 
     try:
-        batch_records = json.loads(result.stdout)
+        return json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise _ExifToolBatchError from exc
 
-    return _metadata_records_by_source(batch_records)
+
+def _fill_compressed_jxl_exif(
+        exiftool_path: str, batch_records: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """
+    Add EXIF that ExifTool could not decompress from JPEG XL files.
+
+    ExifTool needs Perl's ``IO::Uncompress::Brotli`` to read the compressed
+    Exif boxes that ``cjxl`` writes by default, and macOS system Perl does not
+    ship it. For JPEG XL records without parsed EXIF, this extracts the TIFF
+    stream in Python and parses all of them in one extra ExifTool batch.
+    Failures keep the original records, so a broken fallback can never cost
+    metadata the primary read already produced.
+    """
+    blobs: list[tuple[int, bytes]] = []
+    for index, record in enumerate(batch_records):
+        source_file = record.get('SourceFile')
+        if (
+            not isinstance(source_file, str)
+            or Path(source_file).suffix.lower() not in JXL_EXTENSIONS
+            or 'ExifByteOrder' in record
+        ):
+            continue
+
+        tiff = extract_compressed_jxl_exif(Path(source_file))
+        if tiff is not None:
+            blobs.append((index, tiff))
+
+    if not blobs:
+        return batch_records
+
+    filled_records = list(batch_records)
+    blob_paths: dict[str, int] = {}
+    try:
+        with tempfile.TemporaryDirectory(prefix='easy-loupe-jxl-') as temp:
+            # A ``.tif`` name makes ExifTool parse each blob as the TIFF
+            # stream it is, the same way it parses an Exif segment.
+            for blob_index, (record_index, tiff) in enumerate(blobs):
+                blob_path = Path(temp) / f'{blob_index}.tif'
+                blob_path.write_bytes(tiff)
+                blob_paths[str(blob_path)] = record_index
+
+            blob_records = _run_exiftool_json(
+                exiftool_path, [Path(path) for path in blob_paths]
+            )
+    except (OSError, _ExifToolBatchError, _ExifToolLaunchError):
+        return batch_records
+
+    for blob_record in blob_records:
+        record_index = blob_paths.get(str(blob_record.get('SourceFile')))
+        if record_index is None:
+            continue
+
+        original = batch_records[record_index]
+        # File-level fields, SourceFile, and codestream dimensions come from
+        # the real JPEG XL record; the blob only contributes EXIF tags.
+        merged = {**blob_record, **original}
+        if _BROTLI_WARNING_TEXT in str(merged.get('Warning', '')):
+            del merged['Warning']
+
+        filled_records[record_index] = merged
+
+    return filled_records
 
 
 def _metadata_records_by_source(

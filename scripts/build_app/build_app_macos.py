@@ -87,11 +87,17 @@ def main(argv: list[str] | None = None) -> int:
     subprocess.run(command, cwd=REPO_ROOT, check=True)  # noqa: S603
     mark_bundled_exiftool_executable()
     remove_bundled_pyside_tool_apps()
+    verify_app_licenses()
     inject_info_plist_metadata()
     sign_app_bundle()
     verify_app_signature()
     print(APP_PATH)
     return 0
+
+
+def verify_app_licenses(app_path: Path = APP_PATH) -> None:
+    """Fail the build if the app bundle is missing license files."""
+    utils.verify_bundled_licenses(app_path / 'Contents' / 'Resources')
 
 
 def ensure_exiftool_payload() -> Path:

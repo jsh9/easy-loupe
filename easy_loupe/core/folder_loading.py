@@ -14,7 +14,10 @@ from easy_loupe.core.grouped_exif import (
     exact_exif_metadata_for_path,
     read_grouped_exif_metadata,
 )
-from easy_loupe.core.photo_groups import select_photo_group_sources
+from easy_loupe.core.photo_groups import (
+    classify_photo_files,
+    select_photo_group_sources,
+)
 from easy_loupe.core.records import (
     COLOR_LABELS,
     FLAGS,
@@ -35,7 +38,7 @@ from easy_loupe.core.recursive_loading import (
 from easy_loupe.progress import ProgressReporter, ProgressStageDefinition
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
     from datetime import datetime
     from pathlib import Path
 
@@ -307,10 +310,7 @@ def _build_photo_record(
 
     source_metadata = source_metadata or {}
     exif_display = build_photo_exif_display(
-        source_metadata,
-        jpeg_files=jpeg_files,
-        heif_files=heif_files,
-        raw_files=raw_files,
+        source_metadata, photo_files=sorted_group_files
     )
     focus_point = exif_module.extract_focus_point(
         source_metadata, exif_display.image_width, exif_display.image_height
@@ -328,7 +328,7 @@ def _build_photo_record(
         metadata_source=metadata_source,
         focus_point=focus_point,
         has_heif=bool(heif_files),
-        has_raster=bool(jpeg_files or heif_files),
+        has_raster=sources.has_raster,
         focus_point_pending=focus_point_pending,
         capture_at=exif_display.capture_at,
         scene_id=None,
@@ -370,23 +370,23 @@ def _apply_normalized_metadata(
 def build_photo_exif_display(
         source_metadata: dict[str, Any],
         *,
-        jpeg_files: list[Path],
-        heif_files: list[Path] | None = None,
-        raw_files: list[Path],
+        photo_files: Iterable[Path],
 ) -> PhotoExifDisplay:
-    """Build culling-compatible formatted EXIF rows for one photo group."""
+    """
+    Build culling-compatible formatted EXIF rows for one photo group.
+
+    ``photo_files`` is every file in the group. Culling loads and the
+    standalone photo viewer both pass their raw file lists here so the
+    file-size row classifies formats through the same ``PHOTO_FORMATS`` table
+    instead of each caller splitting files by extension.
+    """
     image_width, image_height = exif_module.resolve_image_size(source_metadata)
     capture_at = exif_module.parse_capture_time(source_metadata)
     exif_display: dict[str, str] = {}
     _add_capture_time_display(exif_display, capture_at)
     exif_display.update(exif_module.format_exif_display(source_metadata))
     _add_resolution_display(exif_display, image_width, image_height)
-    _add_file_size_display(
-        exif_display,
-        jpeg_files,
-        heif_files or [],
-        raw_files,
-    )
+    _add_file_size_display(exif_display, classify_photo_files(photo_files))
     return PhotoExifDisplay(
         capture_at=capture_at,
         image_width=image_width,
@@ -422,22 +422,13 @@ def _add_resolution_display(
 
 def _add_file_size_display(
         exif_display: dict[str, str],
-        jpeg_files: list[Path],
-        heif_files: list[Path],
-        raw_files: list[Path],
+        files_by_format: dict[str, list[Path]],
 ) -> None:
     parts: list[str] = []
-    jpeg_size = sum(path.stat().st_size for path in jpeg_files)
-    heif_size = sum(path.stat().st_size for path in heif_files)
-    raw_size = sum(path.stat().st_size for path in raw_files)
-    if jpeg_size:
-        parts.append(f'JPG: {_format_file_size(jpeg_size)}')
-
-    if heif_size:
-        parts.append(f'HEIF: {_format_file_size(heif_size)}')
-
-    if raw_size:
-        parts.append(f'RAW: {_format_file_size(raw_size)}')
+    for label, files in files_by_format.items():
+        size = sum(path.stat().st_size for path in files)
+        if size:
+            parts.append(f'{label}: {_format_file_size(size)}')
 
     if parts:
         exif_display['File Size'] = ', '.join(parts)

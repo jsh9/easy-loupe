@@ -9,13 +9,14 @@ from PySide6.QtWidgets import QApplication, QGraphicsItem
 
 import easy_loupe.ui.viewers.clipping as clipping_module
 import easy_loupe.ui.viewers.photo_viewer as photo_viewer_module
-from tests.ui._helpers import create_jpeg, process_events_until
+from tests.ui._helpers import (
+    CLIPPING_OVERLAY_TIMEOUT_MS,
+    create_jpeg,
+    process_events_until,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-
-CLIPPING_OVERLAY_TIMEOUT_MS = 5_000
 
 
 def _expected_fit_scale(
@@ -494,7 +495,11 @@ def test_photo_viewer_clipping_cache_hit_applies_asynchronously(
     viewer.set_clipping_warning_visible(enabled=True)
     viewer.set_photo(image_path, (0.5, 0.5))
 
-    process_events_until(app, viewer._clipping_overlay_item.isVisible)
+    process_events_until(
+        app,
+        viewer._clipping_overlay_item.isVisible,
+        timeout_ms=CLIPPING_OVERLAY_TIMEOUT_MS,
+    )
     assert viewer._clipping_overlay_item.isVisible() is True
     viewer.close()
 

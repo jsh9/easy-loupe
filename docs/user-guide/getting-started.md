@@ -36,9 +36,15 @@ a folder later.
 
 ## 2. Supported Photos
 
-EasyLoupe is intended for JPEG, HEIC/HEIF, and RAW photo folders. When JPEG and
-RAW companion files share the same filename stem, the app treats them as one
-photo for culling and metadata.
+EasyLoupe is intended for JPEG, HEIC/HEIF, JPEG XL (`.jxl`), PNG, and RAW photo
+folders. When files of different formats share the same filename stem, such as
+`IMG_0001.JPG` and `IMG_0001.CR3`, the app treats them as one photo for culling
+and metadata. Letter case in the stem does not matter.
+
+For a photo with several formats, EasyLoupe shows the first available format in
+this order: JPEG, HEIC/HEIF, JPEG XL, PNG, then RAW. Camera details and focus
+points come from the RAW file when there is one. Transparent areas in PNG and
+JPEG XL images show as a near-white background.
 
 If a selected folder has no supported photos for the current scan mode,
 EasyLoupe shows `No Eligible Photos`.

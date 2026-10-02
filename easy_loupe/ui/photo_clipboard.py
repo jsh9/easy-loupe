@@ -39,8 +39,10 @@ def _clipboard_image_path(library: PhotoLibrary, photo_id: str) -> Path:
     if photo.has_jpeg:
         return photo.preview_source
 
-    # RAW and HEIC/HEIF-only records need EasyLoupe's rendered viewer preview
-    # because their original files are not generally pasteable raster images.
+    # RAW, HEIC/HEIF, JPEG XL, and PNG-only records use EasyLoupe's rendered
+    # viewer preview. RAW, HEIF, and JXL originals are not generally pasteable
+    # raster images, and sharing one path keeps PNG orientation and
+    # transparency flattening consistent with what the viewer shows.
     return library.get_preview_path(photo_id, 'viewer')
 
 

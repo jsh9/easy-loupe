@@ -26,9 +26,11 @@ Primary files:
 
 - `scripts/build_app/build_app_macos.py`
 - `scripts/build_app/build_app_windows.py`
-- `scripts/build_app/common.py`
+- `scripts/build_app/utils.py`
 - `tests/scripts/`
 - `README.md`
+- `THIRD_PARTY_NOTICES.md`
+- `third_party_licenses/`
 
 Major logic:
 
@@ -54,6 +56,28 @@ Major logic:
   cache/staging directories and bundle them under
   `easy_loupe/vendor/exiftool/...` inside the PyInstaller artifact. Do not
   commit downloaded ExifTool payloads.
+- Packaged apps must carry every bundled component's license text.
+  `utils.build_license_data_args()` bundles `LICENSE`,
+  `THIRD_PARTY_NOTICES.md`, and `third_party_licenses/` (texts for components
+  whose Python package metadata lacks them: the Python runtime, Qt, ExifTool,
+  and native libraries inside dependency wheels).
+  `utils.build_runtime_metadata_args()` adds `--copy-metadata` for every
+  installed runtime dependency, computed by
+  `utils.collect_runtime_dependency_names()` from package metadata, so each
+  package's own license files ship too.
+- After PyInstaller finishes, `utils.verify_bundled_licenses()` inspects the
+  built app's data folder (`Contents/Resources` on macOS, `_internal` for
+  Windows one-folder builds) and fails the build if any of those files or
+  metadata folders are missing. Windows `--onefile` builds pack data inside the
+  executable, so verify licenses with a one-folder build.
+- `utils.list_third_party_license_texts()` defines the curated texts as the
+  `*.txt` files in `third_party_licenses/`, so OS-created files such as
+  `.DS_Store` never become required license files.
+- When adding, removing, or swapping a runtime dependency, update the component
+  table in `THIRD_PARTY_NOTICES.md`. If the dependency's wheels bundle native
+  libraries whose licenses are not in its package metadata, add their texts to
+  `third_party_licenses/` with a header naming the component and text source; a
+  test keeps that folder and the notices table in sync.
 
 ## 2. App Identity And Assets
 
@@ -69,6 +93,11 @@ Major logic:
 
 - `ui/identity.py` owns the user-facing app name, packaged icon lookup, Qt app
   identity, and best-effort macOS process/app-switcher identity hooks.
+- `build_about_dialog_html()` in `ui/identity.py` builds the About dialog body,
+  and `show_about_dialog()` shows it for both the culling window and standalone
+  photo-viewer windows. Keep its GPL notices intact: the copyright line, the
+  no-warranty statement, and links to the source code, `LICENSE`, and
+  `THIRD_PARTY_NOTICES.md`.
 - Keep package-data configuration aligned when adding or renaming assets under
   `easy_loupe/ui/assets/`.
 - The active app icon artifacts are committed as `EasyLoupe.png`,
