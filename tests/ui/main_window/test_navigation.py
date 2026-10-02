@@ -223,6 +223,57 @@ def test_main_window_uses_viewer_preview_for_central_image() -> None:
     assert fake_window.viewer.rotation == 0
 
 
+def test_force_fit_display_loads_only_the_new_photo(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Verify forced-fit display does not re-decode the outgoing photo.
+
+    Browse and compare exits force fit view for the new current photo. The
+    viewer used to be reset with ``set_fit_view``, which reloaded the previous
+    full-resolution preview only to replace it immediately. The layout must
+    still return from split view to single-pane fit.
+    """
+    _, app, window = create_main_window_with_library(
+        tmp_path,
+        monkeypatch,
+        photo_specs=[('IMG_7040', 'dimgray'), ('IMG_7041', 'blue')],
+    )
+    window.split_mode_shortcut.activated.emit()
+    app.processEvents()
+    assert window.viewer.is_split_view() is True
+
+    fit_view_calls: list[str] = []
+    monkeypatch.setattr(
+        window.viewer, 'set_fit_view', lambda: fit_view_calls.append('fit')
+    )
+    loaded_paths: list[Path] = []
+    original_set_photo = window.viewer.single_viewer.set_photo
+
+    def record_set_photo(
+            image_path: Path, *args: object, **kwargs: object
+    ) -> None:
+        loaded_paths.append(image_path)
+        original_set_photo(image_path, *args, **kwargs)
+
+    monkeypatch.setattr(
+        window.viewer.single_viewer, 'set_photo', record_set_photo
+    )
+
+    window.current_photo_id = 'IMG_7041'
+    window._display_current_photo(force_fit=True)
+    app.processEvents()
+
+    assert fit_view_calls == []
+    assert loaded_paths == [
+        window.library.get_preview_path('IMG_7041', 'viewer')
+    ]
+    assert window.viewer.is_split_view() is False
+    assert window.viewer.single_viewer.is_fit_view() is True
+
+    window.close()
+
+
 def test_main_window_browse_mode_toggles_grid_and_space_behavior(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

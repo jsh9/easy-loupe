@@ -576,12 +576,12 @@ def test_thumbnail_item_widget_rotation_turns_every_stack_frame(
             for image_widget in widget._image_widgets
         ]
 
-    assert widget.rotation() == 90
+    assert widget.get_rotation() == 90
     assert pixmap_sizes() == [(120, 240)] * 3
 
     widget.set_rotation(180)
 
-    assert widget.rotation() == 180
+    assert widget.get_rotation() == 180
     assert pixmap_sizes() == [(240, 120)] * 3
 
     widget.set_rotation(270)

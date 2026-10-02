@@ -1,42 +1,62 @@
 """
-Qt pixel helpers for view-only photo rotation.
+Qt helpers for view-only photo rotation.
 
-Viewers rotate decoded pixels at display time instead of rotating the
-``QGraphicsView`` or the cached preview files. Rotating by a quarter-turn
-multiple is lossless, and keeping the rotated pixels as the displayed image
-lets fit, zoom, pan, and minimap math keep treating screen axes as image axes.
+Viewers never rotate the ``QGraphicsView`` itself or the cached preview files.
+The main photo item gets a quarter-turn item transform instead, which turns it
+without copying full-resolution pixels and keeps scene coordinates in the
+rotated on-screen frame, so fit, zoom, pan, and minimap math keep treating
+screen axes as image axes. Small images (thumbnails, minimaps, and one-off
+clipboard copies) are turned as pixels.
 """
 
 from __future__ import annotations
 
 from PySide6.QtGui import QImage, QPixmap, QTransform
 
-from easy_loupe.core.rotation import NO_ROTATION_DEGREES
+from easy_loupe.core.rotation import (
+    HALF_TURN_DEGREES,
+    NO_ROTATION_DEGREES,
+    QUARTER_TURN_DEGREES,
+    THREE_QUARTER_TURN_DEGREES,
+)
 
 
-def rotate_pixmap(pixmap: QPixmap, rotation: int) -> QPixmap:
+def build_rotation_transform(
+        width: int, height: int, rotation: int
+) -> QTransform:
     """
-    Return ``pixmap`` turned clockwise by ``rotation`` degrees.
+    Return the item transform that turns a ``width`` x ``height`` image.
 
-    Qt treats positive angles as clockwise on screen and drops the
-    translation from the result, so a quarter turn yields a pixmap whose left
-    edge is now the top edge. Unrotated and null pixmaps are returned as-is.
+    The transform maps unrotated image pixels into a scene rectangle that
+    starts at the origin, so the rotated item covers ``(0, 0)`` to the rotated
+    size. A clockwise quarter turn maps ``(x, y)`` to ``(height - y, x)``: the
+    left edge becomes the top edge.
     """
-    if rotation == NO_ROTATION_DEGREES or pixmap.isNull():
-        return pixmap
+    if rotation == QUARTER_TURN_DEGREES:
+        return QTransform(0, 1, -1, 0, height, 0)
 
-    return pixmap.transformed(QTransform().rotate(rotation))
+    if rotation == HALF_TURN_DEGREES:
+        return QTransform(-1, 0, 0, -1, width, height)
+
+    if rotation == THREE_QUARTER_TURN_DEGREES:
+        return QTransform(0, -1, 1, 0, 0, width)
+
+    return QTransform()
 
 
-def rotate_image(image: QImage, rotation: int) -> QImage:
+def rotate_pixels[PixelsT: (QImage, QPixmap)](
+        pixels: PixelsT, rotation: int
+) -> PixelsT:
     """
-    Return ``image`` turned clockwise by ``rotation`` degrees.
+    Return ``pixels`` turned clockwise by ``rotation`` degrees.
 
-    ``QImage`` is safe off the GUI thread, so this suits clipboard and
-    overlay images. PIL's ``Image.rotate`` turns counterclockwise, so use
-    this helper wherever the result must match the on-screen view.
+    Qt treats positive angles as clockwise on screen and drops the translation
+    from the result, so a quarter turn yields an image whose left edge is now
+    the top edge. Unrotated and null images are returned as-is. PIL's
+    ``Image.rotate`` turns counterclockwise, so use this helper wherever the
+    result must match the on-screen view.
     """
-    if rotation == NO_ROTATION_DEGREES or image.isNull():
-        return image
+    if rotation == NO_ROTATION_DEGREES or pixels.isNull():
+        return pixels
 
-    return image.transformed(QTransform().rotate(rotation))
+    return pixels.transformed(QTransform().rotate(rotation))

@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from easy_loupe.core.rotation import NO_ROTATION_DEGREES
+
 if TYPE_CHECKING:
     from datetime import datetime
     from pathlib import Path
@@ -97,7 +99,7 @@ class PhotoRecord:
     exif_display: dict[str, str] = field(default_factory=dict)
     # Clockwise view-only rotation in degrees (0, 90, 180, or 270). Kept last
     # so positional construction of the older fields stays unchanged.
-    rotation: int = 0
+    rotation: int = NO_ROTATION_DEGREES
 
     def to_api_dict(self) -> dict[str, Any]:
         """Serialize the photo record to the API response shape."""

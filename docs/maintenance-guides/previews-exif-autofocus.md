@@ -88,7 +88,7 @@ Major logic:
   to the cache key; that would re-render previews on every turn and change
   scene detection.
 - Ctrl+C copies the JPEG source or `"viewer"` preview turned by the photo's
-  view rotation with `rotate_image()`. PIL's `Image.rotate()` turns the other
+  view rotation with `rotate_pixels()`. PIL's `Image.rotate()` turns the other
   way, so use the shared Qt helper wherever output must match the screen.
 
 ## 2. Runtime Dependencies

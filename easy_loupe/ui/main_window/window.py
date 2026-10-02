@@ -9,6 +9,7 @@ from PySide6.QtGui import QAction, QKeySequence, QShortcut
 from PySide6.QtWidgets import QMainWindow
 
 from easy_loupe.core.photo_library import PhotoLibrary
+from easy_loupe.core.rotation import ROTATION_METADATA_FIELD
 from easy_loupe.ui.identity import APP_NAME, easy_loupe_icon
 from easy_loupe.ui.main_window.build import MainWindowBuildMixin
 from easy_loupe.ui.main_window.compare import MainWindowCompareMixin
@@ -26,6 +27,8 @@ from easy_loupe.ui.theme import THEMES
 from easy_loupe.ui.threading import ThreadSlot, ThreadSlotGroup
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from PySide6.QtCore import QThread
 
     from easy_loupe.ui.launch import CullingLaunchRequest
@@ -58,6 +61,10 @@ class MainWindow(
         self.library = PhotoLibrary()
         self._photo_filter_selection = PhotoFilterSelection.default()
         self.current_photo_id: str | None = None
+        # Photo currently loaded in ``self.viewer``. Browse and compare move
+        # ``current_photo_id`` without reloading the hidden viewer, so this
+        # can differ from it.
+        self._viewer_photo_id: str | None = None
         self.current_theme = THEMES['light']
         self._busy = False
         # True while a progress helper is pumping events; see
@@ -114,8 +121,7 @@ class MainWindow(
         self._pending_thumbnail_click_center: (
             tuple[object, str, tuple[float, float]] | None
         ) = None
-        self._metadata_undo_stack: list[MetadataEdit | SceneEdit] = []
-        self._metadata_redo_stack: list[MetadataEdit | SceneEdit] = []
+        self._init_metadata_history_state()
         self._initial_folder_prompt_timer = QTimer(self)
         self._initial_folder_prompt_timer.setSingleShot(True)
         self._initial_folder_prompt_timer.timeout.connect(
@@ -132,6 +138,17 @@ class MainWindow(
         self._refresh_ui()
         if launch_request is not None:
             self.load_culling_launch_request(launch_request)
+
+    def _init_metadata_history_state(self) -> None:
+        """Initialize metadata undo/redo stacks and their refresh hooks."""
+        self._metadata_undo_stack: list[MetadataEdit | SceneEdit] = []
+        self._metadata_redo_stack: list[MetadataEdit | SceneEdit] = []
+        # Undo/redo refreshes for fields that change neither filter
+        # membership nor card text; other fields use the full metadata
+        # rebuild in ``_after_metadata_change``.
+        self._metadata_edit_refreshers: dict[
+            str, Callable[[list[str]], None]
+        ] = {ROTATION_METADATA_FIELD: self._refresh_rotated_photos}
 
     def _init_runtime_lifecycle_state(self) -> None:
         """Initialize close lifecycle state."""

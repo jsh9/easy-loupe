@@ -459,7 +459,8 @@ def test_shortcut_help_overlay_top_aligns_and_scales_fonts(
 
 def test_shortcut_help_lists_rotation_wherever_brackets_work() -> None:
     """
-    Verify ``[``/`]` rotation is documented in every context that binds it.
+    Verify ``[`` and ``]`` rotation is documented in every context that binds
+    it.
 
     Culling, browse, and both compare contexts rotate through the shared
     metadata group, while the standalone viewer must say its rotation is only

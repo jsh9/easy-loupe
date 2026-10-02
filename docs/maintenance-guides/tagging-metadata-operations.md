@@ -89,9 +89,19 @@ Major logic:
   before/after values.
 - Rotation never changes filter membership, sort order, or card geometry.
   `MainWindowRotationMixin._refresh_rotated_photos()` therefore turns the
-  existing thumbnail, browse, and scene-strip cards and the main viewer in
-  place instead of rebuilding lists. Undo/redo of a rotation edit uses the same
-  in-place refresh rather than `_after_metadata_change()`.
+  existing thumbnail, browse, and scene-strip cards, compare panes, and the
+  main viewer (whenever it holds a rotated photo, visible or not) in place
+  instead of rebuilding lists. Undo/redo dispatches through
+  `MainWindow._metadata_edit_refreshers`, which maps `rotation` to that
+  in-place refresh; unregistered fields use `_after_metadata_change()`, so the
+  undo code itself has no per-field branches.
+- Metadata saves from assignments, rotation, scene merge/break, and undo/redo
+  go through `_save_metadata_or_warn()`. If writing `easy-loupe.json` raises
+  `OSError` (for example on a read-only card or share), the edit stays applied
+  in memory and undoable, the display still refreshes, and a transient warning
+  says the change applies to this session only. Letting the error escape the Qt
+  slot would skip the refresh and leave the screen out of sync with the
+  records.
 - `Assign to Photo` actions are disabled while the progress overlay/busy state
   is active.
 - `Ctrl+Z` and `Ctrl+Y` undo and redo metadata assignment batches.

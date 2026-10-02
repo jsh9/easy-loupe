@@ -287,26 +287,34 @@ Major logic:
 - Manual zoom state is remembered per photo. Returning to the same photo
   restores its last manual zoom center and scale; a different photo gets its
   own remembered state or falls back to the extracted AF point.
-- View rotation (`]` clockwise, `[` counterclockwise) turns the decoded pixels
-  once when a photo is shown; the `QGraphicsView` itself is never rotated.
-  Every scene coordinate, fit/zoom/pan rule, normalized center, and
-  `visible_region_rect()` therefore lives in the rotated on-screen frame. Only
-  unrotated inputs are mapped: AF points through `rotate_normalized_point()`
-  and clipping overlays at apply time.
+- View rotation (`]` clockwise, `[` counterclockwise) turns the photo item with
+  a quarter-turn item transform from `build_rotation_transform()`; the pixmap
+  stays unrotated and the `QGraphicsView` itself is never rotated. No
+  full-resolution pixels are copied (a pixel rotation of a 45 MP preview costs
+  about 700 ms on the UI thread), and painting the turned item is as fast as
+  painting an unrotated one. The scene rect and `_image_size` use the rotated
+  size, so every scene coordinate, fit/zoom/pan rule, normalized center, and
+  `visible_region_rect()` lives in the rotated on-screen frame. Only unrotated
+  inputs are mapped: AF points through `rotate_normalized_point()` and the
+  clipping overlay through the photo item's transform.
 - Remembered manual zoom is keyed per photo and rotation. Rotation `0` keeps
-  the plain image-path key; other rotations append `|rotation=N`. A photo
-  turned while hidden (for example from a browse multi-selection) therefore
-  starts fresh AF-centered inspection instead of restoring a center from the
-  other orientation. Late AF data clears pending-period concrete centers for
-  every rotation of the photo.
-- `PhotoViewer.set_rotation()` turns the displayed photo in place from the
-  already decoded pixmap, without re-reading the full-resolution preview. Fit
-  stays fit, explicit 100% stays at true 100%, and manual zoom keeps the same
-  detail centered at the same fit-relative zoom (the fill-viewport rule may
-  enlarge it near edges). Hold-zoom and a temporary `Shift+F` recenter end.
+  the plain image-path key; other rotations append `|rotation=N`. A turn of the
+  photo a viewer holds carries its remembered view into the new orientation in
+  every mode. A photo turned while no viewer holds it (for example a
+  non-current photo in a browse multi-selection) starts fresh AF-centered
+  inspection instead of restoring a center from the other orientation. Late AF
+  data clears pending-period concrete centers for every rotation of the photo.
+- `PhotoViewer.set_rotation()` turns the displayed photo in place by changing
+  only the item transform, without re-reading or copying the preview. Fit stays
+  fit, and manual or explicit 100% inspection keeps the same detail centered at
+  the same absolute magnification, so a `Space` focus check at 100% stays at
+  100% even though the turn changes the fit scale. The carried memory's
+  fit-relative zoom is converted through the old and new fit scales for the
+  same reason. Hold-zoom and a temporary `Shift+F` recenter end.
   `MainPhotoViewer` caches the rotation so split toggles, `Space` promotion,
-  and forced-fit reloads keep it. In a locked compare grid, the rotated pane
-  keeps its own detail until the next click or drag re-syncs the panes.
+  and fit reloads keep it. In a locked compare grid, the rotated pane keeps its
+  own detail until the next click re-syncs the panes; drags move every locked
+  pane by the same delta, so they keep the offset.
 - A photo with no remembered manual view enters focus zoom around the extracted
   AF point or image center at scale 1.0. Edge AF positions clamp without
   increasing the initial magnification. Remembered per-photo manual zoom state
@@ -387,14 +395,15 @@ Major logic:
   selected compare photos. Clipping analysis first downsamples the displayed
   preview to a 3000-pixel long edge, then scales the resulting overlay back
   over the full viewer scene. Analysis always uses the unrotated cached
-  preview; the viewer rotates the overlay with the photo when placing it and
-  re-places the last result on in-place rotation without a new job. Overlay
-  generation and cached PNG decoding run off the UI thread and may appear
-  shortly after the photo; stale requests are checked before entering the
-  thread pool during rapid navigation, and viewer teardown cancels delayed
-  starts plus marks in-flight jobs so late results cannot update deleted panes.
-  This speed-first analysis can miss tiny clipped specks after downsampling.
-  Browse thumbnails do not show clipping warnings.
+  preview; the overlay pixmap stays unrotated and is scaled onto the photo and
+  then turned by the photo item's transform, so in-place rotation only
+  re-places it, with no new job and no pixel copy. Overlay generation and
+  cached PNG decoding run off the UI thread and may appear shortly after the
+  photo; stale requests are checked before entering the thread pool during
+  rapid navigation, and viewer teardown cancels delayed starts plus marks
+  in-flight jobs so late results cannot update deleted panes. This speed-first
+  analysis can miss tiny clipped specks after downsampling. Browse thumbnails
+  do not show clipping warnings.
 
 ## 4. Selection And Browse Behavior
 
@@ -444,12 +453,21 @@ Major logic:
   photo while the horizontal scene strip selects the exact photo opened.
 - If a photo already had remembered manual zoom before entering browse mode,
   the user can return to that manual view after browse-mode exit by pressing
-  `Space` again from fit view, unless the photo was rotated in browse mode;
-  zoom memory is per rotation, so `Space` then starts fresh focus zoom.
-- Browse-mode rotation turns the selected grid cards in place. The hidden main
-  viewer may still hold another photo, so it is not rotated directly; browse
-  exit reloads it through `_display_current_photo()`, which passes the record's
-  rotation.
+  `Space` again from fit view. Rotating that photo in browse mode carries the
+  memory into the new orientation, because the hidden viewer still holds it;
+  rotating other photos there gives them fresh per-rotation memory.
+- Rotation refreshes turn existing grid and strip cards in place, and turn the
+  main viewer whenever it holds a rotated photo, even while browse or compare
+  hides it. `MainWindow._viewer_photo_id` records which photo the viewer holds,
+  because browse and compare move `current_photo_id` without reloading it.
+  Keeping the viewer's cached rotation current matters because some exits
+  reload from that cache instead of `_display_current_photo()`, such as the fit
+  reset when scene detection finishes in browse mode.
+- `_display_current_photo(force_fit=True)` switches the viewer layout with
+  `MainPhotoViewer.show_single_pane()` instead of `set_fit_view()`, so leaving
+  browse or compare does not re-decode the outgoing full-resolution preview
+  just before the new photo replaces it. The standalone photo viewer does the
+  same.
 - Multi-selection is preserved in thumbnail, browse, and scene workflows when
   the user extends selection with Shift or Control.
 - `Shift+Up` and `Shift+Down` in the vertical thumbnail strip use anchored

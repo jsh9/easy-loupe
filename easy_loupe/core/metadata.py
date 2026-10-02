@@ -24,6 +24,7 @@ from easy_loupe.core.recursive_loading import (
 )
 from easy_loupe.core.rotation import (
     NO_ROTATION_DEGREES,
+    ROTATION_METADATA_FIELD,
     normalize_rotation,
 )
 
@@ -129,9 +130,9 @@ def normalize_metadata_entries(
 
         # Rotation 0 is the default display, so only real quarter turns are
         # kept; that keeps an entry with no other data from surviving load.
-        rotation = normalize_rotation(value.get('rotation'))
+        rotation = normalize_rotation(value.get(ROTATION_METADATA_FIELD))
         if rotation:
-            entry['rotation'] = rotation
+            entry[ROTATION_METADATA_FIELD] = rotation
 
         if entry:
             target[photo_id] = entry
@@ -238,7 +239,7 @@ def serialize_metadata_entries(
         # Omit the default rotation so unrotated photos keep the historical
         # on-disk shape and clearing every field still removes the entry.
         if photo.rotation != NO_ROTATION_DEGREES:
-            entry['rotation'] = photo.rotation
+            entry[ROTATION_METADATA_FIELD] = photo.rotation
 
         if entry:
             payload[photo.photo_id] = entry
@@ -306,7 +307,7 @@ def validate_and_apply_metadata(
         else:
             raise ValueError('flag must be null, "picked", or "rejected"')
 
-    if 'rotation' in fields:
+    if ROTATION_METADATA_FIELD in fields:
         if rotation is None:
             photo.rotation = NO_ROTATION_DEGREES
         else:

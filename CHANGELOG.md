@@ -12,8 +12,9 @@
     shows a photo: original files, their EXIF data, and XMP sidecars are never
     changed. The viewer, split view, thumbnails, scene strip, browse grid,
     compare panes, AF point, clipping warnings, zoom minimap, and `Ctrl+C`
-    copies all follow it, and rotating while zoomed keeps the same part of the
-    photo centered.
+    copies all follow it. Rotating while zoomed keeps the same part of the
+    photo centered at the same magnification, so a 100 percent focus check
+    stays at 100 percent, and turning even very large photos is instant.
   - Rotations are saved per photo in the folder's `easy-loupe.json` as a new
     optional `rotation` value (90, 180, or 270), so photos open turned the same
     way next time. Photos that are not rotated keep the same entries as before.
@@ -23,6 +24,17 @@
     shows rotations saved in that folder's `easy-loupe.json`. `]` and `[` also
     turn photos there, but only for that viewing session: the photo viewer
     never writes `easy-loupe.json`.
+
+- Fixed
+
+  - If `easy-loupe.json` can't be written, for example on a read-only memory
+    card or network share, rating, labeling, flagging, rotating, merging or
+    breaking scenes, and undo/redo now still update the screen and stay
+    undoable. A short message says the change applies to this session only.
+    Previously the screen could fall out of sync with the change.
+  - Leaving browse or compare view no longer reloads the previously shown photo
+    just before the new one replaces it, which saves a full-size decode of the
+    outgoing photo.
 
 ## [1.5.0] - 2026-10-02
 

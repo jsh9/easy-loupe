@@ -129,9 +129,10 @@ Notes:
     prompts used by photo-viewer startup before scanning neighboring files.
   - `ui/launch.py` defines `CullingLaunchRequest`, the handoff payload used
     when a photo-viewer window opens the full culling workspace.
-  - `ui/rotation.py` holds the Qt helpers that turn pixmaps and images for
-    view-only rotation; viewers rotate pixels at display time and never rotate
-    the `QGraphicsView` or the preview cache.
+  - `ui/rotation.py` holds the Qt helpers for view-only rotation: the
+    quarter-turn item transform viewers apply to the photo (no full-resolution
+    pixel copy, and never a rotated `QGraphicsView` or preview cache) and
+    `rotate_pixels()` for small images such as thumbnails and clipboard copies.
   - `ui/thumbnail_lookahead.py` owns keyboard-navigation neighbor lookahead for
     the left strip. `ThumbnailListWidget.keyPressEvent` and scene-strip Up/Down
     (`navigate_global_from_scene`) call it; mouse and programmatic changes

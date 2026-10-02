@@ -225,6 +225,18 @@ class MainPhotoViewer(QWidget):
         self.split_fit_viewer.set_focus_point_pending(pending=pending)
         self.split_zoom_viewer.set_focus_point_pending(pending=pending)
 
+    def show_single_pane(self) -> None:
+        """
+        Switch to the single-pane layout without reloading the photo.
+
+        Callers about to load a new photo use this instead of ``set_fit_view``,
+        which would first decode the previously shown full-resolution preview
+        only to replace it immediately. The next ``set_photo`` without a manual
+        handoff then lands in fit view.
+        """
+        self._layout.setCurrentWidget(self.single_viewer)
+        self._sync_mode()
+
     def set_fit_view(self) -> None:
         """Switch the visible viewer back to single-pane fit mode."""
         if self._current_image_path is None:

@@ -8,7 +8,7 @@ from PIL import Image, ImageOps
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication
 
-from easy_loupe.ui.rotation import rotate_image
+from easy_loupe.ui.rotation import rotate_pixels
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -35,7 +35,7 @@ def copy_photo_pixels_to_clipboard(
     if image.isNull():
         return False
 
-    QApplication.clipboard().setImage(rotate_image(image, rotation))
+    QApplication.clipboard().setImage(rotate_pixels(image, rotation))
     return True
 
 

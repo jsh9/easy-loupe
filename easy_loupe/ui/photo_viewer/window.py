@@ -70,7 +70,7 @@ from easy_loupe.ui.progress_overlay import (
     ProgressOverlayController,
     build_progress_overlay,
 )
-from easy_loupe.ui.rotation import rotate_pixmap
+from easy_loupe.ui.rotation import rotate_pixels
 from easy_loupe.ui.shortcut_help import (
     ShortcutHelpContext,
     ShortcutHelpOverlay,
@@ -768,7 +768,9 @@ class PhotoViewerWindow(QMainWindow):
         photo = self.library.get_photo(self.current_photo_id)
         image_path = self.library.get_preview_path(photo.photo_id, 'viewer')
         if force_fit:
-            self.viewer.set_fit_view()
+            # Switch layout only; ``set_fit_view`` would first re-decode the
+            # outgoing photo just before ``set_photo`` replaces it.
+            self.viewer.show_single_pane()
 
         self.viewer.set_photo(
             image_path,
@@ -1480,7 +1482,7 @@ class PhotoViewerWindow(QMainWindow):
             # minimap clicks keep using the same normalized coordinates.
             rotation = self.library.get_photo(self.current_photo_id).rotation
             self.minimap.set_pixmap(
-                rotate_pixmap(QPixmap(str(thumb_path)), rotation)
+                rotate_pixels(QPixmap(str(thumb_path)), rotation)
             )
             self._minimap_photo_id = self.current_photo_id
 

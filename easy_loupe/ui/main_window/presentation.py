@@ -765,6 +765,24 @@ class MainWindowPresentationMixin:
         list_widget.setItemWidget(item, widget)
 
     @staticmethod
+    def _find_photo_card(
+            list_widget: QListWidget, row: int | None
+    ) -> tuple[QListWidgetItem, ThumbnailItemWidget] | None:
+        """Return a built row's list item and photo card, or None."""
+        if row is None:
+            return None
+
+        item = list_widget.item(row)
+        if item is None:
+            return None
+
+        widget = list_widget.itemWidget(item)
+        if not isinstance(widget, ThumbnailItemWidget):
+            return None
+
+        return item, widget
+
+    @staticmethod
     def _update_photo_item_metadata(
             list_widget: QListWidget,
             row: int | None,
@@ -773,17 +791,11 @@ class MainWindowPresentationMixin:
             rejected: bool,
     ) -> None:
         """Refresh one existing photo card without replacing its row widget."""
-        if row is None:
+        card = MainWindowPresentationMixin._find_photo_card(list_widget, row)
+        if card is None:
             return
 
-        item = list_widget.item(row)
-        if item is None:
-            return
-
-        widget = list_widget.itemWidget(item)
-        if not isinstance(widget, ThumbnailItemWidget):
-            return
-
+        item, widget = card
         widget.set_metadata_text(metadata_text)
         item.setData(FLAG_ROLE, 'rejected' if rejected else None)
 
@@ -792,16 +804,9 @@ class MainWindowPresentationMixin:
             list_widget: QListWidget, row: int | None, rotation: int
     ) -> None:
         """Turn one existing photo card in place without replacing it."""
-        if row is None:
-            return
-
-        item = list_widget.item(row)
-        if item is None:
-            return
-
-        widget = list_widget.itemWidget(item)
-        if isinstance(widget, ThumbnailItemWidget):
-            widget.set_rotation(rotation)
+        card = MainWindowPresentationMixin._find_photo_card(list_widget, row)
+        if card is not None:
+            card[1].set_rotation(rotation)
 
     def _refresh_metadata_items_in_place(
             self: MainWindow, photo_ids: list[str]
@@ -1259,16 +1264,9 @@ class MainWindowPresentationMixin:
         else:
             row = None
 
-        if row is None:
-            return
-
-        item = list_widget.item(row)
-        if item is None:
-            return
-
-        widget = list_widget.itemWidget(item)
-        if isinstance(widget, ThumbnailItemWidget):
-            widget.set_visible_region_overlay(visible_region)
+        card = self._find_photo_card(list_widget, row)
+        if card is not None:
+            card[1].set_visible_region_overlay(visible_region)
 
     def _handle_thumbnail_image_clicked(
             self: MainWindow,

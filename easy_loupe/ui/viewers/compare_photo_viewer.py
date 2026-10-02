@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from easy_loupe.core.rotation import NO_ROTATION_DEGREES
 from easy_loupe.ui.defaults import (
     DEFAULT_SHOW_AF_POINT,
     DEFAULT_SHOW_CLIPPING,
@@ -72,7 +73,7 @@ class ComparePhoto:
     metadata_text: str = ''
     # Clockwise view-only rotation in degrees; last so positional
     # construction of the older fields keeps working.
-    rotation: int = 0
+    rotation: int = NO_ROTATION_DEGREES
 
 
 @dataclass(frozen=True)

@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from PIL import Image
+from PySide6.QtCore import QPointF, QRectF, QSize
 from PySide6.QtWidgets import QApplication
 
 import easy_loupe.ui.viewers.photo_viewer as photo_viewer_module
@@ -15,7 +16,9 @@ from easy_loupe.ui.viewers.main_photo_viewer import MainPhotoViewer
 from tests.ui._helpers import (
     CLIPPING_OVERLAY_TIMEOUT_MS,
     create_jpeg,
+    image_pixel_rgb,
     process_events_until,
+    render_widget_image,
 )
 
 if TYPE_CHECKING:
@@ -47,13 +50,19 @@ def _show_photo_viewer(
 def _displayed_pixel(
         viewer: photo_viewer_module.PhotoViewer, x: float, y: float
 ) -> tuple[int, int, int]:
-    """Return the displayed pixmap color at normalized ``(x, y)``."""
-    image = viewer._pixmap_item.pixmap().toImage()
-    color = image.pixelColor(
-        min(int(x * image.width()), image.width() - 1),
-        min(int(y * image.height()), image.height() - 1),
+    """
+    Return the on-screen color at normalized ``(x, y)`` of the shown photo.
+
+    The photo pixmap itself stays unrotated (the item is turned by a
+    transform), so colors are read from the rendered viewport at the scene
+    position of the rotated-frame point.
+    """
+    image_size = viewer._image_size
+    position = viewer.mapFromScene(
+        QPointF(x * image_size.width(), y * image_size.height())
     )
-    return (color.red(), color.green(), color.blue())
+    image = render_widget_image(viewer.viewport())
+    return image_pixel_rgb(image, position.x(), position.y())
 
 
 @pytest.mark.parametrize(
@@ -73,11 +82,13 @@ def test_photo_viewer_rotation_turns_displayed_pixels_clockwise(
         expected_aspect: float,
 ) -> None:
     """
-    Verify view rotation turns the displayed pixels in the expected direction.
+    Verify view rotation turns the displayed photo in the expected direction.
 
     The left (red) half must end up on top after a clockwise quarter turn.
     Pinning direction and aspect ratio protects the shared contract that all
-    fit, zoom, and minimap math runs in the rotated frame.
+    fit, zoom, and minimap math runs in the rotated frame. The pixmap must keep
+    its unrotated size, proving the turn is an item transform rather than a
+    full-resolution pixel copy.
     """
     image_path = tmp_path / 'IMG_R001.png'
     _create_split_png(image_path, (400, 200))
@@ -85,8 +96,9 @@ def test_photo_viewer_rotation_turns_displayed_pixels_clockwise(
 
     viewer.set_photo(image_path, (0.5, 0.5), rotation=rotation)
 
-    assert viewer.current_rotation() == rotation
+    assert viewer.get_rotation() == rotation
     assert viewer.image_aspect_ratio() == pytest.approx(expected_aspect)
+    assert viewer._pixmap_item.pixmap().size() == QSize(400, 200)
     assert _displayed_pixel(viewer, *red_point) == RED
     assert _displayed_pixel(viewer, *blue_point) == BLUE
 
@@ -133,8 +145,9 @@ def test_photo_viewer_set_rotation_keeps_fit_without_rereading_file(
     """
     Verify in-place rotation reuses decoded pixels and keeps fit view.
 
-    Viewer previews are full resolution, so re-decoding on every `]` press
-    would stall the UI. Deleting the file proves the turn uses memory only.
+    Viewer previews are full resolution, so re-decoding or copying them on
+    every ``]`` press would stall the UI. Deleting the file proves the turn
+    never reads the preview again.
     """
     image_path = tmp_path / 'IMG_R003.png'
     _create_split_png(image_path, (400, 200))
@@ -158,9 +171,10 @@ def test_photo_viewer_set_rotation_keeps_manual_detail_centered(
     """
     Verify rotating during manual zoom keeps inspecting the same detail.
 
-    The remembered center moves with the pixels, and the fit-relative zoom
-    never shrinks (the fill-viewport rule may enlarge near edges). The turned
-    view is also remembered under the new orientation.
+    The view center moves with the pixels and the absolute magnification is
+    unchanged, even though turning a landscape photo changes its fit scale. The
+    turned view is remembered under the new orientation with its zoom converted
+    to the new fit, so a later restore shows the same scale.
     """
     image_path = tmp_path / 'IMG_R004.JPG'
     create_jpeg(image_path, 'dimgray', size=(2400, 1600))
@@ -168,17 +182,20 @@ def test_photo_viewer_set_rotation_keeps_manual_detail_centered(
     viewer.set_photo(image_path, (0.5, 0.5))
     viewer.toggle_focus_zoom()
     viewer.set_normalized_viewport_center((0.3, 0.4))
-    zoom_before = viewer.current_zoom_factor()
+    scale_before = viewer._current_scale
 
     viewer.set_rotation(90)
 
     assert viewer.should_preserve_zoom() is True
+    assert viewer._current_scale == pytest.approx(scale_before)
     assert viewer.normalized_viewport_center() == pytest.approx(
         (0.6, 0.3), abs=0.01
     )
-    assert viewer.current_zoom_factor() >= zoom_before - 0.001
     remembered = viewer._manual_views[f'{image_path}|rotation=90']
     assert remembered.center == pytest.approx((0.6, 0.3), abs=0.01)
+    assert remembered.zoom_factor == pytest.approx(
+        scale_before / viewer._fit_scale
+    )
 
     viewer.close()
 
@@ -209,6 +226,74 @@ def test_photo_viewer_set_rotation_keeps_actual_size_inspection(
     viewer.close()
 
 
+def test_photo_viewer_focus_zoom_stays_at_true_100_percent_after_rotation(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify a Space focus check at 100 percent survives turning the photo.
+
+    Focus zoom opens at absolute scale 1.0. Turning a landscape photo upright
+    shrinks its fit scale, so carrying the fit-relative zoom would silently
+    drop the check to 75 percent here; the absolute scale must stay 1.0, both
+    right after the turn and when the remembered view is restored later.
+    """
+    image_path = tmp_path / 'IMG_R011.JPG'
+    create_jpeg(image_path, 'dimgray', size=(3000, 2000))
+    _app, viewer = _show_photo_viewer((1500, 1000))
+    viewer.set_photo(image_path, (0.5, 0.5))
+    viewer.toggle_focus_zoom()
+
+    assert viewer._current_scale == pytest.approx(1.0)
+
+    viewer.set_rotation(90)
+
+    assert viewer._current_scale == pytest.approx(1.0)
+
+    viewer.toggle_focus_zoom()
+    assert viewer.is_fit_view() is True
+    viewer.toggle_focus_zoom()
+
+    assert viewer._current_scale == pytest.approx(1.0)
+
+    viewer.close()
+
+
+def test_photo_viewer_rotation_in_fit_view_carries_remembered_zoom(
+        tmp_path: Path,
+) -> None:
+    """
+    Verify a turn made in fit view keeps the photo's remembered zoom.
+
+    The remembered manual view must follow the photo into its new orientation
+    whatever mode the viewer is in, so Space after rotating in fit view (or in
+    browse, where the hidden viewer sits in fit view) returns to the same
+    detail at the same magnification instead of starting a fresh AF-centered
+    zoom.
+    """
+    image_path = tmp_path / 'IMG_R012.JPG'
+    create_jpeg(image_path, 'dimgray', size=(2400, 1600))
+    _app, viewer = _show_photo_viewer((1200, 800))
+    viewer.set_photo(image_path, (0.5, 0.5))
+    viewer.toggle_focus_zoom()
+    viewer.set_normalized_viewport_center((0.3, 0.4))
+    scale_before = viewer._current_scale
+    viewer.toggle_focus_zoom()
+    assert viewer.is_fit_view() is True
+
+    viewer.set_rotation(90)
+
+    assert viewer.is_fit_view() is True
+
+    viewer.toggle_focus_zoom()
+
+    assert viewer._current_scale == pytest.approx(scale_before)
+    assert viewer.normalized_viewport_center() == pytest.approx(
+        (0.6, 0.3), abs=0.01
+    )
+
+    viewer.close()
+
+
 def test_photo_viewer_manual_memory_is_kept_per_rotation(
         tmp_path: Path,
 ) -> None:
@@ -216,9 +301,9 @@ def test_photo_viewer_manual_memory_is_kept_per_rotation(
     Verify remembered zoom centers never cross orientations.
 
     A photo can be rotated while hidden (for example from a browse
-    multi-selection). Its old center is in the unrotated frame, so focus
-    zoom must start fresh at the rotated AF point, while rotation 0 keeps
-    the historical plain image-path key.
+    multi-selection). Its old center is in the unrotated frame, so focus zoom
+    must start fresh at the rotated AF point, while rotation 0 keeps the
+    historical plain image-path key.
     """
     image_path = tmp_path / 'IMG_R006.JPG'
     create_jpeg(image_path, 'dimgray', size=(2400, 1600))
@@ -249,8 +334,8 @@ def test_photo_viewer_late_af_clears_pending_centers_for_all_rotations(
     Verify late AF data drops fallback-centered pans in every orientation.
 
     Pans made while AF was pending are centered on fallback coordinates.
-    Rotating carries that pan into a new orientation key, so both keys must
-    be cleared or turning back could resurrect the stale view.
+    Rotating carries that pan into a new orientation key, so both keys must be
+    cleared or turning back could resurrect the stale view.
     """
     image_path = tmp_path / 'IMG_R007.JPG'
     create_jpeg(image_path, 'white', size=(2400, 1600))
@@ -288,9 +373,10 @@ def test_photo_viewer_rotates_clipping_overlay_without_new_job(
     """
     Verify clipping warnings turn with the photo and stay aligned.
 
-    Analysis runs on the unrotated cached preview, so the overlay must be
-    rotated and rescaled with swapped dimensions. In-place rotation re-places
-    the existing result instead of restarting background work.
+    Analysis runs on the unrotated cached preview. The overlay pixmap stays
+    unrotated and reuses the photo item's rotation, so it must cover the
+    rotated photo exactly. In-place rotation only re-places the existing
+    overlay instead of restarting background work or copying pixels.
     """
     image_path = tmp_path / 'IMG_R008.JPG'
     create_jpeg(image_path, 'white', size=(4000, 1000))
@@ -305,10 +391,11 @@ def test_photo_viewer_rotates_clipping_overlay_without_new_job(
 
     assert viewer._clipping_overlay_request_id == request_id
     assert overlay.isVisible() is True
-    assert overlay.pixmap().width() == 750
-    assert overlay.pixmap().height() == 3000
-    assert overlay.transform().m11() == pytest.approx(1000 / 750)
-    assert overlay.transform().m22() == pytest.approx(4000 / 3000)
+    assert overlay.pixmap().size() == QSize(3000, 750)
+    assert overlay.sceneBoundingRect() == QRectF(0, 0, 1000, 4000)
+    assert overlay.sceneBoundingRect() == (
+        viewer._pixmap_item.sceneBoundingRect()
+    )
 
     viewer.close()
 
@@ -319,8 +406,9 @@ def test_photo_viewer_clipping_result_after_rotation_is_aligned(
     """
     Verify a clipping job that lands after a rotation uses the new frame.
 
-    Users can press `]` before the delayed background analysis finishes. The
-    late result must be rotated at apply time rather than drawn sideways.
+    Users can press ``]`` before the delayed background analysis finishes. The
+    late result must be placed with the current rotation rather than drawn
+    sideways.
     """
     image_path = tmp_path / 'IMG_R009.JPG'
     create_jpeg(image_path, 'white', size=(4000, 1000))
@@ -332,14 +420,8 @@ def test_photo_viewer_clipping_result_after_rotation_is_aligned(
     _wait_for_clipping_overlay(app, viewer)
     overlay = viewer._clipping_overlay_item
 
-    assert overlay.pixmap().width() == 750
-    assert overlay.pixmap().height() == 3000
-    assert overlay.boundingRect().width() * overlay.transform().m11() == (
-        pytest.approx(1000)
-    )
-    assert overlay.boundingRect().height() * overlay.transform().m22() == (
-        pytest.approx(4000)
-    )
+    assert overlay.pixmap().size() == QSize(3000, 750)
+    assert overlay.sceneBoundingRect() == QRectF(0, 0, 1000, 4000)
 
     viewer.close()
 
@@ -351,8 +433,8 @@ def test_main_photo_viewer_rotation_survives_split_and_fit_reloads(
     Verify every internal reload keeps the current rotation.
 
     Split toggles, Space promotion, and forced fit all re-call
-    ``PhotoViewer.set_photo`` from cached state; a stale cached rotation
-    would silently undo the user's turn.
+    ``PhotoViewer.set_photo`` from cached state; a stale cached rotation would
+    silently undo the user's turn.
     """
     image_path = tmp_path / 'IMG_R010.png'
     _create_split_png(image_path, (400, 200))
@@ -365,33 +447,33 @@ def test_main_photo_viewer_rotation_survives_split_and_fit_reloads(
 
     viewer.toggle_split_view()
 
-    assert viewer.split_fit_viewer.current_rotation() == 90
-    assert viewer.split_zoom_viewer.current_rotation() == 90
+    assert viewer.split_fit_viewer.get_rotation() == 90
+    assert viewer.split_zoom_viewer.get_rotation() == 90
 
     viewer.set_rotation(180)
 
-    assert viewer.split_fit_viewer.current_rotation() == 180
-    assert viewer.split_zoom_viewer.current_rotation() == 180
+    assert viewer.split_fit_viewer.get_rotation() == 180
+    assert viewer.split_zoom_viewer.get_rotation() == 180
 
     viewer.toggle_focus_zoom()
 
     assert viewer.is_split_view() is False
-    assert viewer.single_viewer.current_rotation() == 180
+    assert viewer.single_viewer.get_rotation() == 180
 
     viewer.set_fit_view()
 
-    assert viewer.single_viewer.current_rotation() == 180
+    assert viewer.single_viewer.get_rotation() == 180
 
     viewer.set_rotation(270)
     viewer.toggle_split_view()
     viewer.toggle_split_view()
 
-    assert viewer.single_viewer.current_rotation() == 270
+    assert viewer.single_viewer.get_rotation() == 270
 
     viewer.clear_photo()
     viewer.set_rotation(90)
 
-    assert viewer.single_viewer.current_rotation() == 0
+    assert viewer.single_viewer.get_rotation() == 0
 
     viewer.close()
 
@@ -433,14 +515,14 @@ def test_compare_photo_viewer_shows_rotation_and_keeps_it_on_label_refresh(
     """
     _app, viewer = _show_compare_viewer(tmp_path, [90, 0])
 
-    assert viewer._viewers[0].current_rotation() == 90
-    assert viewer._viewers[1].current_rotation() == 0
+    assert viewer._viewers[0].get_rotation() == 90
+    assert viewer._viewers[1].get_rotation() == 0
 
     viewer.update_metadata_texts({'IMG_R10': 'rated'})
     viewer.show_active_photo()
 
     assert viewer._photos[0].rotation == 90
-    assert viewer.selected_viewer.current_rotation() == 90
+    assert viewer.selected_viewer.get_rotation() == 90
 
     viewer.close()
 
@@ -452,8 +534,8 @@ def test_compare_photo_viewer_rotation_relayouts_four_photo_grid(
     Verify rotating compared photos re-lays out the grid in place.
 
     Four photos switch from 2x2 to one row once three are vertical. Turning
-    panes must update that shape without rebuilding panes, so other panes
-    keep their zoom state.
+    panes must update that shape without rebuilding panes, so other panes keep
+    their zoom state.
     """
     app, viewer = _show_compare_viewer(tmp_path, [0, 0, 0, 0])
     assert (viewer._rows, viewer._columns) == (2, 2)
@@ -489,16 +571,16 @@ def test_compare_photo_viewer_rotation_updates_selected_photo_view(
     """
     Verify the one-photo compare view turns with its active photo.
 
-    The selected-photo viewer is separate from the grid panes, so rotating
-    the active photo must update it as well.
+    The selected-photo viewer is separate from the grid panes, so rotating the
+    active photo must update it as well.
     """
     _app, viewer = _show_compare_viewer(tmp_path, [0, 0])
     viewer.show_active_photo()
 
     viewer.set_photo_rotation('IMG_R10', 270)
 
-    assert viewer.selected_viewer.current_rotation() == 270
-    assert viewer._viewers[0].current_rotation() == 270
-    assert viewer._viewers[1].current_rotation() == 0
+    assert viewer.selected_viewer.get_rotation() == 270
+    assert viewer._viewers[0].get_rotation() == 270
+    assert viewer._viewers[1].get_rotation() == 0
 
     viewer.close()

@@ -447,6 +447,7 @@ class MainWindowNavigationMixin:
     ) -> None:
         if self.current_photo_id is None:
             self.viewer.clear_photo()
+            self._viewer_photo_id = None
             if hasattr(self, '_refresh_info_overlay'):
                 self._refresh_info_overlay()
 
@@ -455,7 +456,9 @@ class MainWindowNavigationMixin:
         photo = self.library.get_photo(self.current_photo_id)
         image_path = self.library.get_preview_path(photo.photo_id, 'viewer')
         if force_fit:
-            self.viewer.set_fit_view()
+            # Switch layout only; ``set_fit_view`` would first re-decode the
+            # outgoing photo just before ``set_photo`` replaces it.
+            self.viewer.show_single_pane()
 
         manual_view = None
         if not force_fit:
@@ -472,6 +475,10 @@ class MainWindowNavigationMixin:
             handoff_manual_view=manual_view,
             rotation=getattr(photo, 'rotation', NO_ROTATION_DEGREES),
         )
+        # Browse and compare change ``current_photo_id`` without reloading
+        # the hidden viewer, so rotation refreshes need to know which photo
+        # the viewer actually holds.
+        self._viewer_photo_id = photo.photo_id
         if hasattr(self, '_refresh_info_overlay'):
             self._refresh_info_overlay()
 

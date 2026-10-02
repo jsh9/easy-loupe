@@ -2,11 +2,11 @@
 View-only photo rotation workflow for MainWindow.
 
 Rotation is stored with the other per-photo metadata and shares its undo
-history, so `[`/`]` follow the same selection rules as ratings: every
+history, so ``[`` and ``]`` follow the same selection rules as ratings: every
 selected photo in culling and browse view, only the active pane in compare
 view. Unlike tags, rotation never changes filter membership, sort order, or
-card geometry, so refreshes turn existing cards and viewers in place instead
-of rebuilding lists.
+card geometry, so refreshes turn existing cards and viewers in place instead of
+rebuilding lists.
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ class MainWindowRotationMixin:
             )
         )
         self._metadata_redo_stack.clear()
-        self.library.save_metadata()
+        self._save_metadata_or_warn()
         self._refresh_rotated_photos(photo_ids)
         self._refresh_metadata_history_actions()
 
@@ -66,11 +66,13 @@ class MainWindowRotationMixin:
         """
         Show new rotations on existing cards, compare panes, and the viewer.
 
-        Rows that are not built (filtered out, or non-cover scene photos in
-        the left strip) are skipped; later list rebuilds read the record's
-        rotation. The main viewer is only turned in normal culling view:
-        browse and compare hide it, and it may still hold another photo
-        there, but every way back out calls ``_display_current_photo``.
+        Rows that are not built (filtered out, or non-cover scene photos in the
+        left strip) are skipped; later list rebuilds read the record's
+        rotation. The main viewer is turned whenever it holds a rotated photo,
+        even while browse or compare hides it: its cached rotation drives every
+        reload path (split toggles, Space promotion, the fit reset after scene
+        detection), so it must never fall behind the record. Hidden turns are
+        cheap because only an item transform changes.
         """
         for photo_id in photo_ids:
             rotation = self.library.get_photo(photo_id).rotation
@@ -94,11 +96,8 @@ class MainWindowRotationMixin:
             if self._compare_mode:
                 self.compare_viewer.set_photo_rotation(photo_id, rotation)
 
-        if (
-            not self._browse_mode
-            and not self._compare_mode
-            and self.current_photo_id in photo_ids
-        ):
+        viewer_photo_id = self._viewer_photo_id
+        if viewer_photo_id is not None and viewer_photo_id in photo_ids:
             self.viewer.set_rotation(
-                self.library.get_photo(self.current_photo_id).rotation
+                self.library.get_photo(viewer_photo_id).rotation
             )

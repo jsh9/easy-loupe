@@ -118,6 +118,6 @@ time.
 
 The viewer, thumbnails, scene strip, browse grid, compare panes, AF point,
 clipping warnings, minimap, and `Ctrl+C` copies all follow the rotation. If you
-rotate while zoomed in, the same part of the photo stays centered; 100 percent
-inspection stays at 100 percent. Remembered zoom positions are kept separately
-for each rotation.
+rotate while zoomed in, the same part of the photo stays centered at the same
+magnification, so a 100 percent focus check stays at 100 percent. The photo's
+remembered zoom position turns with it.

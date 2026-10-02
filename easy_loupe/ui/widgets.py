@@ -17,8 +17,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from easy_loupe.core.rotation import NO_ROTATION_DEGREES
-from easy_loupe.ui.rotation import rotate_pixmap
+from easy_loupe.core.rotation import FULL_TURN_DEGREES, NO_ROTATION_DEGREES
+from easy_loupe.ui.rotation import rotate_pixels
 from easy_loupe.ui.thumbnail_lookahead import reveal_neighbor_after_move
 
 if TYPE_CHECKING:
@@ -341,11 +341,11 @@ class ThumbnailItemWidget(QWidget):
             frame_size.height() + stack_offset,
         )
 
-        # Keep the unrotated thumbnail so later rotations re-turn the source
-        # pixels instead of compounding turns on an already rotated copy.
-        self._source_pixmap = QPixmap(str(thumb_path))
+        # Thumbnails are small, so they are turned as pixels. Keep the shown
+        # pixmap so later rotations can turn it by the remaining difference.
         self._rotation = rotation
-        pixmap = rotate_pixmap(self._source_pixmap, rotation)
+        self._pixmap = rotate_pixels(QPixmap(str(thumb_path)), rotation)
+        pixmap = self._pixmap
         if stacked:
             self._create_thumb_frame(
                 stack_widget,
@@ -448,17 +448,19 @@ class ThumbnailItemWidget(QWidget):
 
         Rotation never changes card geometry: each image widget letterboxes the
         pixmap by its own aspect ratio, and minimap overlays stay in the same
-        rotated normalized frame as the main viewer.
+        rotated normalized frame as the main viewer. Quarter turns are
+        lossless, so the shown pixmap is turned by the difference.
         """
         if rotation == self._rotation:
             return
 
+        delta = (rotation - self._rotation) % FULL_TURN_DEGREES
         self._rotation = rotation
-        pixmap = rotate_pixmap(self._source_pixmap, rotation)
+        self._pixmap = rotate_pixels(self._pixmap, delta)
         for image_widget in self._image_widgets:
-            self._set_pixmap(image_widget, pixmap)
+            self._set_pixmap(image_widget, self._pixmap)
 
-    def rotation(self) -> int:
+    def get_rotation(self) -> int:
         """Return the clockwise view rotation shown by this card."""
         return self._rotation
 

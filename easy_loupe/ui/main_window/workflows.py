@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from easy_loupe.core.folder_loading import FOLDER_LOAD_PROGRESS_STAGES
-from easy_loupe.core.rotation import ROTATION_METADATA_FIELD
+from easy_loupe.core.records import METADATA_FILENAME
 from easy_loupe.operations.common import (
     OperationSummary,
     UndoPlan,
@@ -78,6 +78,11 @@ BREAK_SCENE_FILTER_ACTIVE_MESSAGE = (
     'break scenes, please first turn off filtering.\n\n'
     'Press Esc to exit.'
 )
+
+
+# Save warnings carry a reason and a consequence, so keep them on screen
+# longer than short confirmations such as "Copied image to clipboard".
+METADATA_SAVE_WARNING_TIMEOUT_MS = TRANSIENT_MESSAGE_TIMEOUT_MS * 3
 
 
 @dataclass(frozen=True)
@@ -1019,7 +1024,7 @@ class MainWindowWorkflowMixin:
             MetadataEdit(field=field, before=before, after=after)
         )
         self._metadata_redo_stack.clear()
-        self.library.save_metadata()
+        self._save_metadata_or_warn()
         self._after_metadata_change(photo_ids)
         self._refresh_metadata_history_actions()
 
@@ -1035,14 +1040,14 @@ class MainWindowWorkflowMixin:
         if isinstance(edit, SceneEdit):
             self._apply_scene_state(edit.before_groups, edit.before_source)
             self._metadata_redo_stack.append(edit)
-            self.library.save_metadata()
+            self._save_metadata_or_warn()
             self._after_scene_change()
             self._refresh_metadata_history_actions()
             return
 
         self._apply_metadata_values(edit.field, edit.before)
         self._metadata_redo_stack.append(edit)
-        self.library.save_metadata()
+        self._save_metadata_or_warn()
         self._refresh_after_metadata_edit(edit.field, list(edit.before))
         self._refresh_metadata_history_actions()
 
@@ -1058,14 +1063,14 @@ class MainWindowWorkflowMixin:
         if isinstance(edit, SceneEdit):
             self._apply_scene_state(edit.after_groups, edit.after_source)
             self._metadata_undo_stack.append(edit)
-            self.library.save_metadata()
+            self._save_metadata_or_warn()
             self._after_scene_change()
             self._refresh_metadata_history_actions()
             return
 
         self._apply_metadata_values(edit.field, edit.after)
         self._metadata_undo_stack.append(edit)
-        self.library.save_metadata()
+        self._save_metadata_or_warn()
         self._refresh_after_metadata_edit(edit.field, list(edit.after))
         self._refresh_metadata_history_actions()
 
@@ -1075,15 +1080,36 @@ class MainWindowWorkflowMixin:
         """
         Refresh displays after an undo or redo of one metadata field.
 
-        Rotation edits only turn existing cards and viewers in place; tag edits
-        may change filtered list membership and need the full metadata refresh
-        path.
+        Fields registered in ``_metadata_edit_refreshers`` change neither
+        filter membership nor card text and refresh in place; every other field
+        may change filtered list membership and takes the full metadata refresh
+        path. Keeping the mapping in data keeps this undo code free of
+        per-field branches.
         """
-        if field == ROTATION_METADATA_FIELD:
-            self._refresh_rotated_photos(photo_ids)
-            return
+        refresh = self._metadata_edit_refreshers.get(
+            field, self._after_metadata_change
+        )
+        refresh(photo_ids)
 
-        self._after_metadata_change(photo_ids)
+    def _save_metadata_or_warn(self: MainWindow) -> None:
+        """
+        Save folder metadata, warning instead of raising on write errors.
+
+        Edits are applied in memory and pushed to undo before saving. On a
+        read-only card or share, letting ``OSError`` escape the Qt slot would
+        skip the display refresh and leave the screen out of sync with the
+        records. The edit stays for this session and stays undoable; only
+        persistence is skipped, and the warning says so.
+        """
+        try:
+            self.library.save_metadata()
+        except OSError as exc:
+            reason = exc.strerror or str(exc)
+            self._show_transient_message(
+                f'Could not save {METADATA_FILENAME}: {reason}. Changes apply'
+                ' to this session only.',
+                timeout_ms=METADATA_SAVE_WARNING_TIMEOUT_MS,
+            )
 
     def _apply_metadata_values(
             self: MainWindow, field: str, values: dict[str, Any]
@@ -1384,7 +1410,7 @@ class MainWindowWorkflowMixin:
             )
         )
         self._metadata_redo_stack.clear()
-        self.library.save_metadata()
+        self._save_metadata_or_warn()
         self._after_scene_change(
             selected_photo_ids=[scene.photo_ids[0]],
             thumbnail_anchor=thumbnail_anchor,
@@ -1494,7 +1520,7 @@ class MainWindowWorkflowMixin:
             )
         )
         self._metadata_redo_stack.clear()
-        self.library.save_metadata()
+        self._save_metadata_or_warn()
         self._after_scene_change(
             selected_photo_ids=selected_photo_ids,
             thumbnail_anchor=thumbnail_anchor,

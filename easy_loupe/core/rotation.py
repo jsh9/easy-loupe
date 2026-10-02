@@ -2,10 +2,10 @@
 View-only photo rotation values and normalized-coordinate helpers.
 
 Rotation is a per-photo display preference stored in ``easy-loupe.json``. It
-never changes original files or cached previews: viewers rotate pixels at
-display time, so this module only owns the persisted value domain and the
-math that maps unrotated normalized coordinates (such as AF points) into the
-rotated on-screen frame.
+never changes original files or cached previews: viewers turn the photo only at
+display time, so this module only owns the persisted value domain and the math
+that maps unrotated sizes and normalized coordinates (such as AF points) into
+the rotated on-screen frame.
 """
 
 from __future__ import annotations
@@ -52,6 +52,19 @@ def step_rotation(rotation: int, quarter_turns: int) -> int:
     ) % FULL_TURN_DEGREES
 
 
+def rotate_size(size: tuple[int, int], rotation: int) -> tuple[int, int]:
+    """
+    Return the ``(width, height)`` an image occupies after rotation.
+
+    Quarter and three-quarter turns swap the axes; half turns keep them.
+    """
+    width, height = size
+    if rotation in {QUARTER_TURN_DEGREES, THREE_QUARTER_TURN_DEGREES}:
+        return (height, width)
+
+    return (width, height)
+
+
 def rotate_normalized_point(
         point: tuple[float, float], rotation: int
 ) -> tuple[float, float]:
@@ -59,9 +72,9 @@ def rotate_normalized_point(
     Map a normalized point from the unrotated frame into a rotated frame.
 
     ``point`` is an ``(x, y)`` pair in ``0..1`` image coordinates with the
-    origin at the top-left. A clockwise quarter turn moves the left edge to
-    the top, so ``(x, y)`` becomes ``(1 - y, x)``. These are the same
-    mappings EXIF orientations 6, 3, and 8 use for AF points.
+    origin at the top-left. A clockwise quarter turn moves the left edge to the
+    top, so ``(x, y)`` becomes ``(1 - y, x)``. These are the same mappings EXIF
+    orientations 6, 3, and 8 use for AF points.
     """
     x, y = point
     if rotation == QUARTER_TURN_DEGREES:

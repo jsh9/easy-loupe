@@ -1937,9 +1937,9 @@ def test_photo_viewer_shows_saved_rotation_and_rotates_for_session_only(
     Verify the standalone viewer reads rotation but never writes it.
 
     Photos turned in culling mode should open upright from Finder or Explorer.
-    ``[``/`]` may turn photos for the viewing session, and that turn survives
-    neighbor navigation, but the standalone viewer has no safe save path, so
-    ``easy-loupe.json`` must stay byte-for-byte unchanged.
+    ``[`` and ``]`` may turn photos for the viewing session, and that turn
+    survives neighbor navigation, but the standalone viewer has no safe save
+    path, so ``easy-loupe.json`` must stay byte-for-byte unchanged.
     """
     create_jpeg(tmp_path / 'A.JPG', 'green', size=(2400, 1600))
     create_jpeg(tmp_path / 'B.JPG', 'blue', size=(2400, 1600))
@@ -1955,23 +1955,23 @@ def test_photo_viewer_shows_saved_rotation_and_rotates_for_session_only(
     _assert_window_shortcut(window.rotate_counterclockwise_shortcut, '[')
 
     assert window.current_photo_id == 'B'
-    assert single_viewer.current_rotation() == 90
+    assert single_viewer.get_rotation() == 90
 
     window.rotate_clockwise_shortcut.activated.emit()
     app.processEvents()
 
-    assert single_viewer.current_rotation() == 180
+    assert single_viewer.get_rotation() == 180
 
     window.navigate(-1)
     app.processEvents()
 
     assert window.current_photo_id == 'A'
-    assert single_viewer.current_rotation() == 0
+    assert single_viewer.get_rotation() == 0
 
     window.rotate_counterclockwise_shortcut.activated.emit()
     app.processEvents()
 
-    assert single_viewer.current_rotation() == 270
+    assert single_viewer.get_rotation() == 270
 
     window.resize(1200, 800)
     window.space_shortcut.activated.emit()
@@ -1985,6 +1985,6 @@ def test_photo_viewer_shows_saved_rotation_and_rotates_for_session_only(
     app.processEvents()
 
     assert window.current_photo_id == 'B'
-    assert single_viewer.current_rotation() == 180
+    assert single_viewer.get_rotation() == 180
     assert metadata_path.read_bytes() == saved_metadata
     window.close()
